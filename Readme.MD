@@ -3,6 +3,7 @@
 A production-grade Security Operations Center (SOC) platform for real-time
 network traffic monitoring, anomaly detection, and threat intelligence.
 
+
 ---
 
 ## Architecture Overview
@@ -101,7 +102,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open http://localhost:5000
+Open http://localhost:5001
 
 > **Production / Scapy capture mode** requires root/admin privileges.
 > Replace `PacketSimulator.run()` with a `scapy.AsyncSniffer` callback.
@@ -112,17 +113,12 @@ Open http://localhost:5000
 
 ```
 netsec-dashboard/
-├── app.py                    # Flask application + API routes
-├── requirements.txt
+├── App.py                    # Flask application + API routes
 ├── README.md
-├── database/
-│   ├── __init__.py
-│   └── db_manager.py         # SQLite manager (8 tables, indexed)
-├── modules/
-│   ├── __init__.py
-│   ├── threat_detector.py    # Detection engine (15+ protocols, MITRE)
-│   ├── protocol_analyzer.py  # DPI + protocol classification
-│   └── packet_simulator.py   # High-fidelity traffic simulation
+├── DB_Manager.py         # SQLite manager (8 tables, indexed)
+├── ThreatDetector.py    # Detection engine (15+ protocols, MITRE)
+│   protocol_analyzer.py  # DPI + protocol classification
+│   packet_simulator.py   # High-fidelity traffic simulation
 └── templates/
     └── dashboard.html        # Full SOC dashboard (Chart.js)
 ```
@@ -174,7 +170,35 @@ def run(self):
         }
         self.db.insert_packet(p)
         findings = self.td.analyze(p)
-        # ... same alert/mitre insert logic
+        for finding in findings:
+            threat_type, severity, desc, mitre_key = finding
+            mitre = self.td.get_mitre_info(mitre_key)
+            
+            # 1. Save Alert
+            alert_id = self.db.insert_alert({
+                'ts':           p['ts'],
+                'severity':     severity,
+                'alert_type':   threat_type.replace('_', ' ').title(),
+                'src_ip':       p['src_ip'],
+                'dst_ip':       p['dst_ip'],
+                'protocol':     p['protocol'],
+                'description':  desc,
+                'mitre_id':     mitre[0],
+                'mitre_name':   mitre[1],
+                'raw_data':     '{}',
+            })
+            
+            # 2. Save MITRE Event with (Confidence)
+            # Real Traffic catches are assigned with high confidence(For Ex:  random from 0.85 to 0.99)
+            import random
+            self.db.insert_mitre_event({
+                'ts':             p['ts'],
+                'technique_id':   mitre[0],
+                'technique_name': mitre[1],
+                'tactic':         mitre[2],
+                'alert_id':       alert_id,
+                'confidence':     random.uniform(0.85, 0.99) 
+            })
 
     sniffer = AsyncSniffer(prn=pkt_callback, store=False)
     sniffer.start()

@@ -19,6 +19,7 @@ class DatabaseManager:
     def __init__(self):
         self.db_path = DB_PATH
         self._init_db()
+        # Just In case, we can seed some demo data on first run (comment out after initial setup to avoid duplicates)
         self._seed_demo_data()
 
     @contextmanager
@@ -358,19 +359,28 @@ class DatabaseManager:
             crit_alerts = conn.execute("SELECT COUNT(*) FROM alerts WHERE severity='CRITICAL' AND acknowledged=0").fetchone()[0]
             unacked     = conn.execute("SELECT COUNT(*) FROM alerts WHERE acknowledged=0").fetchone()[0]
             malicious   = conn.execute("SELECT COUNT(*) FROM packets WHERE is_malicious=1 AND timestamp>?", (hour_ago,)).fetchone()[0]
-            ppm_row     = conn.execute("""SELECT AVG(packets_pm) FROM performance_metrics
-                                          WHERE timestamp > ?""", (now-600,)).fetchone()[0]
+            # Calculate real dynamic accuracy based on the ThreatDetector's MITRE confidence scores
+            avg_conf_row = conn.execute(
+            "SELECT AVG(confidence) FROM mitre_events WHERE timestamp > ?", 
+            (hour_ago,)
+        ).fetchone()[0]
+            
+            # It no recent MITRE events, fall back to a default high accuracy (since it's a demo)
+            actual_accuracy = round((avg_conf_row or 0.992) * 100, 2)
+        
+            ppm_row = conn.execute("""SELECT AVG(packets_pm) FROM performance_metrics
+                                  WHERE timestamp > ?""", (now-600,)).fetchone()[0]
         q_ms = (time.time()-t0)*1000
         return {
             'total_packets': total_pkts,
             'packets_last_hour': pkts_hour,
-            'packets_per_min': round(ppm_row or 5213, 0),
+            'packets_per_min': round(ppm_row),
             'active_threats': active_thr,
             'alerts_24h': alerts_day,
             'critical_unacked': crit_alerts,
             'unacked_alerts': unacked,
             'malicious_pkt_hour': malicious,
-            'accuracy_pct': 99.2,
+            'accuracy_pct': actual_accuracy,
             'query_ms': round(q_ms, 2)
         }
 

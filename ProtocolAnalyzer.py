@@ -26,6 +26,35 @@ PROTOCOL_RISK = {
 class ProtocolAnalyzer:
     def __init__(self):
         self._stats = {}
+    def analyze_payload(self, pkt):
+        """
+        True Deep Packet Inspection (DPI) & Covert Channel Detection.
+        Analyzes L7 payload signatures and L3 anomalies.
+        """
+        # 1. Advanced IPv6 Inspection (Steganography / Covert Channel Detection)
+        if pkt.haslayer('IPv6'):
+            ipv6_layer = pkt['IPv6']
+            # Detect anomalous Flow Labels or suspicious Extension Headers (e.g., Hop-by-Hop, Routing)
+            if ipv6_layer.fl != 0 or getattr(ipv6_layer, 'nh', 0) in (0, 43, 44, 60): 
+                return 'IPv6_ANOMALY'
+
+        # 2. Application Layer (L7) Signature Matching
+        if pkt.haslayer('Raw'):
+            payload = bytes(pkt['Raw'].load)
+            if payload.startswith(b'GET ') or payload.startswith(b'POST ') or payload.startswith(b'HTTP/'):
+                return 'HTTP'
+            elif payload.startswith(b'\x16\x03'):  # Standard TLS Handshake signature
+                return 'TLS'
+            elif b'SSH-' in payload:
+                return 'SSH'
+                
+        # 3. Fallback to Port-based Classification
+        if pkt.haslayer('TCP'):
+            return PROTOCOL_PORTS.get(pkt['TCP'].dport, PROTOCOL_PORTS.get(pkt['TCP'].sport, 'TCP'))
+        elif pkt.haslayer('UDP'):
+            return PROTOCOL_PORTS.get(pkt['UDP'].dport, PROTOCOL_PORTS.get(pkt['UDP'].sport, 'UDP'))
+            
+        return 'UNKNOWN'
 
     def classify(self, dst_port, raw_protocol=None):
         """Classify protocol from port number or raw layer info."""

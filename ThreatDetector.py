@@ -66,6 +66,10 @@ class ThreatDetector:
         src = pkt['src_ip']
         proto = pkt['protocol']
 
+        # Prevent Memory Leak: Periodically purge inactive IPs
+        if now - self._last_cleanup > self._cleanup_interval:
+            self._purge_stale_records(now)
+
         # Sliding window bookkeeping
         self._ip_events[src].append(now)
         self._ip_bytes[src] += pkt['length']
@@ -281,3 +285,26 @@ class ThreatDetector:
 
     def get_mitre_info(self, mitre_key):
         return MITRE_TECHNIQUES.get(mitre_key, ('T0000','Unknown','Unknown'))
+    
+    # Memory management: purge records for IPs inactive for >10 minutes
+    def _purge_stale_records(self, current_time):
+        """Removes IP records inactive for over 1 hour to free RAM."""
+        stale_threshold = current_time - 3600
+        stale_ips = []
+        
+        for ip, events in self._ip_events.items():
+            # Remove timestamps older than the threshold
+            while events and events[0] < stale_threshold:
+                events.popleft()
+            # If no recent events exist, mark IP for complete deletion
+            if not events:
+                stale_ips.append(ip)
+                
+        for ip in stale_ips:
+            del self._ip_events[ip]
+            self._ip_ports.pop(ip, None)
+            self._ip_dns.pop(ip, None)
+            self._ip_ssh_fail.pop(ip, None)
+            self._ip_bytes.pop(ip, None)
+            
+        self._last_cleanup = current_time

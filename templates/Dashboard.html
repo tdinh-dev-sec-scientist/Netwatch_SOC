@@ -571,7 +571,7 @@ table.alerts-tbl {
 
     <div style="margin-top:auto; padding:16px; border-top: 1px solid var(--border);">
       <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:1px;margin-bottom:8px;">ACCURACY</div>
-      <div style="font-family:var(--title);font-size:24px;font-weight:700;color:var(--green);text-shadow:0 0 12px var(--green)">99.2<span style="font-size:14px;color:var(--text2)">%</span></div>
+      <div style="font-family:var(--title);font-size:24px;font-weight:700;color:var(--green);text-shadow:0 0 12px var(--green)"><span id="kpi-accuracy">99.2</span><span style="font-size:14px;color:var(--text2)">%</span></div>
       <div style="font-family:var(--mono);font-size:9px;color:var(--text2);margin-top:2px">Detection Rate</div>
     </div>
   </nav>
@@ -859,6 +859,10 @@ async function loadOverview() {
     document.getElementById('kpi-crit-sub').textContent = `${stats.critical_unacked} critical unacked`;
     document.getElementById('kpi-total').textContent = (stats.total_packets/1000).toFixed(1)+'K';
     document.getElementById('kpi-qms').textContent = stats.query_ms;
+    
+    // Update accuracy KPI and threat ticker
+    document.getElementById('kpi-accuracy').textContent = stats.accuracy_pct;
+
     document.getElementById('alert-ticker').textContent = `${stats.unacked_alerts} UNACKED`;
     document.getElementById('tc-count').textContent = stats.active_threats;
     document.getElementById('nav-alert-badge').textContent = stats.critical_unacked;

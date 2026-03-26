@@ -131,5 +131,13 @@ if __name__ == '__main__':
     print("🔐 NetWatch SOC Dashboard starting...")
     print("📡 Packet simulation engine: ACTIVE")
     print("🛡️  Threat detection engine: ACTIVE")
-    print("🌐 Dashboard: http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=5001, threaded=True, use_reloader=False)
+    
+    # Secure configuration to prevent Werkzeug RCE exploits
+    # Run with: export SOC_DEBUG=true python app.py (for local testing)
+    is_debug = os.environ.get('SOC_DEBUG', 'False').lower() == 'true'
+    
+    # Bind to localhost in debug mode to prevent external access to the console
+    host_ip = '127.0.0.1' if is_debug else '0.0.0.0'
+    
+    print(f"🌐 Dashboard bound to: http://{host_ip}:5001 | Debug: {is_debug}")
+    app.run(debug=is_debug, host=host_ip, port=5001, threaded=True, use_reloader=False)
