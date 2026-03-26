@@ -188,7 +188,8 @@ class PacketSimulator:
         try:
             import os
             ppm = int(pkts / elapsed * 60)
-            self.db._conn().__enter__().execute("""
+            with self.db._conn() as conn:
+                conn.execute("""
                 INSERT INTO performance_metrics
                 (timestamp,packets_pm,alerts_pm,db_query_ms,cpu_pct,mem_mb,drop_pct)
                 VALUES(?,?,?,?,?,?,?)

@@ -10,10 +10,10 @@ import random
 import threading
 import datetime
 from flask import Flask, render_template, jsonify, request
-from database.db_manager import DatabaseManager
-from modules.threat_detector import ThreatDetector
-from modules.protocol_analyzer import ProtocolAnalyzer
-from modules.packet_simulator import PacketSimulator
+from DB_Manager import DatabaseManager
+from ThreatDetector import ThreatDetector
+from ProtocolAnalyzer import ProtocolAnalyzer
+from PacketSimulator import PacketSimulator
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'netwatch-soc-2024'
@@ -32,7 +32,7 @@ sim_thread.start()
 
 @app.route('/')
 def index():
-    return render_template('dashboard.html')
+    return render_template('Dashboard.html')
 
 # ─── API: Live Stats ───────────────────────────────────────────────────────────
 
@@ -132,4 +132,4 @@ if __name__ == '__main__':
     print("📡 Packet simulation engine: ACTIVE")
     print("🛡️  Threat detection engine: ACTIVE")
     print("🌐 Dashboard: http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=5001, threaded=True, use_reloader=False)

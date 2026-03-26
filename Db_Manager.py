@@ -12,7 +12,7 @@ import random
 import os
 from contextlib import contextmanager
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'netwatch.db')
+DB_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)) if '__file__' in globals() else os.getcwd(), 'netwatch.db')
 
 
 class DatabaseManager:
