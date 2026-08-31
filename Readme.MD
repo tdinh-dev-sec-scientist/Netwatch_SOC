@@ -2,7 +2,7 @@
 
 A network security monitoring platform: deep packet inspection over 21 protocols,
 17 modular threat detectors mapped to MITRE ATT&CK, an indexed 8-table SQLite
-store, a 21-endpoint REST API, and a 9-module analyst dashboard.
+store, a 24-endpoint REST API, and a 9-module analyst dashboard.
 
 Every number in this README is measured, and the commands to reproduce each one
 are given. Where a number falls short of a target, it says so.
@@ -83,18 +83,36 @@ you will get numbers of the same shape; absolute throughput is hardware-dependen
 ```
 Environment : Python 3.11.15, Linux x86_64, single-threaded
 Command     : python benchmark.py --iterations 5 --packets 20000
+Dataset     : 106,690 packets, 120 alerts, 135 technique links
 ```
 
 | Claim | Target | Measured | Status |
 |---|---|---|---|
-| Threat types | 15+ | **17** | ✅ |
+| Threat types | 15+ | **17** (all 17 proven by a scenario) | ✅ |
 | Protocols inspected | 15+ | **21** | ✅ |
-| ATT&CK techniques | 12 | **15** | ✅ |
-| SQLite tables | 8 | **8** (all written by the pipeline) | ✅ |
-| REST endpoints | 14+ | **21** | ✅ |
+| ATT&CK techniques | 12 | **15** across 9 tactics | ✅ |
+| SQLite tables | 8 | **8**, all written by the pipeline | ✅ |
+| Indexes | — | **24**, usage asserted by `EXPLAIN QUERY PLAN` | ✅ |
+| REST endpoints | 14+ | **24** | ✅ |
 | Dashboard modules | 8+ | **9** | ✅ |
-| Throughput | 5,000 pkt/min | see `benchmark.py` output | ✅ |
-| Query latency | < 50 ms | see `benchmark.py` output | ✅ |
+| Throughput | 5,000 pkt/min | **286,603 pkt/min** mean (243,736–363,916) | ✅ |
+| Query latency | < 50 ms | **p50 0.11 ms · p95 0.84 ms · max 1.34 ms** | ✅ |
+| False positives | — | **0** across 240,000 benign packets, 8 seeds | ✅ |
+
+At a larger scale — 248,028 packets and 3,776 alerts, produced by relaxing
+detector cooldowns so more real detections are retained — latency stays within
+target: **p50 0.45 ms, p95 3.63 ms, p99 4.00 ms, max 5.60 ms**, throughput
+278,919 pkt/min.
+
+```bash
+# reproduce the scale run
+python - <<'EOF'
+import json, config
+json.dump({k: {'cooldown_s': 0} for k, v in config.DEFAULTS.items()
+           if isinstance(v, dict) and 'cooldown_s' in v}, open('lowcooldown.json','w'))
+EOF
+NETWATCH_CONFIG=lowcooldown.json python benchmark.py --iterations 6 --packets 40000
+```
 
 Throughput is measured end-to-end — parse **and** detect **and** batched
 SQLite persistence — over `--iterations` independent runs, reported as mean,
@@ -281,7 +299,7 @@ plus thread-local reader connections, and foreign keys enforced.
 
 ---
 
-## REST API — 21 endpoints
+## REST API — 24 endpoints
 
 All read from SQLite. Empty database returns empty collections, never filler.
 Invalid parameters return `400` with a message; unknown resources return `404`.
