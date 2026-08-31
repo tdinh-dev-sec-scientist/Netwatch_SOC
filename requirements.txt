@@ -1,0 +1,8 @@
+# NetWatch SOC runtime dependencies.
+# The capture, parsing, detection and persistence layers use only the Python
+# standard library (struct, sqlite3, re, math) — Flask is needed just for the
+# API and dashboard, and pytest only for the test suite.
+Flask>=3.0,<4.0
+
+# Development / testing
+pytest>=8.0
