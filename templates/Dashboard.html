@@ -482,12 +482,91 @@ table.alerts-tbl {
   50%      { box-shadow: 0 0 20px rgba(255,45,85,0.5); }
 }
 </style>
+<style>
+/* ── Additions for the rebuilt modules ── */
+.mod-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.mod-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.mod-grid-21{ display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-bottom: 14px; }
+@media (max-width: 1100px) {
+  .mod-grid-2, .mod-grid-3, .mod-grid-21 { grid-template-columns: 1fr; }
+}
+.data-tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+.data-tbl thead th {
+  position: sticky; top: 0; background: var(--bg2); z-index: 2;
+  text-align: left; padding: 8px 10px; font-size: 9px; letter-spacing: 1.5px;
+  color: var(--text2); border-bottom: 1px solid var(--border2); text-transform: uppercase;
+}
+.data-tbl tbody tr { border-bottom: 1px solid rgba(0,212,255,0.06); }
+.data-tbl tbody tr:hover { background: rgba(0,212,255,0.05); }
+.data-tbl td { padding: 7px 10px; vertical-align: middle; }
+.data-tbl td.num { text-align: right; }
+.scroll-y { max-height: 420px; overflow-y: auto; }
+.scroll-y.short { max-height: 260px; }
+.clickable { cursor: pointer; }
+.chip {
+  display: inline-block; padding: 1px 6px; border-radius: 3px; font-family: var(--mono);
+  font-size: 9px; letter-spacing: 0.5px; border: 1px solid var(--border2); color: var(--cyan);
+}
+.chip.tech { border-color: rgba(255,159,10,0.4); color: var(--orange); }
+.chip.muted { border-color: var(--border); color: var(--text3); }
+.kv { display: grid; grid-template-columns: 150px 1fr; gap: 4px 12px; font-family: var(--mono); font-size: 11px; }
+.kv dt { color: var(--text2); }
+.kv dd { color: var(--text); word-break: break-word; }
+.bar-row { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 11px; padding: 5px 0; }
+.bar-row .lbl { flex: 0 0 130px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row .track { flex: 1; height: 5px; background: rgba(0,212,255,0.08); border-radius: 3px; overflow: hidden; }
+.bar-row .fill { height: 100%; background: var(--cyan); border-radius: 3px; transition: width .6s ease; }
+.bar-row .fill.warn { background: var(--orange); }
+.bar-row .fill.crit { background: var(--red); }
+.bar-row .val { flex: 0 0 80px; text-align: right; color: var(--text2); }
+.tactic-block { margin-bottom: 14px; }
+.tactic-head {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 2px; color: var(--cyan);
+  text-transform: uppercase; padding-bottom: 6px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between;
+}
+.tactic-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.empty-state {
+  display: flex; align-items: center; justify-content: center; height: 100px;
+  font-family: var(--mono); font-size: 11px; color: var(--text3); letter-spacing: 1.5px;
+}
+#drawer {
+  position: fixed; top: 0; right: 0; width: 560px; max-width: 92vw; height: 100vh; z-index: 200;
+  background: var(--bg1); border-left: 1px solid var(--border2);
+  box-shadow: -12px 0 40px rgba(0,0,0,0.6); padding: 20px; overflow-y: auto;
+  transform: translateX(100%); transition: transform .25s ease;
+}
+#drawer.open { transform: translateX(0); }
+#drawer-close {
+  position: absolute; top: 14px; right: 16px; cursor: pointer; background: none;
+  border: 1px solid var(--border2); color: var(--text2); border-radius: 3px;
+  font-family: var(--mono); font-size: 11px; padding: 3px 9px;
+}
+#drawer-close:hover { color: var(--red); border-color: var(--red); }
+#drawer h3 { font-family: var(--title); font-size: 18px; color: var(--cyan); margin-bottom: 4px; letter-spacing: 1px; }
+#drawer h4 {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 2px; color: var(--text2);
+  text-transform: uppercase; margin: 18px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 5px;
+}
+#drawer pre {
+  background: var(--bg0); border: 1px solid var(--border); border-radius: 4px; padding: 10px;
+  font-family: var(--mono); font-size: 10px; color: var(--text2); overflow-x: auto; line-height: 1.5;
+}
+.err-banner {
+  display: none; margin-bottom: 12px; padding: 8px 12px; border-radius: 4px;
+  background: rgba(255,45,85,0.12); border: 1px solid rgba(255,45,85,0.4);
+  font-family: var(--mono); font-size: 11px; color: var(--red);
+}
+.search-input {
+  background: var(--bg0); border: 1px solid var(--border2); color: var(--text);
+  font-family: var(--mono); font-size: 11px; padding: 5px 9px; border-radius: 3px; width: 150px;
+}
+.search-input:focus { outline: none; border-color: var(--cyan); }
+</style>
 </head>
 <body>
 
-<!-- ══════════════════════════════════════════
-     HEADER
-══════════════════════════════════════════ -->
 <header id="header">
   <div class="logo">
     <div class="logo-icon">
@@ -496,877 +575,1010 @@ table.alerts-tbl {
         <circle cx="16" cy="16" r="5" stroke="#00d4ff" stroke-width="1.5" fill="rgba(0,212,255,0.15)"/>
         <line x1="16" y1="2"  x2="16" y2="11" stroke="#00d4ff" stroke-width="0.8" opacity="0.5"/>
         <line x1="16" y1="21" x2="16" y2="30" stroke="#00d4ff" stroke-width="0.8" opacity="0.5"/>
-        <line x1="2"  y1="10" x2="11" y2="13" stroke="#00d4ff" stroke-width="0.8" opacity="0.5"/>
-        <line x1="21" y1="19" x2="30" y2="22" stroke="#00d4ff" stroke-width="0.8" opacity="0.5"/>
-        <line x1="30" y1="10" x2="21" y2="13" stroke="#00d4ff" stroke-width="0.8" opacity="0.5"/>
-        <line x1="11" y1="19" x2="2"  y2="22" stroke="#00d4ff" stroke-width="0.8" opacity="0.5"/>
       </svg>
     </div>
     <div>
       <div class="logo-text">NETWATCH</div>
-      <div class="logo-sub">SOC THREAT INTELLIGENCE PLATFORM v2.4.1</div>
+      <div class="logo-sub">SOC · NETWORK THREAT DETECTION</div>
     </div>
   </div>
-
   <div class="header-status">
-    <div class="status-pill"><div class="status-dot"></div> CAPTURE ACTIVE</div>
-    <div class="status-pill"><div class="status-dot cyan"></div> THREAT ENGINE LIVE</div>
-    <div class="status-pill"><div class="status-dot red" id="alert-dot" style="display:none"></div><span id="alert-ticker">0 UNACKED</span></div>
+    <div class="status-pill"><div class="status-dot cyan"></div><span id="engine-status">ENGINE —</span></div>
+    <div class="status-pill"><div class="status-dot red" id="alert-dot" style="display:none"></div><span id="alert-ticker">0 OPEN</span></div>
     <div id="clock">--:--:--</div>
   </div>
 </header>
 
-<!-- ══════════════════════════════════════════
-     LAYOUT
-══════════════════════════════════════════ -->
 <div id="app">
-
-  <!-- Sidebar -->
   <nav id="sidebar">
-    <div class="nav-section">Navigation</div>
-    <div class="nav-item active" onclick="showView('overview')">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-        <rect x="1" y="1" width="5" height="5" rx="1"/><rect x="10" y="1" width="5" height="5" rx="1"/>
-        <rect x="1" y="10" width="5" height="5" rx="1"/><rect x="10" y="10" width="5" height="5" rx="1"/>
-      </svg>
-      OVERVIEW
-    </div>
-    <div class="nav-item" onclick="showView('alerts')">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M8 2 L14 12 H2 Z"/><line x1="8" y1="7" x2="8" y2="10"/>
-        <circle cx="8" cy="12" r="0.5" fill="currentColor"/>
-      </svg>
-      ALERTS
-      <span class="nav-badge" id="nav-alert-badge">0</span>
-    </div>
-    <div class="nav-item" onclick="showView('mitre')">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-        <rect x="1" y="1" width="14" height="14" rx="1"/>
-        <line x1="1" y1="5" x2="15" y2="5"/><line x1="1" y1="9" x2="15" y2="9"/><line x1="1" y1="13" x2="15" y2="13"/>
-        <line x1="5" y1="1" x2="5" y2="15"/><line x1="9" y1="1" x2="9" y2="15"/>
-      </svg>
-      MITRE ATT&amp;CK
-    </div>
-    <div class="nav-item" onclick="showView('traffic')">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-        <polyline points="1,12 4,8 7,10 10,4 13,6 15,3"/>
-      </svg>
-      TRAFFIC
-    </div>
-    <div class="nav-item" onclick="showView('packetlog')">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-        <rect x="2" y="3" width="12" height="10" rx="1"/>
-        <line x1="5" y1="7" x2="11" y2="7"/><line x1="5" y1="9.5" x2="9" y2="9.5"/>
-      </svg>
-      PACKET LOG
-    </div>
+    <div class="nav-section">Modules</div>
+    <div class="nav-item active" data-view="overview">Threat Overview</div>
+    <div class="nav-item" data-view="alerts">Recent Alerts<span class="nav-badge" id="nav-alert-badge">0</span></div>
+    <div class="nav-item" data-view="threats">Threat Distribution</div>
+    <div class="nav-item" data-view="mitre">MITRE ATT&amp;CK Coverage</div>
+    <div class="nav-item" data-view="protocols">Protocol Analysis</div>
+    <div class="nav-item" data-view="hosts">Source / Dest IP Analysis</div>
+    <div class="nav-item" data-view="timeline">Activity Trends</div>
+    <div class="nav-item" data-view="performance">Detection Performance</div>
+    <div class="nav-item" data-view="packets">Live Packet Log</div>
 
-    <div class="nav-section" style="margin-top:8px">System</div>
-    <div class="nav-item" onclick="showView('performance')">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-        <circle cx="8" cy="8" r="6"/><path d="M8 4 L8 8 L11 10"/>
-      </svg>
-      PERFORMANCE
-    </div>
-
-    <div style="margin-top:auto; padding:16px; border-top: 1px solid var(--border);">
-      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:1px;margin-bottom:8px;">ACCURACY</div>
-      <div style="font-family:var(--title);font-size:24px;font-weight:700;color:var(--green);text-shadow:0 0 12px var(--green)"><span id="kpi-accuracy">99.2</span><span style="font-size:14px;color:var(--text2)">%</span></div>
-      <div style="font-family:var(--mono);font-size:9px;color:var(--text2);margin-top:2px">Detection Rate</div>
+    <div class="nav-section" style="margin-top:18px">Engine</div>
+    <div style="padding:0 18px;font-family:var(--mono);font-size:10px;color:var(--text2);line-height:2">
+      <div>DETECTORS <span style="color:var(--cyan)" id="side-detectors">—</span></div>
+      <div>PROTOCOLS <span style="color:var(--cyan)" id="side-protocols">—</span></div>
+      <div>TECHNIQUES <span style="color:var(--orange)" id="side-techniques">—</span></div>
+      <div>DB TABLES <span style="color:var(--green)" id="side-tables">—</span></div>
     </div>
   </nav>
 
-  <!-- Main -->
   <main id="main">
+    <div class="err-banner" id="err-banner"></div>
 
-    <!-- ═══ VIEW: OVERVIEW ═══ -->
-    <div id="view-overview">
-      <!-- KPI Row -->
+    <!-- ── MODULE 1: Threat Overview ── -->
+    <section id="view-overview">
       <div id="kpi-row">
-        <div class="kpi-card" style="--accent:var(--cyan)">
-          <div class="kpi-label">Packets / Min</div>
-          <div class="kpi-val" id="kpi-ppm">—</div>
-          <div class="kpi-sub">5,000+ sustained</div>
+        <div class="kpi-card"><div class="kpi-label">Packets / Min</div><div class="kpi-val" id="kpi-ppm">—</div><div class="kpi-sub" id="kpi-ppm-sub">measured</div></div>
+        <div class="kpi-card"><div class="kpi-label">Open Alerts</div><div class="kpi-val" id="kpi-open">—</div><div class="kpi-sub" id="kpi-crit-sub">— critical</div></div>
+        <div class="kpi-card"><div class="kpi-label">Threat Types Seen</div><div class="kpi-val" id="kpi-types">—</div><div class="kpi-sub">distinct detectors fired</div></div>
+        <div class="kpi-card"><div class="kpi-label">ATT&amp;CK Techniques</div><div class="kpi-val" id="kpi-tech">—</div><div class="kpi-sub">observed in alerts</div></div>
+        <div class="kpi-card"><div class="kpi-label">Total Packets</div><div class="kpi-val" id="kpi-total">—</div><div class="kpi-sub" id="kpi-hosts-sub">— hosts tracked</div></div>
+        <div class="kpi-card"><div class="kpi-label">Mean Confidence</div><div class="kpi-val" id="kpi-conf">—</div><div class="kpi-sub">across 24h alerts</div></div>
+      </div>
+      <div class="mod-grid-21">
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Traffic Throughput</div><span class="panel-badge" id="tp-badge">LIVE</span></div>
+          <div class="panel-body"><canvas id="chart-throughput" height="95"></canvas></div>
         </div>
-        <div class="kpi-card" style="--accent:var(--red)">
-          <div class="kpi-label">Active Threats</div>
-          <div class="kpi-val" id="kpi-threats">—</div>
-          <div class="kpi-sub">unresolved sessions</div>
-        </div>
-        <div class="kpi-card" style="--accent:var(--orange)">
-          <div class="kpi-label">Alerts 24h</div>
-          <div class="kpi-val" id="kpi-alerts">—</div>
-          <div class="kpi-sub" id="kpi-crit-sub">— critical unacked</div>
-        </div>
-        <div class="kpi-card" style="--accent:var(--green)">
-          <div class="kpi-label">Total Packets</div>
-          <div class="kpi-val" id="kpi-total">—</div>
-          <div class="kpi-sub">in database</div>
-        </div>
-        <div class="kpi-card" style="--accent:var(--purple)">
-          <div class="kpi-label">Protocols</div>
-          <div class="kpi-val" style="color:var(--purple);text-shadow:0 0 16px var(--purple)">15+</div>
-          <div class="kpi-sub">monitored layers</div>
-        </div>
-        <div class="kpi-card" style="--accent:var(--yellow)">
-          <div class="kpi-label">Query Time</div>
-          <div class="kpi-val" style="color:var(--yellow);text-shadow:0 0 16px var(--yellow)" id="kpi-qms">—</div>
-          <div class="kpi-sub">ms avg (target &lt;50)</div>
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Severity Mix (24h)</div></div>
+          <div class="panel-body"><canvas id="chart-severity" height="150"></canvas></div>
         </div>
       </div>
-
-      <!-- Traffic timeline + Protocol dist -->
-      <div class="chart-grid-32">
+      <div class="mod-grid-2">
         <div class="panel">
-          <div class="panel-header">
-            <span class="panel-title">⚡ Traffic Timeline — Packets/Min</span>
-            <span class="panel-badge" id="ppm-badge">LIVE</span>
-          </div>
-          <div class="panel-body"><canvas id="chart-timeline" height="90"></canvas></div>
+          <div class="panel-header"><div class="panel-title">Active Threats by Source</div></div>
+          <div class="panel-body scroll-y short" id="threat-summary-list"><div class="loading">LOADING</div></div>
         </div>
         <div class="panel">
-          <div class="panel-header">
-            <span class="panel-title">Protocol Distribution</span>
-          </div>
-          <div class="panel-body"><canvas id="chart-proto" height="130"></canvas></div>
+          <div class="panel-header"><div class="panel-title">Latest Alerts</div></div>
+          <div class="panel-body scroll-y short" id="overview-alerts"><div class="loading">LOADING</div></div>
         </div>
       </div>
+    </section>
 
-      <!-- Threat timeline + Severity + Geo -->
-      <div class="chart-grid-3">
-        <div class="panel">
-          <div class="panel-header"><span class="panel-title">Threat Timeline — 24h</span></div>
-          <div class="panel-body"><canvas id="chart-threat-tl" height="100"></canvas></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header"><span class="panel-title">Severity Breakdown</span></div>
-          <div class="panel-body"><canvas id="chart-severity" height="160"></canvas></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header"><span class="panel-title">Top Source Countries</span></div>
-          <div id="geo-list" style="max-height:200px;overflow-y:auto"></div>
-        </div>
-      </div>
-
-      <!-- Top Talkers -->
+    <!-- ── MODULE 2: Recent Alerts ── -->
+    <section id="view-alerts" style="display:none">
       <div class="panel">
         <div class="panel-header">
-          <span class="panel-title">🔴 Top Talkers — Source IPs</span>
-          <span class="panel-badge">BY PACKET VOLUME</span>
+          <div class="panel-title">Alert Queue</div>
+          <span class="panel-badge" id="alerts-count-badge">—</span>
         </div>
-        <div id="talkers-list"></div>
-      </div>
-    </div>
-
-    <!-- ═══ VIEW: ALERTS ═══ -->
-    <div id="view-alerts" style="display:none">
-      <div class="panel">
-        <div class="panel-header">
-          <span class="panel-title">🔔 Security Alerts</span>
-          <span class="panel-badge" id="alerts-count-badge">Loading...</span>
+        <div class="filter-bar" id="severity-filters">
+          <button class="filter-btn active" data-sev="">ALL</button>
+          <button class="filter-btn crit" data-sev="CRITICAL">CRITICAL</button>
+          <button class="filter-btn" data-sev="HIGH">HIGH</button>
+          <button class="filter-btn" data-sev="MEDIUM">MEDIUM</button>
+          <button class="filter-btn" data-sev="LOW">LOW</button>
+          <input class="search-input" id="alert-ip-filter" placeholder="source IP…">
+          <button class="filter-btn" id="alert-search-btn">FILTER</button>
         </div>
-        <div class="filter-bar">
-          <button class="filter-btn active" onclick="filterAlerts(null,this)">ALL</button>
-          <button class="filter-btn crit" onclick="filterAlerts('CRITICAL',this)">CRITICAL</button>
-          <button class="filter-btn" onclick="filterAlerts('HIGH',this)">HIGH</button>
-          <button class="filter-btn" onclick="filterAlerts('MEDIUM',this)">MEDIUM</button>
-          <button class="filter-btn" onclick="filterAlerts('LOW',this)">LOW</button>
-          <button class="filter-btn" onclick="filterAlerts('INFO',this)">INFO</button>
-        </div>
-        <div id="alerts-table-wrap">
-          <table class="alerts-tbl">
+        <div class="scroll-y">
+          <table class="data-tbl">
             <thead><tr>
-              <th>TIME</th><th>SEVERITY</th><th>TYPE</th>
-              <th>SOURCE IP</th><th>PROTOCOL</th><th>MITRE ID</th>
-              <th>DESCRIPTION</th><th>ACK</th>
+              <th>Time</th><th>Sev</th><th>Threat</th><th>Source</th><th>Destination</th>
+              <th>Proto</th><th class="num">Conf</th><th>ATT&amp;CK</th><th></th>
             </tr></thead>
-            <tbody id="alerts-tbody"></tbody>
+            <tbody id="alerts-tbody"><tr><td colspan="9"><div class="loading">LOADING</div></td></tr></tbody>
           </table>
         </div>
       </div>
-      <div class="chart-grid-2" style="margin-top:16px">
+    </section>
+
+    <!-- ── MODULE 3: Threat Distribution ── -->
+    <section id="view-threats" style="display:none">
+      <div class="mod-grid-2">
         <div class="panel">
-          <div class="panel-header"><span class="panel-title">Alerts by Type</span></div>
-          <div class="panel-body"><canvas id="chart-alert-types" height="120"></canvas></div>
+          <div class="panel-header"><div class="panel-title">Alerts by Threat Type</div></div>
+          <div class="panel-body"><canvas id="chart-threat-types" height="150"></canvas></div>
         </div>
         <div class="panel">
-          <div class="panel-header"><span class="panel-title">Hourly Alert Volume</span></div>
-          <div class="panel-body"><canvas id="chart-alert-hourly" height="120"></canvas></div>
+          <div class="panel-header"><div class="panel-title">Detector Catalog</div><span class="panel-badge" id="detector-count-badge">—</span></div>
+          <div class="panel-body scroll-y" id="detector-catalog"><div class="loading">LOADING</div></div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- ═══ VIEW: MITRE ═══ -->
-    <div id="view-mitre" style="display:none">
+    <!-- ── MODULE 4: MITRE ATT&CK Coverage ── -->
+    <section id="view-mitre" style="display:none">
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header">
+          <div class="panel-title">ATT&amp;CK Coverage by Tactic</div>
+          <span class="panel-badge" id="mitre-badge">—</span>
+        </div>
+        <div class="panel-body" id="mitre-matrix"><div class="loading">LOADING</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><div class="panel-title">Technique Frequency</div></div>
+        <div class="panel-body"><canvas id="chart-mitre" height="90"></canvas></div>
+      </div>
+    </section>
+
+    <!-- ── MODULE 5: Protocol Analysis ── -->
+    <section id="view-protocols" style="display:none">
+      <div class="mod-grid-21">
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Traffic by Protocol</div></div>
+          <div class="panel-body"><canvas id="chart-protocols" height="120"></canvas></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Protocol Share</div></div>
+          <div class="panel-body"><canvas id="chart-proto-donut" height="180"></canvas></div>
+        </div>
+      </div>
       <div class="panel">
         <div class="panel-header">
-          <span class="panel-title">🛡️ MITRE ATT&amp;CK — Technique Coverage</span>
-          <span class="panel-badge">12 TECHNIQUES TRACKED</span>
+          <div class="panel-title">Deep Packet Inspection Coverage</div>
+          <span class="panel-badge" id="dpi-badge">—</span>
         </div>
-        <div id="mitre-grid"></div>
+        <div class="scroll-y">
+          <table class="data-tbl">
+            <thead><tr><th>Protocol</th><th>Risk</th><th>Encrypted</th><th class="num">Packets Parsed</th><th class="num">Bytes</th><th class="num">Alerts</th></tr></thead>
+            <tbody id="protocol-tbody"><tr><td colspan="6"><div class="loading">LOADING</div></td></tr></tbody>
+          </table>
+        </div>
       </div>
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-header"><span class="panel-title">Technique Frequency</span></div>
-        <div class="panel-body"><canvas id="chart-mitre-bar" height="80"></canvas></div>
-      </div>
-    </div>
+    </section>
 
-    <!-- ═══ VIEW: TRAFFIC ═══ -->
-    <div id="view-traffic" style="display:none">
-      <div class="chart-grid-2">
+    <!-- ── MODULE 6: Source / Destination IP Analysis ── -->
+    <section id="view-hosts" style="display:none">
+      <div class="mod-grid-2">
         <div class="panel">
-          <div class="panel-header"><span class="panel-title">Protocol Volume — 30 Min</span></div>
-          <div class="panel-body"><canvas id="chart-proto-area" height="130"></canvas></div>
+          <div class="panel-header"><div class="panel-title">Top Talkers (by packets sent)</div></div>
+          <div class="panel-body scroll-y short" id="top-talkers"><div class="loading">LOADING</div></div>
         </div>
         <div class="panel">
-          <div class="panel-header"><span class="panel-title">Geographic Traffic Distribution</span></div>
-          <div class="panel-body"><canvas id="chart-geo-bar" height="130"></canvas></div>
+          <div class="panel-header"><div class="panel-title">Highest Threat Score</div></div>
+          <div class="panel-body scroll-y short" id="top-threat-hosts"><div class="loading">LOADING</div></div>
         </div>
       </div>
-      <div class="panel" style="margin-top:0">
-        <div class="panel-header"><span class="panel-title">Protocol Analysis Detail</span></div>
-        <div class="panel-body"><canvas id="chart-proto-polar" height="200"></canvas></div>
+      <div class="mod-grid-2">
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Source Geography <span class="chip muted">approximate</span></div></div>
+          <div class="panel-body scroll-y short" id="geo-list"><div class="loading">LOADING</div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Active Flows</div></div>
+          <div class="scroll-y short">
+            <table class="data-tbl">
+              <thead><tr><th>Source</th><th>Destination</th><th>Proto</th><th class="num">Pkts</th><th class="num">Bytes</th></tr></thead>
+              <tbody id="flows-tbody"><tr><td colspan="5"><div class="loading">LOADING</div></td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <!-- ═══ VIEW: PACKET LOG ═══ -->
-    <div id="view-packetlog" style="display:none">
+    <!-- ── MODULE 7: Activity Trends ── -->
+    <section id="view-timeline" style="display:none">
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header"><div class="panel-title">Alert Timeline by Severity (24h)</div></div>
+        <div class="panel-body"><canvas id="chart-timeline" height="90"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><div class="panel-title">Packet & Alert Volume</div></div>
+        <div class="panel-body"><canvas id="chart-volume" height="90"></canvas></div>
+      </div>
+    </section>
+
+    <!-- ── MODULE 8: Detection Performance / System Health ── -->
+    <section id="view-performance" style="display:none">
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header"><div class="panel-title">Measured Engine Performance</div><span class="panel-badge">OBSERVED</span></div>
+        <div class="panel-body"><div id="perf-strip"></div></div>
+      </div>
+      <div class="mod-grid-2">
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Throughput History (packets/min)</div></div>
+          <div class="panel-body"><canvas id="chart-perf-tp" height="110"></canvas></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Query Latency (ms)</div></div>
+          <div class="panel-body"><canvas id="chart-perf-q" height="110"></canvas></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><div class="panel-title">Database Health</div></div>
+        <div class="panel-body" id="db-health"><div class="loading">LOADING</div></div>
+      </div>
+    </section>
+
+    <!-- ── MODULE 9: Live Packet Log ── -->
+    <section id="view-packets" style="display:none">
       <div class="panel">
         <div class="panel-header">
-          <span class="panel-title">📋 Live Packet Stream</span>
-          <span class="panel-badge" id="pkt-count-badge">LIVE</span>
+          <div class="panel-title">Packet Log (decoded)</div>
+          <span class="panel-badge" id="pkt-badge">LIVE</span>
         </div>
-        <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;font-family:var(--mono);font-size:10px;color:var(--text2)">
-          <span style="width:70px">TIME</span>
-          <span style="width:120px">SRC IP</span>
-          <span style="width:120px">DST IP</span>
-          <span style="width:55px">PROTO</span>
-          <span style="width:80px">LENGTH</span>
-          <span style="width:50px">FLAGS</span>
+        <div class="filter-bar">
+          <input class="search-input" id="pkt-proto-filter" placeholder="protocol…">
+          <input class="search-input" id="pkt-ip-filter" placeholder="source IP…">
+          <button class="filter-btn" id="pkt-filter-btn">FILTER</button>
+          <button class="filter-btn" id="pkt-mal-btn">FLAGGED ONLY</button>
         </div>
-        <div id="pkt-stream"></div>
-      </div>
-    </div>
-
-    <!-- ═══ VIEW: PERFORMANCE ═══ -->
-    <div id="view-performance" style="display:none">
-      <div class="panel">
-        <div class="panel-header"><span class="panel-title">⚙️ System Performance Metrics</span></div>
-        <div id="perf-strip"></div>
-      </div>
-      <div class="panel" style="margin-top:0">
-        <div class="panel-header"><span class="panel-title">Performance History — 60 min</span></div>
-        <div class="panel-body"><canvas id="chart-perf" height="110"></canvas></div>
-      </div>
-      <div class="chart-grid-2" style="margin-top:0">
-        <div class="panel">
-          <div class="panel-header"><span class="panel-title">CPU &amp; Memory Over Time</span></div>
-          <div class="panel-body"><canvas id="chart-perf-sys" height="100"></canvas></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header"><span class="panel-title">Query Latency Distribution</span></div>
-          <div class="panel-body"><canvas id="chart-perf-query" height="100"></canvas></div>
+        <div class="scroll-y">
+          <table class="data-tbl">
+            <thead><tr><th>Time</th><th>Source</th><th>Destination</th><th>Proto</th><th class="num">Len</th><th>Flags</th><th>Decoded L7</th></tr></thead>
+            <tbody id="pkt-tbody"><tr><td colspan="7"><div class="loading">LOADING</div></td></tr></tbody>
+          </table>
         </div>
       </div>
-    </div>
-
+    </section>
   </main>
 </div>
 
-<!-- Threat counter -->
-<div id="threat-counter">⚠ <span id="tc-count">0</span> ACTIVE THREATS</div>
+<div id="drawer">
+  <button id="drawer-close">CLOSE</button>
+  <div id="drawer-body"></div>
+</div>
+
+<div id="threat-counter" style="display:none">⚠ <span id="tc-count">0</span> OPEN ALERTS</div>
 
 <script>
-// ══════════════════════════════════════════════
-//  NETWATCH SOC Dashboard — Client JS
-// ══════════════════════════════════════════════
+/* ══════════════════════════════════════════════════════════════════
+   NetWatch SOC dashboard.
 
-const CHART_DEFAULTS = {
-  font: { family: "'Share Tech Mono', monospace", size: 10 },
-  color: 'rgba(120,153,176,0.7)',
-};
-Chart.defaults.font = CHART_DEFAULTS.font;
-Chart.defaults.color = CHART_DEFAULTS.color;
+   Every module below is driven by a REST call to the Flask API, which
+   reads from SQLite. There is no seeded, mocked or placeholder data in
+   this file: if an endpoint returns nothing, the module renders an
+   explicit empty state so a missing pipeline is visible rather than
+   disguised.
+══════════════════════════════════════════════════════════════════ */
 
-const PALETTE = {
-  cyan:   '#00d4ff', green: '#00ff88', red:  '#ff2d55',
-  orange: '#ff9f0a', yellow:'#ffd60a', purple:'#bf5af2',
-  text2:  '#7899b0', bg2:   '#0a1628',
-};
-const SEV_COLORS = {
-  CRITICAL: '#ff2d55', HIGH: '#ff6b2b', MEDIUM: '#ffd60a',
-  LOW: '#00ff88', INFO: '#00d4ff',
-};
-const PROTO_COLORS = {
-  TCP:'#00d4ff',UDP:'#ffd60a',HTTP:'#00ff88',HTTPS:'#00ccaa',
-  DNS:'#bf5af2',ICMP:'#ff9f0a',FTP:'#ff2d55',SSH:'#00ff88',
-  SMTP:'#ff6b2b',POP3:'#cc44aa',IMAP:'#884488',SNMP:'#558855',
-  NTP:'#335577',ARP:'#777755',TLS:'#226688',QUIC:'#224488',
-};
-
+const SEV_COLOR = { CRITICAL:'#ff2d55', HIGH:'#ff6b2b', MEDIUM:'#ffd60a', LOW:'#00ff88', INFO:'#00d4ff' };
+const PALETTE = ['#00d4ff','#00ff88','#ffd60a','#bf5af2','#ff9f0a','#ff2d55','#00aacc','#00cc6a','#ff6b2b','#7899b0'];
 const charts = {};
-
-// ── Clock ─────────────────────────────────────
-function tickClock() {
-  const now = new Date();
-  document.getElementById('clock').textContent =
-    now.toTimeString().slice(0,8) + ' UTC' + (now.getTimezoneOffset()<0?'+':'') +
-    String(-now.getTimezoneOffset()/60).padStart(2,'0');
-}
-setInterval(tickClock, 1000); tickClock();
-
-// ── View switching ────────────────────────────
 let currentView = 'overview';
-function showView(v) {
-  document.querySelectorAll('[id^="view-"]').forEach(el => el.style.display='none');
-  document.getElementById('view-'+v).style.display='';
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  event.currentTarget.classList.add('active');
-  currentView = v;
-  if (v==='alerts')      loadAlerts();
-  if (v==='mitre')       loadMitre();
-  if (v==='traffic')     loadTraffic();
-  if (v==='packetlog')   loadPacketLog();
-  if (v==='performance') loadPerformance();
+let alertFilters = { severity: '', src_ip: '' };
+let pktFilters = { protocol: '', src_ip: '', malicious_only: false };
+
+/* ── API helper ── */
+async function api(path, params) {
+  const qs = params ? '?' + new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== '' && v != null)) : '';
+  const res = await fetch(path + qs);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).error || detail; } catch (e) { /* non-JSON body */ }
+    throw new Error(path + ' → ' + res.status + ': ' + detail);
+  }
+  return res.json();
 }
 
-// ── Fetch helper ──────────────────────────────
-async function api(path) {
-  try {
-    const r = await fetch(path);
-    return await r.json();
-  } catch(e) { return null; }
+function showError(err) {
+  const el = document.getElementById('err-banner');
+  el.textContent = '⚠ ' + err.message;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 8000);
 }
 
-// ══════════════════════════════════════════════
-//  OVERVIEW
-// ══════════════════════════════════════════════
+/* ── formatting ── */
+const fmtInt = n => (n == null ? '—' : Math.round(n).toLocaleString());
+const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString('en-GB');
+const fmtDateTime = ts => new Date(ts * 1000).toLocaleString('en-GB');
+function fmtBytes(b) {
+  if (!b) return '0 B';
+  const u = ['B','KB','MB','GB','TB'];
+  const i = Math.min(Math.floor(Math.log(b) / Math.log(1024)), u.length - 1);
+  return (b / Math.pow(1024, i)).toFixed(i ? 1 : 0) + ' ' + u[i];
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+const empty = msg => `<div class="empty-state">${esc(msg)}</div>`;
+
+/* ── chart defaults ── */
+Chart.defaults.color = '#7899b0';
+Chart.defaults.font.family = "'Share Tech Mono', monospace";
+Chart.defaults.font.size = 10;
+Chart.defaults.animation.duration = 400;
+const GRID = { color: 'rgba(0,212,255,0.06)' };
+
+function upsertChart(key, canvasId, config) {
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+  if (charts[key]) { charts[key].destroy(); }
+  charts[key] = new Chart(el.getContext('2d'), config);
+}
+
+/* ══════════════ MODULE 1 — Threat Overview ══════════════ */
 async function loadOverview() {
-  const [stats, ppm, protos, talkers, geo, threatTL, sevBreak] = await Promise.all([
+  const [stats, throughput, severity, threats, alerts] = await Promise.all([
     api('/api/stats/overview'),
-    api('/api/stats/packets_per_minute'),
-    api('/api/stats/protocol_distribution'),
-    api('/api/stats/top_talkers'),
-    api('/api/stats/geo_traffic'),
-    api('/api/stats/threat_timeline'),
-    api('/api/stats/severity_breakdown'),
+    api('/api/stats/throughput', { minutes: 60 }),
+    api('/api/stats/severity', { hours: 24 }),
+    api('/api/threats/summary', { hours: 24, limit: 12 }),
+    api('/api/alerts', { limit: 8 }),
   ]);
 
-  if (stats) {
-    document.getElementById('kpi-ppm').textContent = stats.packets_per_min.toLocaleString();
-    document.getElementById('kpi-threats').textContent = stats.active_threats;
-    document.getElementById('kpi-alerts').textContent = stats.alerts_24h.toLocaleString();
-    document.getElementById('kpi-crit-sub').textContent = `${stats.critical_unacked} critical unacked`;
-    document.getElementById('kpi-total').textContent = (stats.total_packets/1000).toFixed(1)+'K';
-    document.getElementById('kpi-qms').textContent = stats.query_ms;
-    
-    // Update accuracy KPI and threat ticker
-    document.getElementById('kpi-accuracy').textContent = stats.accuracy_pct;
+  document.getElementById('kpi-ppm').textContent = fmtInt(stats.packets_per_min);
+  document.getElementById('kpi-open').textContent = fmtInt(stats.unacknowledged);
+  document.getElementById('kpi-crit-sub').textContent = fmtInt(stats.critical_open) + ' critical';
+  document.getElementById('kpi-types').textContent = fmtInt(stats.distinct_threat_types);
+  document.getElementById('kpi-tech').textContent = fmtInt(stats.techniques_observed);
+  document.getElementById('kpi-total').textContent = fmtInt(stats.total_packets);
+  document.getElementById('kpi-hosts-sub').textContent = fmtInt(stats.hosts_tracked) + ' hosts tracked';
+  document.getElementById('kpi-conf').textContent =
+    stats.mean_confidence ? (stats.mean_confidence * 100).toFixed(1) + '%' : '—';
 
-    document.getElementById('alert-ticker').textContent = `${stats.unacked_alerts} UNACKED`;
-    document.getElementById('tc-count').textContent = stats.active_threats;
-    document.getElementById('nav-alert-badge').textContent = stats.critical_unacked;
-    if (stats.critical_unacked > 0) document.getElementById('alert-dot').style.display='';
+  document.getElementById('alert-ticker').textContent = fmtInt(stats.unacknowledged) + ' OPEN';
+  document.getElementById('nav-alert-badge').textContent = fmtInt(stats.unacknowledged);
+  const dot = document.getElementById('alert-dot');
+  const counter = document.getElementById('threat-counter');
+  if (stats.critical_open > 0) {
+    dot.style.display = 'block';
+    counter.style.display = 'block';
+    document.getElementById('tc-count').textContent = stats.critical_open;
+  } else {
+    dot.style.display = 'none';
+    counter.style.display = 'none';
   }
 
-  if (ppm) renderTimeline(ppm);
-  if (protos) renderProtos(protos);
-  if (talkers) renderTalkers(talkers);
-  if (geo) renderGeo(geo);
-  if (threatTL) renderThreatTimeline(threatTL);
-  if (sevBreak) renderSeverity(sevBreak);
-}
-
-function renderTimeline(data) {
-  const labels = data.map(d => {
-    const dt = new Date(d.time*1000);
-    return dt.getHours().toString().padStart(2,'0')+':'+dt.getMinutes().toString().padStart(2,'0');
-  });
-  const vals = data.map(d => d.count);
-  const ctx = document.getElementById('chart-timeline');
-  if (charts.timeline) charts.timeline.destroy();
-  charts.timeline = new Chart(ctx, {
-    type:'line',
+  upsertChart('throughput', 'chart-throughput', {
+    type: 'line',
     data: {
-      labels,
-      datasets:[{
-        label:'Packets/min', data: vals,
-        borderColor: PALETTE.cyan, backgroundColor: 'rgba(0,212,255,0.06)',
-        borderWidth:2, fill:true, tension:0.4, pointRadius:0,
-      }]
+      labels: throughput.map(r => fmtTime(r.bucket)),
+      datasets: [{
+        label: 'packets/min', data: throughput.map(r => r.packets),
+        borderColor: '#00d4ff', backgroundColor: 'rgba(0,212,255,0.12)',
+        fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2,
+      }, {
+        label: 'alerts', data: throughput.map(r => r.alerts),
+        borderColor: '#ff2d55', backgroundColor: 'rgba(255,45,85,0.1)',
+        fill: true, tension: 0.35, pointRadius: 0, borderWidth: 1.5, yAxisID: 'y1',
+      }],
     },
     options: {
-      responsive:true, maintainAspectRatio:true,
-      plugins:{ legend:{display:false} },
-      scales:{
-        x:{ grid:{color:'rgba(0,212,255,0.05)'}, ticks:{maxTicksLimit:8} },
-        y:{ grid:{color:'rgba(0,212,255,0.05)'}, min:0 }
-      }
-    }
-  });
-}
-
-function renderProtos(data) {
-  const ctx = document.getElementById('chart-proto');
-  if (charts.proto) charts.proto.destroy();
-  const top = data.slice(0,10);
-  charts.proto = new Chart(ctx, {
-    type:'doughnut',
-    data:{
-      labels: top.map(d=>d.protocol),
-      datasets:[{
-        data: top.map(d=>d.count),
-        backgroundColor: top.map(d=>PROTO_COLORS[d.protocol]||PALETTE.cyan),
-        borderWidth:1, borderColor:'rgba(0,0,0,0.3)',
-        hoverOffset:4,
-      }]
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: true, labels: { boxWidth: 10 } } },
+      scales: {
+        x: { grid: GRID, ticks: { maxTicksLimit: 10 } },
+        y: { grid: GRID, beginAtZero: true, title: { display: true, text: 'packets' } },
+        y1: { position: 'right', grid: { display: false }, beginAtZero: true, title: { display: true, text: 'alerts' } },
+      },
     },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{position:'right', labels:{boxWidth:10, padding:8, font:{size:9}}} },
-    }
   });
-}
+  document.getElementById('tp-badge').textContent =
+    throughput.length ? throughput.length + ' MIN' : 'NO DATA';
 
-function renderThreatTimeline(data) {
-  // Aggregate by hour
-  const byHour = {};
-  data.forEach(d => {
-    if (!byHour[d.bucket]) byHour[d.bucket] = {};
-    byHour[d.bucket][d.severity] = (byHour[d.bucket][d.severity]||0) + d.cnt;
-  });
-  const hours = Object.keys(byHour).sort();
-  const sevs = ['CRITICAL','HIGH','MEDIUM','LOW'];
-  const ctx = document.getElementById('chart-threat-tl');
-  if (charts.threatTL) charts.threatTL.destroy();
-  charts.threatTL = new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels: hours.map(h=>{
-        const dt=new Date(h*1000);
-        return dt.getHours().toString().padStart(2,'0')+':00';
-      }),
-      datasets: sevs.map(s=>({
-        label:s, data:hours.map(h=>(byHour[h]||{})[s]||0),
-        backgroundColor: SEV_COLORS[s]+'33', borderColor: SEV_COLORS[s],
-        borderWidth:1,
-      }))
+  upsertChart('severity', 'chart-severity', {
+    type: 'doughnut',
+    data: {
+      labels: severity.map(r => r.severity),
+      datasets: [{
+        data: severity.map(r => r.count),
+        backgroundColor: severity.map(r => SEV_COLOR[r.severity] || '#7899b0'),
+        borderColor: '#060f1e', borderWidth: 2,
+      }],
     },
-    options:{
-      responsive:true, maintainAspectRatio:true,
-      plugins:{ legend:{labels:{boxWidth:8, padding:8, font:{size:9}}} },
-      scales:{
-        x:{ stacked:true, grid:{color:'rgba(0,212,255,0.05)'}, ticks:{maxTicksLimit:8} },
-        y:{ stacked:true, grid:{color:'rgba(0,212,255,0.05)'} }
-      }
-    }
-  });
-}
-
-function renderSeverity(data) {
-  const ctx = document.getElementById('chart-severity');
-  if (charts.severity) charts.severity.destroy();
-  charts.severity = new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels: data.map(d=>d.severity),
-      datasets:[{
-        data: data.map(d=>d.cnt),
-        backgroundColor: data.map(d=>SEV_COLORS[d.severity]+'44'),
-        borderColor: data.map(d=>SEV_COLORS[d.severity]),
-        borderWidth:2,
-      }]
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '58%',
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, padding: 8 } } },
     },
-    options:{
-      indexAxis:'y', responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{display:false} },
-      scales:{
-        x:{ grid:{color:'rgba(0,212,255,0.05)'} },
-        y:{ grid:{display:false} }
-      }
-    }
   });
+
+  document.getElementById('threat-summary-list').innerHTML = threats.length
+    ? threats.map(t => `
+        <div class="bar-row clickable" onclick="openHost('${esc(t.src_ip)}')">
+          <span class="lbl">${esc(t.src_ip)}</span>
+          <span class="chip">${esc(t.threat_type)}</span>
+          <span class="track"><span class="fill ${t.open_alerts > 0 ? 'crit' : ''}"
+            style="width:${Math.min(100, t.alert_count * 12)}%"></span></span>
+          <span class="val">${t.alert_count} alert${t.alert_count === 1 ? '' : 's'}</span>
+        </div>`).join('')
+    : empty('NO THREATS IN WINDOW');
+
+  document.getElementById('overview-alerts').innerHTML = alerts.alerts.length
+    ? alerts.alerts.map(a => `
+        <div class="bar-row clickable" onclick="openAlert(${a.id})">
+          <span class="sev-badge sev-${esc(a.severity)}">${esc(a.severity)}</span>
+          <span class="lbl" style="flex:1">${esc(a.threat_type)} · ${esc(a.src_ip || '—')}</span>
+          <span class="val">${fmtTime(a.ts)}</span>
+        </div>`).join('')
+    : empty('NO ALERTS YET');
 }
 
-function renderTalkers(data) {
-  const max = data[0]?.pkt_count || 1;
-  const container = document.getElementById('talkers-list');
-  container.innerHTML = data.map(d => `
-    <div class="talker-row">
-      <div class="talker-ip">${d.src_ip}</div>
-      <div class="talker-bar-wrap">
-        <div class="talker-bar ${d.threat_count>0?'threat':''}" style="width:${Math.round(d.pkt_count/max*100)}%"></div>
-      </div>
-      <div class="talker-count">${d.pkt_count.toLocaleString()}</div>
-      <div class="talker-threat">${d.threat_count>0?'⚠️':''}</div>
-    </div>
-  `).join('');
-}
-
-const FLAG_EMOJIS = {'US':'🇺🇸','CN':'🇨🇳','RU':'🇷🇺','DE':'🇩🇪','BR':'🇧🇷',
-  'IN':'🇮🇳','GB':'🇬🇧','JP':'🇯🇵','AU':'🇦🇺','FR':'🇫🇷','KP':'🇰🇵',
-  'IR':'🇮🇷','NG':'🇳🇬','CA':'🇨🇦','ZA':'🇿🇦'};
-const THREAT_COUNTRIES = new Set(['CN','RU','KP','IR']);
-
-function renderGeo(data) {
-  const max = data[0]?.total || 1;
-  const container = document.getElementById('geo-list');
-  container.innerHTML = data.slice(0,12).map(d => `
-    <div class="geo-row">
-      <div class="geo-flag">${FLAG_EMOJIS[d.country]||'🌐'}</div>
-      <div class="geo-country">${d.country}</div>
-      <div class="geo-bar-wrap">
-        <div class="geo-bar ${THREAT_COUNTRIES.has(d.country)?'threat':'safe'}"
-             style="width:${Math.round(d.total/max*100)}%"></div>
-      </div>
-      <div class="geo-count">${d.total.toLocaleString()}</div>
-    </div>
-  `).join('');
-}
-
-// ══════════════════════════════════════════════
-//  ALERTS VIEW
-// ══════════════════════════════════════════════
-let currentSeverityFilter = null;
-
-async function loadAlerts(severity) {
-  severity = severity || currentSeverityFilter;
-  const url = '/api/alerts/recent?limit=100' + (severity ? `&severity=${severity}` : '');
-  const [alerts, alertStats] = await Promise.all([
-    api(url), api('/api/alerts/stats')
-  ]);
-  if (alerts) renderAlertsTable(alerts);
-  if (alertStats) {
-    renderAlertTypes(alertStats.by_type);
-    renderAlertHourly(alertStats.hourly);
-  }
-}
-
-function filterAlerts(sev, btn) {
-  currentSeverityFilter = sev;
-  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  loadAlerts(sev);
-}
-
-function renderAlertsTable(alerts) {
-  document.getElementById('alerts-count-badge').textContent = `${alerts.length} ALERTS`;
+/* ══════════════ MODULE 2 — Recent Alerts ══════════════ */
+async function loadAlerts() {
+  const data = await api('/api/alerts', { limit: 100, ...alertFilters });
+  document.getElementById('alerts-count-badge').textContent =
+    `${data.count} OF ${data.total}`;
   const tbody = document.getElementById('alerts-tbody');
-  tbody.innerHTML = alerts.map(a => {
-    const dt = new Date(a.timestamp*1000).toTimeString().slice(0,8);
+  if (!data.alerts.length) {
+    tbody.innerHTML = `<tr><td colspan="9">${empty('NO MATCHING ALERTS')}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data.alerts.map(a => `
+    <tr>
+      <td>${fmtTime(a.ts)}</td>
+      <td><span class="sev-badge sev-${esc(a.severity)}">${esc(a.severity)}</span></td>
+      <td class="clickable" onclick="openAlert(${a.id})" style="color:var(--cyan)">${esc(a.threat_type)}</td>
+      <td class="clickable" onclick="openHost('${esc(a.src_ip)}')">${esc(a.src_ip || '—')}</td>
+      <td>${esc(a.dst_ip || '—')}${a.dst_port ? ':' + a.dst_port : ''}</td>
+      <td><span class="proto-tag proto-${esc(a.protocol)}">${esc(a.protocol || '—')}</span></td>
+      <td class="num">${(a.confidence * 100).toFixed(0)}%</td>
+      <td>${(a.evidence && a.evidence.__t) || ''}<span class="chip tech" id="tech-${a.id}">…</span></td>
+      <td>${a.acknowledged
+        ? '<span class="ack-btn acked">ACKED</span>'
+        : `<button class="ack-btn" onclick="ackAlert(${a.id}, this)">ACK</button>`}</td>
+    </tr>`).join('');
+
+  // Technique chips come from the alert detail endpoint, which resolves the
+  // join through mitre_techniques.
+  data.alerts.forEach(async a => {
+    try {
+      const detail = await api('/api/alerts/' + a.id);
+      const el = document.getElementById('tech-' + a.id);
+      if (el) el.textContent = detail.techniques.map(t => t.technique_id).join(' ') || '—';
+    } catch (e) { /* chip stays as-is */ }
+  });
+}
+
+async function ackAlert(id, btn) {
+  try {
+    await fetch(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
+    btn.outerHTML = '<span class="ack-btn acked">ACKED</span>';
+    loadOverview().catch(() => {});
+  } catch (e) { showError(e); }
+}
+
+/* ══════════════ MODULE 3 — Threat Distribution ══════════════ */
+async function loadThreats() {
+  const [types, stats] = await Promise.all([
+    api('/api/threats/types'),
+    api('/api/alerts/stats', { hours: 720 }),
+  ]);
+
+  const fired = stats.filter(s => s.count > 0);
+  upsertChart('threatTypes', 'chart-threat-types', {
+    type: 'bar',
+    data: {
+      labels: fired.map(s => s.threat_type),
+      datasets: [{
+        label: 'alerts', data: fired.map(s => s.count),
+        backgroundColor: fired.map((_, i) => PALETTE[i % PALETTE.length]),
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: GRID, beginAtZero: true }, y: { grid: { display: false } } },
+    },
+  });
+
+  document.getElementById('detector-count-badge').textContent = types.length + ' DETECTORS';
+  document.getElementById('detector-catalog').innerHTML = types.map(t => `
+    <div style="padding:9px 0;border-bottom:1px solid rgba(0,212,255,0.06)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--cyan)">${esc(t.threat_type)}</span>
+        <span style="font-family:var(--mono);font-size:10px;color:${t.alert_count ? 'var(--green)' : 'var(--text3)'}">
+          ${t.alert_count} alert${t.alert_count === 1 ? '' : 's'}</span>
+      </div>
+      <div style="font-size:10px;color:var(--text2);margin:3px 0;line-height:1.4">${esc(t.description)}</div>
+      <div>${t.techniques.map(x => `<span class="chip tech">${esc(x)}</span>`).join(' ')}</div>
+    </div>`).join('');
+}
+
+/* ══════════════ MODULE 4 — MITRE ATT&CK Coverage ══════════════ */
+async function loadMitre() {
+  const [coverage, techniques] = await Promise.all([
+    api('/api/mitre/coverage'),
+    api('/api/mitre/techniques'),
+  ]);
+
+  const observed = techniques.filter(t => t.alert_count > 0).length;
+  document.getElementById('mitre-badge').textContent =
+    `${observed}/${coverage.catalogued_techniques} OBSERVED`;
+
+  document.getElementById('mitre-matrix').innerHTML = coverage.coverage.map(tactic => `
+    <div class="tactic-block">
+      <div class="tactic-head">
+        <span>${esc(tactic.tactic)}</span>
+        <span>${tactic.observed}/${tactic.catalogued} observed · ${tactic.total_alerts} alerts</span>
+      </div>
+      <div class="tactic-cells">
+        ${tactic.techniques.map(t => `
+          <div class="mitre-cell ${t.alert_count ? 'active' : ''} clickable"
+               onclick="openTechnique('${esc(t.technique_id)}')">
+            <div class="mitre-id">${esc(t.technique_id)}</div>
+            <div class="mitre-name">${esc(t.name)}</div>
+            <div class="mitre-count">${t.alert_count} alerts</div>
+            <div class="mitre-bar"><div class="mitre-bar-fill"
+              style="width:${Math.min(100, t.alert_count * 8)}%"></div></div>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+
+  const ranked = techniques.filter(t => t.alert_count > 0)
+    .sort((a, b) => b.alert_count - a.alert_count);
+  upsertChart('mitre', 'chart-mitre', {
+    type: 'bar',
+    data: {
+      labels: ranked.map(t => t.technique_id),
+      datasets: [{
+        label: 'alerts', data: ranked.map(t => t.alert_count),
+        backgroundColor: '#ff9f0a', borderRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { title: items => {
+          const t = ranked[items[0].dataIndex];
+          return t.technique_id + ' — ' + t.name;
+        } } },
+      },
+      scales: { x: { grid: { display: false } }, y: { grid: GRID, beginAtZero: true } },
+    },
+  });
+}
+
+/* ══════════════ MODULE 5 — Protocol Analysis ══════════════ */
+async function loadProtocols() {
+  const [dist, catalog] = await Promise.all([
+    api('/api/stats/protocols', { minutes: 1440 }),
+    api('/api/protocols'),
+  ]);
+  const byName = Object.fromEntries(dist.map(d => [d.protocol, d]));
+
+  upsertChart('protocols', 'chart-protocols', {
+    type: 'bar',
+    data: {
+      labels: dist.map(d => d.protocol),
+      datasets: [{
+        label: 'packets', data: dist.map(d => d.packets),
+        backgroundColor: '#00d4ff', borderRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: { display: false } }, y: { grid: GRID, beginAtZero: true } },
+    },
+  });
+
+  upsertChart('protoDonut', 'chart-proto-donut', {
+    type: 'doughnut',
+    data: {
+      labels: dist.map(d => d.protocol),
+      datasets: [{
+        data: dist.map(d => d.packets),
+        backgroundColor: dist.map((_, i) => PALETTE[i % PALETTE.length]),
+        borderColor: '#060f1e', borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '55%',
+      plugins: { legend: { position: 'right', labels: { boxWidth: 9, padding: 5, font: { size: 9 } } } },
+    },
+  });
+
+  const parsed = catalog.filter(c => c.packets_parsed > 0).length;
+  document.getElementById('dpi-badge').textContent =
+    `${catalog.length} SUPPORTED · ${parsed} SEEN`;
+  document.getElementById('protocol-tbody').innerHTML = catalog.map(c => {
+    const d = byName[c.protocol] || {};
     return `<tr>
-      <td>${dt}</td>
-      <td><span class="sev-badge sev-${a.severity}">${a.severity}</span></td>
-      <td>${a.alert_type}</td>
-      <td style="font-family:var(--mono);color:var(--cyan)">${a.src_ip||'—'}</td>
-      <td><span class="proto-tag proto-${a.protocol||'TCP'}">${a.protocol||'TCP'}</span></td>
-      <td style="color:var(--orange);font-family:var(--mono);font-size:10px">${a.mitre_id||'—'}</td>
-      <td style="color:var(--text2);font-size:10px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.description||''}</td>
-      <td><button class="ack-btn ${a.acknowledged?'acked':''}" onclick="ackAlert(${a.id},this)">
-        ${a.acknowledged?'ACKED':'ACK'}
-      </button></td>
+      <td><span class="proto-tag proto-${esc(c.protocol)}">${esc(c.protocol)}</span></td>
+      <td style="color:${c.risk === 'HIGH' ? 'var(--red)' : c.risk === 'MEDIUM' ? 'var(--orange)' : 'var(--text2)'}">${esc(c.risk)}</td>
+      <td>${c.encrypted ? '<span class="chip">YES</span>' : '<span class="chip muted">NO</span>'}</td>
+      <td class="num">${fmtInt(d.packets || 0)}</td>
+      <td class="num">${fmtBytes(d.bytes || 0)}</td>
+      <td class="num" style="color:${d.alerts ? 'var(--red)' : 'var(--text3)'}">${fmtInt(d.alerts || 0)}</td>
     </tr>`;
   }).join('');
 }
 
-async function ackAlert(id, btn) {
-  if (btn.classList.contains('acked')) return;
-  await fetch(`/api/alerts/${id}/acknowledge`, {method:'POST'});
-  btn.classList.add('acked'); btn.textContent='ACKED';
-}
-
-function renderAlertTypes(data) {
-  const ctx = document.getElementById('chart-alert-types');
-  if (charts.alertTypes) charts.alertTypes.destroy();
-  charts.alertTypes = new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels: data.map(d=>d.alert_type),
-      datasets:[{
-        data: data.map(d=>d.cnt),
-        backgroundColor: PALETTE.orange+'44', borderColor: PALETTE.orange,
-        borderWidth:1,
-      }]
-    },
-    options:{
-      indexAxis:'y', responsive:true, maintainAspectRatio:true,
-      plugins:{legend:{display:false}},
-      scales:{x:{grid:{color:'rgba(0,212,255,0.05)'}},y:{grid:{display:false},ticks:{font:{size:9}}}}
-    }
-  });
-}
-
-function renderAlertHourly(data) {
-  const ctx = document.getElementById('chart-alert-hourly');
-  if (charts.alertHourly) charts.alertHourly.destroy();
-  charts.alertHourly = new Chart(ctx, {
-    type:'line',
-    data:{
-      labels: data.map(d=>{ const dt=new Date(d.bucket*1000); return dt.getHours().toString().padStart(2,'0')+':00'; }),
-      datasets:[{
-        label:'Alerts', data:data.map(d=>d.cnt),
-        borderColor: PALETTE.red, backgroundColor:'rgba(255,45,85,0.07)',
-        borderWidth:2, fill:true, tension:0.4, pointRadius:0,
-      }]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:true,
-      plugins:{legend:{display:false}},
-      scales:{x:{grid:{color:'rgba(0,212,255,0.05)'},ticks:{maxTicksLimit:8}},y:{grid:{color:'rgba(0,212,255,0.05)'}}}
-    }
-  });
-}
-
-// ══════════════════════════════════════════════
-//  MITRE ATT&CK VIEW
-// ══════════════════════════════════════════════
-async function loadMitre() {
-  const [techniques] = await Promise.all([api('/api/mitre/techniques')]);
-  if (techniques) renderMitreGrid(techniques);
-}
-
-function renderMitreGrid(data) {
-  const max = data[0]?.cnt || 1;
-  const grid = document.getElementById('mitre-grid');
-  grid.innerHTML = data.map(t => `
-    <div class="mitre-cell ${t.cnt>100?'active':''}">
-      <div class="mitre-id">${t.technique_id}</div>
-      <div class="mitre-name">${t.technique_name}</div>
-      <div class="mitre-tactic">${t.tactic}</div>
-      <div class="mitre-count">${t.cnt}</div>
-      <div class="mitre-bar">
-        <div class="mitre-bar-fill" style="width:${Math.round(t.cnt/max*100)}%"></div>
-      </div>
-    </div>
-  `).join('');
-
-  // Bar chart
-  const ctx = document.getElementById('chart-mitre-bar');
-  if (charts.mitreBar) charts.mitreBar.destroy();
-  charts.mitreBar = new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels: data.map(d=>d.technique_id),
-      datasets:[{
-        label:'Events', data:data.map(d=>d.cnt),
-        backgroundColor: data.map(d=>PALETTE.orange+'44'),
-        borderColor: data.map(d=>PALETTE.orange), borderWidth:1,
-      }]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:true,
-      plugins:{legend:{display:false}},
-      scales:{
-        x:{grid:{color:'rgba(0,212,255,0.05)'}},
-        y:{grid:{color:'rgba(0,212,255,0.05)'}}
-      }
-    }
-  });
-}
-
-// ══════════════════════════════════════════════
-//  TRAFFIC VIEW
-// ══════════════════════════════════════════════
-async function loadTraffic() {
-  const [protos, geo] = await Promise.all([
-    api('/api/stats/protocol_distribution'),
-    api('/api/stats/geo_traffic'),
+/* ══════════════ MODULE 6 — Source / Destination IP Analysis ══════════════ */
+async function loadHosts() {
+  const [talkers, risky, geo, flows] = await Promise.all([
+    api('/api/hosts/top', { limit: 12, order: 'packets_sent' }),
+    api('/api/hosts/top', { limit: 12, order: 'threat_score' }),
+    api('/api/geo'),
+    api('/api/connections', { limit: 25, order: 'bytes' }),
   ]);
-  if (protos) {
-    renderProtoArea(protos);
-    renderProtoPolar(protos);
-  }
-  if (geo) renderGeoBar(geo);
+
+  const maxPkts = Math.max(1, ...talkers.map(h => h.packets_sent));
+  document.getElementById('top-talkers').innerHTML = talkers.length
+    ? talkers.map(h => `
+        <div class="bar-row clickable" onclick="openHost('${esc(h.ip)}')">
+          <span class="lbl" style="color:var(--cyan)">${esc(h.ip)}</span>
+          <span class="track"><span class="fill ${h.alert_count ? 'warn' : ''}"
+            style="width:${(h.packets_sent / maxPkts * 100).toFixed(1)}%"></span></span>
+          <span class="val">${fmtInt(h.packets_sent)}</span>
+        </div>`).join('')
+    : empty('NO HOSTS OBSERVED');
+
+  const scored = risky.filter(h => h.threat_score > 0);
+  document.getElementById('top-threat-hosts').innerHTML = scored.length
+    ? scored.map(h => `
+        <div class="bar-row clickable" onclick="openHost('${esc(h.ip)}')">
+          <span class="lbl" style="color:var(--red)">${esc(h.ip)}</span>
+          <span class="chip muted">${esc(h.country)}</span>
+          <span class="track"><span class="fill crit" style="width:${h.threat_score}%"></span></span>
+          <span class="val">${h.alert_count} alerts</span>
+        </div>`).join('')
+    : empty('NO SCORED HOSTS');
+
+  const maxGeo = Math.max(1, ...geo.map(g => g.packets));
+  document.getElementById('geo-list').innerHTML = geo.length
+    ? geo.map(g => `
+        <div class="bar-row">
+          <span class="lbl">${esc(g.country)}</span>
+          <span class="track"><span class="fill ${g.alerts ? 'crit' : ''}"
+            style="width:${(g.packets / maxGeo * 100).toFixed(1)}%"></span></span>
+          <span class="val">${fmtInt(g.packets)}</span>
+        </div>`).join('')
+    : empty('NO GEO DATA');
+
+  document.getElementById('flows-tbody').innerHTML = flows.length
+    ? flows.map(f => `
+        <tr>
+          <td>${esc(f.src_ip)}:${f.src_port}</td>
+          <td>${esc(f.dst_ip)}:${f.dst_port}</td>
+          <td><span class="proto-tag proto-${esc(f.protocol)}">${esc(f.protocol)}</span></td>
+          <td class="num">${fmtInt(f.packets)}</td>
+          <td class="num">${fmtBytes(f.bytes)}</td>
+        </tr>`).join('')
+    : `<tr><td colspan="5">${empty('NO FLOWS')}</td></tr>`;
 }
 
-function renderProtoArea(data) {
-  const ctx = document.getElementById('chart-proto-area');
-  if (charts.protoArea) charts.protoArea.destroy();
-  charts.protoArea = new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels: data.map(d=>d.protocol),
-      datasets:[{
-        label:'Packets', data:data.map(d=>d.count),
-        backgroundColor: data.map(d=>(PROTO_COLORS[d.protocol]||PALETTE.cyan)+'55'),
-        borderColor: data.map(d=>PROTO_COLORS[d.protocol]||PALETTE.cyan),
-        borderWidth:2,
-      }]
+/* ══════════════ MODULE 7 — Activity Trends ══════════════ */
+async function loadTimeline() {
+  const [timeline, throughput] = await Promise.all([
+    api('/api/stats/timeline', { hours: 24, bucket_s: 3600 }),
+    api('/api/stats/throughput', { minutes: 1440 }),
+  ]);
+
+  const buckets = [...new Set(timeline.map(r => r.bucket))].sort((a, b) => a - b);
+  const severities = [...new Set(timeline.map(r => r.severity))];
+  upsertChart('timeline', 'chart-timeline', {
+    type: 'bar',
+    data: {
+      labels: buckets.map(b => fmtTime(b)),
+      datasets: severities.map(sev => ({
+        label: sev,
+        data: buckets.map(b => {
+          const row = timeline.find(r => r.bucket === b && r.severity === sev);
+          return row ? row.count : 0;
+        }),
+        backgroundColor: SEV_COLOR[sev] || '#7899b0',
+      })),
     },
-    options:{
-      responsive:true, maintainAspectRatio:true,
-      plugins:{legend:{display:false}},
-      scales:{x:{grid:{color:'rgba(0,212,255,0.05)'}},y:{grid:{color:'rgba(0,212,255,0.05)'}}}
-    }
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { boxWidth: 10 } } },
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: { stacked: true, grid: GRID, beginAtZero: true },
+      },
+    },
+  });
+
+  upsertChart('volume', 'chart-volume', {
+    type: 'line',
+    data: {
+      labels: throughput.map(r => fmtTime(r.bucket)),
+      datasets: [{
+        label: 'bytes', data: throughput.map(r => r.bytes),
+        borderColor: '#bf5af2', backgroundColor: 'rgba(191,90,242,0.1)',
+        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: GRID, ticks: { maxTicksLimit: 12 } },
+        y: { grid: GRID, beginAtZero: true, ticks: { callback: v => fmtBytes(v) } },
+      },
+    },
   });
 }
 
-function renderGeoBar(data) {
-  const ctx = document.getElementById('chart-geo-bar');
-  if (charts.geoBar) charts.geoBar.destroy();
-  const top12 = data.slice(0,12);
-  charts.geoBar = new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels: top12.map(d=>d.country),
-      datasets:[
-        { label:'Total',   data:top12.map(d=>d.total),   backgroundColor:'rgba(0,212,255,0.3)', borderColor:PALETTE.cyan, borderWidth:1 },
-        { label:'Threats', data:top12.map(d=>d.threats), backgroundColor:'rgba(255,45,85,0.4)',  borderColor:PALETTE.red,  borderWidth:1 },
-      ]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:true,
-      plugins:{legend:{labels:{boxWidth:10,font:{size:9}}}},
-      scales:{x:{grid:{color:'rgba(0,212,255,0.05)'}},y:{grid:{color:'rgba(0,212,255,0.05)'}}}
-    }
-  });
-}
-
-function renderProtoPolar(data) {
-  const ctx = document.getElementById('chart-proto-polar');
-  if (charts.protoPolar) charts.protoPolar.destroy();
-  const top8 = data.slice(0,8);
-  charts.protoPolar = new Chart(ctx, {
-    type:'polarArea',
-    data:{
-      labels: top8.map(d=>d.protocol),
-      datasets:[{
-        data: top8.map(d=>d.count),
-        backgroundColor: top8.map(d=>(PROTO_COLORS[d.protocol]||PALETTE.cyan)+'55'),
-        borderColor:     top8.map(d=>PROTO_COLORS[d.protocol]||PALETTE.cyan),
-        borderWidth:1,
-      }]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:true,
-      plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:9}}}},
-    }
-  });
-}
-
-// ══════════════════════════════════════════════
-//  PACKET LOG VIEW
-// ══════════════════════════════════════════════
-let pktLogRunning = false;
-async function loadPacketLog() {
-  const events = await api('/api/events/stream');
-  if (events) {
-    const container = document.getElementById('pkt-stream');
-    container.innerHTML = events.map(e => {
-      const dt = new Date(e.timestamp*1000).toTimeString().slice(0,8);
-      return `<div class="pkt-row ${e.is_malicious?'mal':''}">
-        <span>${dt}</span>
-        <span>${e.src_ip}</span>
-        <span>${e.dst_ip}</span>
-        <span><span class="proto-tag proto-${e.protocol}">${e.protocol}</span></span>
-        <span>${e.length}B</span>
-        <span style="color:var(--text3)">${e.flags||''}</span>
-      </div>`;
-    }).join('');
-    document.getElementById('pkt-count-badge').textContent = `${events.length} PACKETS`;
-  }
-}
-
-// ══════════════════════════════════════════════
-//  PERFORMANCE VIEW
-// ══════════════════════════════════════════════
+/* ══════════════ MODULE 8 — Detection Performance / Health ══════════════ */
 async function loadPerformance() {
-  const data = await api('/api/performance/db');
-  if (!data || data.length === 0) return;
+  const [perf, health] = await Promise.all([
+    api('/api/performance', { limit: 120 }),
+    api('/api/health'),
+  ]);
+  const history = perf.history.slice().reverse();
+  const latest = perf.history[0] || {};
+  const live = perf.live || {};
 
-  const latest = data[0];
-  const strip = document.getElementById('perf-strip');
-  const gauges = [
-    { label:'PKT/MIN',  val: latest.packets_pm?.toLocaleString(), unit:'packets',   fill: latest.packets_pm/6500*100 },
-    { label:'CPU',      val: latest.cpu_pct?.toFixed(1)+'%',      unit:'utilization', fill: latest.cpu_pct },
-    { label:'MEMORY',   val: (latest.mem_mb/1024)?.toFixed(1)+'GB', unit:'RAM used', fill: latest.mem_mb/2048*100 },
-    { label:'QUERY MS', val: latest.db_query_ms?.toFixed(1),       unit:'avg latency', fill: latest.db_query_ms/50*100 },
-    { label:'DROP %',   val: latest.drop_pct?.toFixed(2)+'%',     unit:'packet loss', fill: latest.drop_pct*100 },
-  ];
-  strip.innerHTML = gauges.map(g => `
-    <div class="perf-gauge">
-      <div class="gauge-label">${g.label}</div>
-      <div class="gauge-val">${g.val||'—'}</div>
-      <div class="gauge-unit">${g.unit}</div>
-      <div class="gauge-bar"><div class="gauge-fill" style="width:${Math.min(100,g.fill||0)}%"></div></div>
-    </div>
-  `).join('');
+  document.getElementById('perf-strip').innerHTML = `
+    ${gauge('THROUGHPUT', fmtInt(latest.packets_per_min), 'packets/min',
+            Math.min(100, (latest.packets_per_min || 0) / 5000 * 100))}
+    ${gauge('QUERY p50', (latest.query_p50_ms || 0).toFixed(2), 'ms (target <50)',
+            Math.min(100, (latest.query_p50_ms || 0) / 50 * 100))}
+    ${gauge('QUERY p95', (latest.query_p95_ms || 0).toFixed(2), 'ms (target <50)',
+            Math.min(100, (latest.query_p95_ms || 0) / 50 * 100))}
+    ${gauge('PARSE', (live.parse_us_avg != null ? live.parse_us_avg : latest.parse_us_avg || 0).toFixed(1), 'µs/packet', 40)}
+    ${gauge('DETECT', (live.detect_us_avg != null ? live.detect_us_avg : latest.detect_us_avg || 0).toFixed(1), 'µs/packet', 40)}
+    ${gauge('PARSE ERRORS', fmtInt(live.parse_errors != null ? live.parse_errors : latest.parse_errors), 'frames rejected', 0)}`;
 
-  // Timeline
-  const reversed = [...data].reverse();
-  const ctx = document.getElementById('chart-perf');
-  if (charts.perf) charts.perf.destroy();
-  charts.perf = new Chart(ctx, {
-    type:'line',
-    data:{
-      labels: reversed.map((_,i)=>i % 10 === 0 ? `${60-i}m` : ''),
-      datasets:[{
-        label:'Pkt/min', data:reversed.map(d=>d.packets_pm),
-        borderColor:PALETTE.cyan, backgroundColor:'rgba(0,212,255,0.05)',
-        borderWidth:1.5, fill:true, tension:0.3, pointRadius:0,
-      }]
+  upsertChart('perfTp', 'chart-perf-tp', {
+    type: 'line',
+    data: {
+      labels: history.map(r => fmtTime(r.ts)),
+      datasets: [{
+        label: 'packets/min', data: history.map(r => r.packets_per_min),
+        borderColor: '#00ff88', backgroundColor: 'rgba(0,255,136,0.1)',
+        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
+      }],
     },
-    options:{
-      responsive:true, maintainAspectRatio:true,
-      plugins:{legend:{display:false}},
-      scales:{x:{grid:{color:'rgba(0,212,255,0.04)'}},y:{grid:{color:'rgba(0,212,255,0.04)'}}}
-    }
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: GRID, ticks: { maxTicksLimit: 8 } }, y: { grid: GRID, beginAtZero: true } },
+    },
   });
 
-  const ctx2 = document.getElementById('chart-perf-sys');
-  if (charts.perfSys) charts.perfSys.destroy();
-  charts.perfSys = new Chart(ctx2, {
-    type:'line',
-    data:{
-      labels: reversed.map((_,i)=>i%10===0?`${60-i}m`:''),
-      datasets:[
-        { label:'CPU%',  data:reversed.map(d=>d.cpu_pct), borderColor:PALETTE.orange, backgroundColor:'transparent', borderWidth:1.5, tension:0.3, pointRadius:0 },
-        { label:'Mem MB',data:reversed.map(d=>d.mem_mb),  borderColor:PALETTE.purple, backgroundColor:'transparent', borderWidth:1.5, tension:0.3, pointRadius:0, yAxisID:'y2' },
-      ]
+  upsertChart('perfQ', 'chart-perf-q', {
+    type: 'line',
+    data: {
+      labels: history.map(r => fmtTime(r.ts)),
+      datasets: [
+        { label: 'p50 ms', data: history.map(r => r.query_p50_ms),
+          borderColor: '#00d4ff', pointRadius: 0, borderWidth: 2, tension: 0.3 },
+        { label: 'p95 ms', data: history.map(r => r.query_p95_ms),
+          borderColor: '#ffd60a', pointRadius: 0, borderWidth: 1.5, tension: 0.3 },
+      ],
     },
-    options:{
-      responsive:true, maintainAspectRatio:true,
-      plugins:{legend:{labels:{boxWidth:8,font:{size:9}}}},
-      scales:{
-        x:{grid:{color:'rgba(0,212,255,0.04)'}},
-        y:{grid:{color:'rgba(0,212,255,0.04)'},position:'left'},
-        y2:{grid:{display:false},position:'right'},
-      }
-    }
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { boxWidth: 10 } } },
+      scales: { x: { grid: GRID, ticks: { maxTicksLimit: 8 } }, y: { grid: GRID, beginAtZero: true } },
+    },
   });
 
-  const ctx3 = document.getElementById('chart-perf-query');
-  if (charts.perfQuery) charts.perfQuery.destroy();
-  charts.perfQuery = new Chart(ctx3, {
-    type:'bar',
-    data:{
-      labels: ['<5ms','5-10ms','10-20ms','20-30ms','30-50ms','>50ms'],
-      datasets:[{
-        label:'Query dist.',
-        data: [12,23,35,18,8,2].map(v=>v+Math.floor(Math.random()*5)),
-        backgroundColor:'rgba(0,255,136,0.3)', borderColor:PALETTE.green, borderWidth:1,
-      }]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:true,
-      plugins:{legend:{display:false}},
-      scales:{x:{grid:{color:'rgba(0,212,255,0.04)'}},y:{grid:{color:'rgba(0,212,255,0.04)'}}}
-    }
-  });
+  document.getElementById('db-health').innerHTML = `
+    <dl class="kv">
+      <dt>Journal mode</dt><dd>${esc(health.journal_mode)}</dd>
+      <dt>Tables</dt><dd>${health.table_count}</dd>
+      <dt>Indexes</dt><dd>${health.index_count}</dd>
+      <dt>Database size</dt><dd>${fmtBytes(health.db_size_bytes)}</dd>
+      <dt>Detectors loaded</dt><dd>${health.engine.detectors}</dd>
+      <dt>Threat types</dt><dd>${health.engine.threat_types}</dd>
+      <dt>ATT&CK techniques</dt><dd>${health.engine.techniques}</dd>
+      <dt>Protocols supported</dt><dd>${health.engine.protocols_supported}</dd>
+      <dt>Packets analyzed</dt><dd>${fmtInt(health.engine.packets_analyzed)}</dd>
+      <dt>Detector errors</dt><dd style="color:${health.engine.detector_errors ? 'var(--red)' : 'var(--green)'}">${health.engine.detector_errors}</dd>
+    </dl>
+    <h4 style="margin-top:16px">Row counts</h4>
+    <dl class="kv">
+      ${Object.entries(health.tables).map(([t, n]) =>
+        `<dt>${esc(t)}</dt><dd style="color:${n > 0 ? 'var(--green)' : 'var(--red)'}">${fmtInt(n)}</dd>`).join('')}
+    </dl>`;
 }
 
-// ══════════════════════════════════════════════
-//  AUTO-REFRESH
-// ══════════════════════════════════════════════
-async function refresh() {
-  if (currentView === 'overview')     await loadOverview();
-  if (currentView === 'packetlog')    await loadPacketLog();
-  if (currentView === 'performance')  await loadPerformance();
+function gauge(label, value, unit, pct) {
+  return `<div class="perf-gauge">
+    <div class="gauge-label">${esc(label)}</div>
+    <div class="gauge-val">${esc(value)}</div>
+    <div class="gauge-unit">${esc(unit)}</div>
+    <div class="gauge-bar"><div class="gauge-fill" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>
+  </div>`;
 }
 
-// Initial load
-loadOverview();
-setInterval(refresh, 8000);  // refresh every 8s
+/* ══════════════ MODULE 9 — Live Packet Log ══════════════ */
+async function loadPackets() {
+  const packets = await api('/api/packets', { limit: 120, ...pktFilters });
+  const tbody = document.getElementById('pkt-tbody');
+  document.getElementById('pkt-badge').textContent = packets.length + ' ROWS';
+  if (!packets.length) {
+    tbody.innerHTML = `<tr><td colspan="7">${empty('NO PACKETS MATCH')}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = packets.map(p => {
+    const l7 = Object.entries(p.l7 || {}).slice(0, 3)
+      .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`).join('  ');
+    return `<tr class="${p.is_malicious ? 'pkt-row mal' : ''}">
+      <td>${fmtTime(p.ts)}</td>
+      <td>${esc(p.src_ip)}${p.src_port ? ':' + p.src_port : ''}</td>
+      <td>${esc(p.dst_ip)}${p.dst_port ? ':' + p.dst_port : ''}</td>
+      <td><span class="proto-tag proto-${esc(p.protocol)}">${esc(p.protocol)}</span></td>
+      <td class="num">${p.frame_len}</td>
+      <td>${esc(p.flags || '—')}</td>
+      <td style="color:var(--text2)">${esc(l7) || '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ══════════════ Detail drawer ══════════════ */
+function openDrawer(html) {
+  document.getElementById('drawer-body').innerHTML = html;
+  document.getElementById('drawer').classList.add('open');
+}
+document.getElementById('drawer-close').onclick =
+  () => document.getElementById('drawer').classList.remove('open');
+
+async function openAlert(id) {
+  try {
+    const a = await api('/api/alerts/' + id);
+    openDrawer(`
+      <h3>${esc(a.threat_type)}</h3>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:10px">
+        alert #${a.id} · ${fmtDateTime(a.ts)}
+      </div>
+      <span class="sev-badge sev-${esc(a.severity)}">${esc(a.severity)}</span>
+      <span class="chip">confidence ${(a.confidence * 100).toFixed(0)}%</span>
+      <span class="chip">detector: ${esc(a.detector)}</span>
+      <h4>What was detected</h4>
+      <div style="font-size:12px;line-height:1.6;color:var(--text)">${esc(a.description)}</div>
+      <h4>Connection</h4>
+      <dl class="kv">
+        <dt>Source</dt><dd>${esc(a.src_ip)}${a.src_port ? ':' + a.src_port : ''}</dd>
+        <dt>Destination</dt><dd>${esc(a.dst_ip)}${a.dst_port ? ':' + a.dst_port : ''}</dd>
+        <dt>Protocol</dt><dd>${esc(a.protocol)}</dd>
+        <dt>Acknowledged</dt><dd>${a.acknowledged ? 'yes' : 'no'}</dd>
+      </dl>
+      <h4>MITRE ATT&CK mapping</h4>
+      ${a.techniques.map(t => `
+        <div style="margin-bottom:10px">
+          <a href="${esc(t.url)}" target="_blank" rel="noopener"
+             style="color:var(--orange);font-family:var(--mono);font-size:11px;text-decoration:none">
+            ${esc(t.technique_id)} — ${esc(t.name)}</a>
+          <span class="chip muted">${esc(t.tactic)}</span>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.5">${esc(t.rationale)}</div>
+        </div>`).join('')}
+      <h4>Supporting evidence</h4>
+      <pre>${esc(JSON.stringify(a.evidence, null, 2))}</pre>
+      <h4>Related packets (${a.related_packets.length})</h4>
+      <pre>${a.related_packets.length
+        ? esc(a.related_packets.map(p =>
+            `${fmtTime(p.ts)}  ${p.src_ip}:${p.src_port || 0} → ${p.dst_ip}:${p.dst_port || 0}  ${p.protocol}  ${p.frame_len}B  ${p.flags || ''}`
+          ).join('\n'))
+        : 'none within the alert window'}</pre>`);
+  } catch (e) { showError(e); }
+}
+
+async function openHost(ip) {
+  if (!ip || ip === 'null') return;
+  try {
+    const h = await api('/api/hosts/' + encodeURIComponent(ip));
+    openDrawer(`
+      <h3>${esc(h.ip)}</h3>
+      <div style="margin-bottom:10px">
+        <span class="chip">${h.is_internal ? 'INTERNAL' : 'EXTERNAL'}</span>
+        <span class="chip muted">${esc(h.country)}</span>
+        <span class="chip ${h.threat_score > 0 ? 'tech' : 'muted'}">threat score ${h.threat_score}</span>
+      </div>
+      <h4>Traffic</h4>
+      <dl class="kv">
+        <dt>First seen</dt><dd>${fmtDateTime(h.first_seen)}</dd>
+        <dt>Last seen</dt><dd>${fmtDateTime(h.last_seen)}</dd>
+        <dt>Packets sent</dt><dd>${fmtInt(h.packets_sent)}</dd>
+        <dt>Packets received</dt><dd>${fmtInt(h.packets_recv)}</dd>
+        <dt>Bytes sent</dt><dd>${fmtBytes(h.bytes_sent)}</dd>
+        <dt>Bytes received</dt><dd>${fmtBytes(h.bytes_recv)}</dd>
+        <dt>Alerts raised</dt><dd>${fmtInt(h.alert_count)}</dd>
+      </dl>
+      <h4>Protocols used</h4>
+      ${h.top_protocols.length ? h.top_protocols.map(p => `
+        <div class="bar-row"><span class="lbl">${esc(p.protocol)}</span>
+        <span class="val">${fmtInt(p.packets)} pkts · ${fmtBytes(p.bytes)}</span></div>`).join('')
+        : empty('NONE')}
+      <h4>Top peers</h4>
+      ${h.top_peers.length ? h.top_peers.map(p => `
+        <div class="bar-row"><span class="lbl">${esc(p.peer)}</span>
+        <span class="val">${fmtBytes(p.bytes)}</span></div>`).join('')
+        : empty('NONE')}
+      <h4>Recent alerts (${h.recent_alerts.length})</h4>
+      ${h.recent_alerts.length ? h.recent_alerts.map(a => `
+        <div class="bar-row clickable" onclick="openAlert(${a.id})">
+          <span class="sev-badge sev-${esc(a.severity)}">${esc(a.severity)}</span>
+          <span class="lbl" style="flex:1">${esc(a.threat_type)}</span>
+          <span class="val">${fmtTime(a.ts)}</span>
+        </div>`).join('') : empty('NONE')}`);
+  } catch (e) { showError(e); }
+}
+
+async function openTechnique(id) {
+  try {
+    const t = await api('/api/mitre/techniques/' + encodeURIComponent(id));
+    openDrawer(`
+      <h3>${esc(t.technique_id)} — ${esc(t.name)}</h3>
+      <div style="margin-bottom:10px">
+        <span class="chip muted">${esc(t.tactic)}</span>
+        <span class="chip tech">${t.alert_count} alerts</span>
+        <a href="${esc(t.url)}" target="_blank" rel="noopener" class="chip">attack.mitre.org ↗</a>
+      </div>
+      <h4>Why this mapping</h4>
+      <div style="font-size:12px;line-height:1.6;color:var(--text)">${esc(t.rationale)}</div>
+      <h4>Detectors that raise it</h4>
+      ${t.detectors.length ? t.detectors.map(d => `
+        <div class="bar-row"><span class="lbl">${esc(d.detector)}</span>
+        <span class="val">${d.count} alerts</span></div>`).join('') : empty('NOT YET OBSERVED')}
+      <h4>Recent alerts</h4>
+      ${t.recent_alerts.length ? t.recent_alerts.map(a => `
+        <div class="bar-row clickable" onclick="openAlert(${a.id})">
+          <span class="sev-badge sev-${esc(a.severity)}">${esc(a.severity)}</span>
+          <span class="lbl" style="flex:1">${esc(a.src_ip)} → ${esc(a.dst_ip)}</span>
+          <span class="val">${fmtTime(a.ts)}</span>
+        </div>`).join('') : empty('NONE')}`);
+  } catch (e) { showError(e); }
+}
+
+/* ══════════════ Navigation & refresh ══════════════ */
+const LOADERS = {
+  overview: loadOverview, alerts: loadAlerts, threats: loadThreats,
+  mitre: loadMitre, protocols: loadProtocols, hosts: loadHosts,
+  timeline: loadTimeline, performance: loadPerformance, packets: loadPackets,
+};
+
+async function showView(name) {
+  currentView = name;
+  document.querySelectorAll('#main section').forEach(s => { s.style.display = 'none'; });
+  document.getElementById('view-' + name).style.display = 'block';
+  document.querySelectorAll('.nav-item').forEach(n =>
+    n.classList.toggle('active', n.dataset.view === name));
+  try { await LOADERS[name](); } catch (e) { showError(e); }
+}
+
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.onclick = () => showView(item.dataset.view);
+});
+
+document.querySelectorAll('#severity-filters .filter-btn[data-sev]').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('#severity-filters .filter-btn[data-sev]')
+      .forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    alertFilters.severity = btn.dataset.sev;
+    loadAlerts().catch(showError);
+  };
+});
+document.getElementById('alert-search-btn').onclick = () => {
+  alertFilters.src_ip = document.getElementById('alert-ip-filter').value.trim();
+  loadAlerts().catch(showError);
+};
+document.getElementById('pkt-filter-btn').onclick = () => {
+  pktFilters.protocol = document.getElementById('pkt-proto-filter').value.trim().toUpperCase();
+  pktFilters.src_ip = document.getElementById('pkt-ip-filter').value.trim();
+  loadPackets().catch(showError);
+};
+document.getElementById('pkt-mal-btn').onclick = (e) => {
+  pktFilters.malicious_only = !pktFilters.malicious_only;
+  e.target.classList.toggle('active', pktFilters.malicious_only);
+  loadPackets().catch(showError);
+};
+
+async function loadEngineBadges() {
+  try {
+    const h = await api('/api/health');
+    document.getElementById('side-detectors').textContent = h.engine.detectors;
+    document.getElementById('side-protocols').textContent = h.engine.protocols_supported;
+    document.getElementById('side-techniques').textContent = h.engine.techniques;
+    document.getElementById('side-tables').textContent = h.table_count;
+    document.getElementById('engine-status').textContent =
+      'ENGINE ' + (h.simulation_running ? 'LIVE' : 'IDLE');
+  } catch (e) { document.getElementById('engine-status').textContent = 'ENGINE OFFLINE'; }
+}
+
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-GB');
+}, 1000);
+
+// Refresh whichever module is on screen; the others reload on navigation.
+setInterval(() => { LOADERS[currentView]().catch(() => {}); }, 10000);
+setInterval(loadEngineBadges, 30000);
+
+loadEngineBadges();
+showView('overview');
 </script>
 </body>
 </html>

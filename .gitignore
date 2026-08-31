@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.venv_fresh/
+venv/
+.DS_Store
+netwatch.db
+netwatch.db-wal
+netwatch.db-shm
+benchmark_results.json
+results.json
+.pytest_cache/
