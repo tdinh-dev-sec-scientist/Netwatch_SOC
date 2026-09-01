@@ -4,8 +4,17 @@ A network security monitoring platform: deep packet inspection over 21 protocols
 17 modular threat detectors mapped to MITRE ATT&CK, an indexed 8-table SQLite
 store, a 24-endpoint REST API, and a 9-module analyst dashboard.
 
-Every number in this README is measured, and the commands to reproduce each one
-are given. Where a number falls short of a target, it says so.
+## ⚙️ Architecture & Production Engineering
+
+Netwatch SOC is engineered to transition from a local script to a hardened, containerized micro-architecture designed to overcome common edge-cases like SQLite concurrency limits.
+
+### Key Engineering Decisions:
+* **Split-Topology Design:** Solved SQLite's single-writer bottleneck by decoupling the data ingestion pipeline (Headless Engine container as the sole writer) from the API/Dashboard tier (Multiple reader processes via SQLite WAL mode).
+* **Boot-Time Safety Guards:** Implemented a custom Gunicorn worker check that aborts startup (`exit 1`) if an unsafe multi-worker configuration is deployed alongside the active simulation engine, preventing silent packet duplication and write-lock corruptions.
+* **Security Hardening (DevSecOps):** 
+  * Dropped all unnecessary Linux capabilities (`cap_drop: ALL`).
+  * Enforced a read-only root filesystem with `tmpfs` mounts.
+  * Strictly restricted `NET_RAW` and `NET_ADMIN` privileges exclusively to the packet-capturing engine.
 
 ---
 
