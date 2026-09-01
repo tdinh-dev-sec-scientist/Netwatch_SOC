@@ -1,0 +1,56 @@
+# Keep the build context minimal and free of anything sensitive or local.
+# The runtime stage also copies source explicitly, so this is defence in depth.
+
+# Version control and CI
+.git
+.github
+.gitignore
+
+# Virtualenvs and caches
+.venv
+.venv_fresh
+venv
+env
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.tox
+.coverage
+htmlcov
+
+# Local databases — never bake data into an image
+*.db
+*.db-wal
+*.db-shm
+netwatch.db*
+
+# Local secrets and configuration
+.env
+.env.*
+*.pem
+*.key
+*.crt
+secrets/
+
+# Editor and OS noise
+.DS_Store
+.idea
+.vscode
+*.swp
+
+# Build artefacts and local outputs
+dist
+build
+*.egg-info
+results.json
+benchmark_results.json
+*.patch
+*.bundle
+
+# Container files themselves (not needed inside the image)
+Dockerfile
+docker-compose*.yml
+.dockerignore
