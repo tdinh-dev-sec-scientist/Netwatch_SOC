@@ -380,26 +380,3 @@ expected threat type, asserted end to end.
 
 ---
 
-## Honest limitations
-
-- **Traffic is synthetic.** `frames.py` emits real wire-format bytes and the
-  analyzer has no privileged knowledge of their origin, so the parsing and
-  detection logic is genuinely exercised — but the *traffic mix* is a model of
-  an enterprise network, not a capture of one. The measured false-positive rate
-  is against that model. Validating against real captured traffic would be the
-  next step, and would very likely require re-tuning thresholds.
-- **Geo enrichment is a static prefix table**, not MaxMind. `geoip.py` returns
-  `UNKNOWN` rather than guessing, and the dashboard labels it "approximate".
-  The high-risk country list is a crude proxy, not threat intelligence.
-- **SSH brute force is inferred, not observed.** Authentication happens inside
-  the encrypted channel; the detector counts cleartext version banners, which is
-  the standard network-side signal, and caps its confidence at 0.85 accordingly.
-- **Throughput is single-threaded and hardware-dependent.** The benchmark reports
-  what your machine measured, not a fixed figure.
-- **No prior "99.2% accuracy" claim is made.** Accuracy requires labelled ground
-  truth across both classes; what is measured here is detection of known
-  scenarios and a false-positive count on a benign corpus. Those two numbers are
-  reported, and nothing is extrapolated from them.
-- **The dev server is for demonstration.** It binds to `127.0.0.1` by default;
-  use a production WSGI server to expose it, and note there is no authentication
-  on the API.
