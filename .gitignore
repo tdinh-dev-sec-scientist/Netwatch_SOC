@@ -10,3 +10,7 @@ netwatch.db-shm
 benchmark_results.json
 results.json
 .pytest_cache/
+
+.coverage
+htmlcov/
+*.db
