@@ -298,3 +298,50 @@ working as designed: it slowed the producer instead of losing a packet.
 range partitioning keeps each partition's indexes small enough to stay
 resident, and turns retention into `DROP PARTITION` instead of a mass `DELETE`.
 It is not implemented here, and this section is where that would be measured.
+
+---
+
+## Step 10 — the query the indexes cannot help, and a reporting bug
+
+The composite indexes do what they were designed to do on the filtered list
+endpoints. One query in the targeted set does not move at all:
+
+```
+threat_summary   p95  73.7 ms  ->  72.4 ms   (1.0x)
+```
+
+An earlier run of the same benchmark showed it at 66.5 ms before and 87.0 ms
+after — apparently a regression. It is not: across runs the number wanders
+either side of unchanged, which is what a query no index can help looks like
+when the machine is not quiet.
+
+The reason is structural. `/api/threats/summary` groups alerts by (source
+host, threat type) over a time window and orders by severity rank, then alert
+count — both of them **aggregates**. PostgreSQL cannot terminate that scan
+early at the `LIMIT`, because it cannot know which group ranks highest until
+every group in the window is built. The query is a full aggregate over the
+window whatever indexes exist.
+
+Chasing that apparent regression exposed a reporting bug worth more than the
+regression would have been. The benchmark captures an `EXPLAIN` probe
+alongside each latency, and the probe for this query had been written without
+the `ORDER BY` over aggregates. It reported **55.6 ms → 1.9 ms**, a 29×
+improvement, for a query whose measured latency had not improved at all —
+because the simplified probe *could* stop at the `LIMIT` and the real query
+could not. The probe now carries the ordering, so the plan the report prints
+stands for the query that was timed, and the docstring says plainly that these
+probes are the index-relevant core of a query rather than the whole statement.
+
+Two things follow, and neither is a reshuffle of the numbers.
+
+**The query stays in the targeted set.** Moving it out after seeing it fail to
+improve would be choosing the sample to fit the result. It stays, the headline
+includes it, and the headline is therefore conservative.
+
+**The fix, if one is wanted, is not an index.** Ordering by an aggregate over
+an unbounded group set is answered by a rollup — a materialised
+`(src_host_id, threat_type_id, window)` summary maintained on write. That is
+exactly the denormalisation the schema notes argue against for `threats`, and
+it would be worth revisiting only if this endpoint's latency mattered more
+than the write-path cost of maintaining it. It is not implemented, and this is
+the measurement that would justify it.

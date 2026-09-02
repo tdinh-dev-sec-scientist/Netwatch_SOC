@@ -294,7 +294,148 @@ single-writer file database the API had to live inside the writer's process.
 
 ## Measured results
 
-MEASURED_RESULTS_PLACEHOLDER
+All figures below were produced by the scripts in `benchmarks/`; each one's raw
+JSON is committed in `benchmarks/results/`.
+
+**Machine.** 4 vCPU, 16 GB RAM, Linux 6.18, CPython 3.11.15, PostgreSQL 16.13
+on the same host — so the pipeline and the database compete for the same four
+cores, which is the pessimistic arrangement. PostgreSQL settings at their
+defaults, `synchronous_commit=on`.
+
+### Pipeline throughput — `benchmarks/pipeline_benchmark.py`
+
+5 runs of 51,338 frames (50,000 benign background plus every attack scenario),
+each measured from the capture stage's stamp to the commit that persists the
+packet:
+
+```
+run 1/5:  8,019.8 pkt/s      run 4/5:  7,676.4 pkt/s
+run 2/5:  7,136.8 pkt/s      run 5/5:  7,093.4 pkt/s
+run 3/5:  7,512.7 pkt/s
+
+mean 7,487.8 pkt/s   median 7,512.7   range 7,093.4 – 8,019.8   stdev 386.6
+
+offered 256,690 | persisted 256,690 | dropped 0 | failed 0 | identity holds
+end-to-end latency  p50 880 ms   p95 1,083 ms   p99 1,121 ms
+peak RSS 133.0 MB   mean CPU 101.5% of 4 cores
+```
+
+The latency is queueing delay, not work: at saturation the offered rate
+exceeds capacity, so in-flight depth divided by throughput *is* the latency.
+The soak below, which runs at a rate the pipeline can absorb, is the number to
+read for latency under normal load.
+
+The configuration sweep (`--sweep`, 16 combinations, zero drops throughout)
+picked the defaults: two persistence workers, batches of 2,000. More writers
+past two cost more in GIL contention and lock ordering than they buy in
+overlap.
+
+### Soak — `benchmarks/soak_test.py`
+
+Ten minutes at 5,000 offered packets/sec, starting from an empty database:
+
+```
+Packets generated:   1,889,798
+Packets processed:   1,889,798
+Packets dropped:     0
+Packets failed:      0    (0 parse failures, 0 write failures)
+Duration:            601.5 s
+Throughput:          3,141.9 packets/sec
+P50 / P95 / P99:     1,760 / 2,404 / 2,576 ms
+Peak memory:         212.2 MB   (100.3 -> 212.0 MB over 117 samples)
+
+1,889,798 captured == 1,889,798 persisted + 0 dropped + 0 parse_failed
+                                           + 0 write_failed
+identity holds: True    unaccounted: 0
+```
+
+Two things worth reading carefully.
+
+**The zero is real, and so is what it cost.** Under the `BLOCK` policy the
+pipeline never drops — it slows the producer instead. The capture queue sat at
+16/16 for the whole run and the capture stage spent 282 s of 601 s blocked, so
+the achieved 3,142 packets/sec is the pipeline's sustained capacity at this
+data volume, not the 5,000 that was offered. Both numbers are in the JSON.
+
+**Memory is bounded, and the sample series shows why.** RSS rose +15 MB per
+50 s over the first third and +2.4 MB per 50 s over the last: caches filling to
+their configured bounds, not a leak, which would keep the slope constant. The
+soak fails the run if peak RSS crosses a configurable ceiling.
+
+Throughput also fell as the fact table grew — 3,668 packets/sec over the first
+half, 2,620 over the second, against ~7,500 on the burst benchmark where no run
+appends more than a few hundred thousand rows. That is index maintenance on a
+growing table, and it is why time partitioning is the identified next step. See
+[docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+### Database and query latency — `benchmarks/query_benchmark.py`
+
+Dataset: **400,075 alerts**, 2,489,798 packets, 559,743 technique links,
+1.6 GB. Every API-backing query timed 15 times, twice — once with only primary
+keys, unique constraints and single-column indexes, once with the 12 composite
+indexes added — same data, same order, `ANALYZE` before each pass.
+
+```
+                                          BEFORE      AFTER
+p95, the 11 queries the indexes target    887.5 ms    65.9 ms   (13.5x)
+p95, the 7 of those against alerts only    80.3 ms    68.5 ms    (1.2x)
+p95, all 28 queries incl. aggregates      230.2 ms   187.4 ms    (1.2x)
+```
+
+Per query, the ones the indexes were designed for:
+
+| query | before | after | |
+|---|---:|---:|---:|
+| `packets_by_source` | 1054.7 ms | 8.1 ms | 130.0× |
+| `alerts_by_source_host` | 85.7 ms | 9.4 ms | 9.1× |
+| `host_detail` | 186.7 ms | 21.3 ms | 8.8× |
+| `alerts_severity_and_time` | 43.6 ms | 10.3 ms | 4.2× |
+| `packets_by_protocol` | 178.5 ms | 43.5 ms | 4.1× |
+| `alert_detail` | 56.9 ms | 18.3 ms | 3.1× |
+| `alerts_by_threat_type` | 44.5 ms | 14.4 ms | 3.1× |
+| `alerts_unacknowledged` | 72.0 ms | 34.0 ms | 2.1× |
+| `alerts_by_severity` | 43.6 ms | 27.5 ms | 1.6× |
+| `flows_by_source` | 7.5 ms | 7.6 ms | 1.0× |
+| `threat_summary` | 73.7 ms | 72.4 ms | 1.0× |
+
+Three qualifications, because the headline alone would mislead:
+
+* **The 13.5× spans two tables.** It covers the alerts table (400,075 rows)
+  *and* the packets table (2,489,798 rows), and `packets_by_source` — the host
+  detail page's packet list, a sequential scan of 2.5 M rows without its index
+  — dominates the before-side tail. Restricted to queries that touch only the
+  alerts event table, the same measurement is 80.3 ms → 68.5 ms.
+* **`threat_summary` does not improve, and cannot.** It orders by aggregates,
+  so PostgreSQL cannot stop at the `LIMIT` no matter what index exists. It
+  stays in the measured set anyway — removing a query after seeing it fail to
+  improve would be choosing the sample to fit the result — which makes the
+  headline conservative.
+* **Whole-table aggregates are unaffected**, which is why the all-28 figure
+  barely moves. Those were addressed separately by rewriting the queries
+  themselves: `/api/stats/overview` went from twelve round trips (one of them
+  a `COUNT(*)` over a million packet rows) to a single statement sourcing its
+  counters from the per-minute rollup — **629 ms → 88 ms**.
+
+### Tests, coverage, lint
+
+```
+435 tests, all passing
+89.8% statement+branch coverage over netwatch/
+ruff check: all checks passed
+```
+
+### Containers
+
+`docker compose up -d --wait` brings up PostgreSQL, applies the migrations,
+seeds the reference tables, and starts the engine and API. Verified running:
+
+```
+db      Up (healthy)
+engine  Up (healthy)     ingesting; 24,011 received / 23,817 persisted / 0 dropped
+api     Up (healthy)     /api/health -> status ok, 10 tables, schema_complete
+image   410 MB, runs as uid 10001, read-only root filesystem
+```
+
 
 ---
 

@@ -20,6 +20,16 @@ to an index scan replacing a sequential scan rather than to a warm cache.
     python -m benchmarks.query_benchmark --alerts 500000 --packets 1000000
     python -m benchmarks.query_benchmark --repeats 50
 
+Three figures are reported, and which one a claim may use depends on how the
+claim is phrased:
+
+  * p95 over the queries the composite indexes target;
+  * p95 over the subset of those that touch only the `alerts` event table,
+    which is what a per-table claim has to be measured over;
+  * p95 over every query in the suite, whole-table aggregates included, which
+    no index changes and which is reported so the headline cannot be read as
+    "everything got faster".
+
 Every number reported here is measured. Nothing is scaled, extrapolated or
 chosen in advance.
 """
@@ -52,11 +62,24 @@ from netwatch.db.repository import Repository
 #: matrices, catalog rollups, distributions. No composite index makes a
 #: GROUP BY over every row cheaper, and including them in the headline would
 #: measure something the indexes were never meant to change.
+#:
+#: INDEX_TARGETED spans two tables, so a claim phrased "on an N-row table"
+#: cannot be made from it. ALERTS_TABLE below is the subset that touches only
+#: the alerts event table, and is what such a claim should be measured over.
 INDEX_TARGETED = (
     'alerts_by_severity', 'alerts_by_threat_type', 'alerts_by_source_host',
     'alerts_unacknowledged', 'alerts_severity_and_time', 'alert_detail',
     'threat_summary', 'host_detail', 'packets_by_source',
     'packets_by_protocol', 'flows_by_source',
+)
+
+#: The index-targeted queries whose predicates and ordering are entirely
+#: against `alerts` — the event table. Reported separately so a per-table
+#: claim is measured over exactly the queries that table serves.
+ALERTS_TABLE = (
+    'alerts_by_severity', 'alerts_by_threat_type', 'alerts_by_source_host',
+    'alerts_unacknowledged', 'alerts_severity_and_time', 'alert_detail',
+    'threat_summary',
 )
 
 #: The queries behind the REST API, in the shape the API issues them.
@@ -101,8 +124,19 @@ QUERIES = [
     ('threat_type_catalog', lambda r, c: r.get_threat_types()),
 ]
 
-#: Raw SQL mirrors of the queries whose plan is worth showing. Keyed by the
-#: benchmark name above so the report can pair a latency with a plan.
+#: Raw SQL probes whose plan is worth showing, keyed by the benchmark name so
+#: the report can pair a latency with a plan.
+#:
+#: These are the *index-relevant core* of each query — its predicate and its
+#: ordering — not the whole statement the repository issues, which also joins
+#: the reference tables and counts rows for the pagination envelope. They
+#: answer "does this predicate reach its rows through an index", which is the
+#: question an index change is about. They do not answer "why is this endpoint
+#: slow"; the measured latency does that, and where the two disagree, the
+#: measurement wins. `threat_summary` is the instructive case: its ordering is
+#: over aggregates, so the LIMIT cannot terminate the scan early no matter
+#: what index exists, and the probe below includes that ordering precisely so
+#: the plan it prints is not more flattering than the query it stands for.
 EXPLAIN_SQL = {
     'alerts_by_severity': """
         SELECT a.id FROM alerts a WHERE a.severity = 'CRITICAL'
@@ -115,9 +149,13 @@ EXPLAIN_SQL = {
         SELECT a.id FROM alerts a WHERE NOT a.acknowledged
         ORDER BY a.ts DESC LIMIT 50""",
     'threat_summary': """
-        SELECT a.src_host_id, a.threat_type_id, COUNT(*)
+        SELECT a.src_host_id, a.threat_type_id, COUNT(*) AS n,
+               MIN(CASE a.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1
+                                   WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3
+                                   ELSE 4 END) AS sev_rank
         FROM alerts a WHERE a.ts > now() - interval '24 hours'
-        GROUP BY a.src_host_id, a.threat_type_id LIMIT 50""",
+        GROUP BY a.src_host_id, a.threat_type_id
+        ORDER BY sev_rank ASC, n DESC LIMIT 50""",
     'packets_by_source': """
         SELECT p.id FROM packets p
         WHERE p.src_host_id = (SELECT id FROM hosts ORDER BY id LIMIT 1)
@@ -131,7 +169,7 @@ def measure(repository, ctx, repeats, warmup=3):
         for _ in range(warmup):
             fn(repository, ctx)
 
-    per_query, pooled, targeted = {}, [], []
+    per_query, pooled, targeted, alerts_only = {}, [], [], []
     for name, fn in QUERIES:
         samples = []
         for _ in range(repeats):
@@ -142,7 +180,10 @@ def measure(repository, ctx, repeats, warmup=3):
         pooled.extend(samples)
         if name in INDEX_TARGETED:
             targeted.extend(samples)
-    return per_query, summarize(pooled), summarize(targeted)
+        if name in ALERTS_TABLE:
+            alerts_only.extend(samples)
+    return (per_query, summarize(pooled), summarize(targeted),
+            summarize(alerts_only))
 
 
 def capture_plans(engine):
@@ -235,27 +276,33 @@ def main(argv=None):
     schema_mod.analyze(engine)
     print('\n' + rule('BEFORE: %d composite indexes dropped' % len(dropped)))
     before_plans = capture_plans(engine)
-    before_per_query, before_pooled, before_targeted = measure(
-        repository, ctx, args.repeats)
+    (before_per_query, before_pooled, before_targeted,
+     before_alerts) = measure(repository, ctx, args.repeats)
     print('  all %d queries   p50 %8.2f ms   p95 %8.2f ms   p99 %8.2f ms'
           % (len(QUERIES), before_pooled['p50_ms'], before_pooled['p95_ms'],
              before_pooled['p99_ms']))
     print('  %d targeted      p50 %8.2f ms   p95 %8.2f ms   p99 %8.2f ms'
           % (len(INDEX_TARGETED), before_targeted['p50_ms'],
              before_targeted['p95_ms'], before_targeted['p99_ms']))
+    print('  %d alerts-only   p50 %8.2f ms   p95 %8.2f ms   p99 %8.2f ms'
+          % (len(ALERTS_TABLE), before_alerts['p50_ms'],
+             before_alerts['p95_ms'], before_alerts['p99_ms']))
 
     # ── AFTER ────────────────────────────────────────────────────────────────
     created = schema_mod.create_composite_indexes(engine)
     print('\n' + rule('AFTER: %d composite indexes created' % len(created)))
     after_plans = capture_plans(engine)
-    after_per_query, after_pooled, after_targeted = measure(
-        repository, ctx, args.repeats)
+    (after_per_query, after_pooled, after_targeted,
+     after_alerts) = measure(repository, ctx, args.repeats)
     print('  all %d queries   p50 %8.2f ms   p95 %8.2f ms   p99 %8.2f ms'
           % (len(QUERIES), after_pooled['p50_ms'], after_pooled['p95_ms'],
              after_pooled['p99_ms']))
     print('  %d targeted      p50 %8.2f ms   p95 %8.2f ms   p99 %8.2f ms'
           % (len(INDEX_TARGETED), after_targeted['p50_ms'],
              after_targeted['p95_ms'], after_targeted['p99_ms']))
+    print('  %d alerts-only   p50 %8.2f ms   p95 %8.2f ms   p99 %8.2f ms'
+          % (len(ALERTS_TABLE), after_alerts['p50_ms'],
+             after_alerts['p95_ms'], after_alerts['p99_ms']))
 
     # ── comparison ───────────────────────────────────────────────────────────
     print('\n' + rule('Per query (p95 ms), biggest wins first'))
@@ -290,6 +337,13 @@ def main(argv=None):
     print('    %.1f ms  ->  %.1f ms   (%.1fx)'
           % (before_targeted['p95_ms'], after_targeted['p95_ms'],
              targeted_speedup))
+    alerts_speedup = (before_alerts['p95_ms'] / after_alerts['p95_ms']
+                      if after_alerts['p95_ms'] else 0.0)
+    print('  p95 over the %d of those that query only the alerts event table'
+          % len(ALERTS_TABLE))
+    print('    %.1f ms  ->  %.1f ms   (%.1fx)  on %s alert rows'
+          % (before_alerts['p95_ms'], after_alerts['p95_ms'], alerts_speedup,
+             format(rows['alerts'], ',')))
     print('  p95 over all %d queries, aggregates included' % len(QUERIES))
     print('    %.1f ms  ->  %.1f ms   (%.1fx)'
           % (before_pooled['p95_ms'], after_pooled['p95_ms'], pooled_speedup))
@@ -305,13 +359,19 @@ def main(argv=None):
         'probe_context': ctx,
         'composite_indexes': sorted(schema_mod.composite_index_names()),
         'index_targeted_queries': list(INDEX_TARGETED),
+        'alerts_table_queries': list(ALERTS_TABLE),
         'before': {'pooled': before_pooled, 'targeted': before_targeted,
+                   'alerts_table': before_alerts,
                    'per_query': before_per_query, 'plans': before_plans},
         'after': {'pooled': after_pooled, 'targeted': after_targeted,
+                  'alerts_table': after_alerts,
                   'per_query': after_per_query, 'plans': after_plans},
         'targeted_p95_before_ms': before_targeted['p95_ms'],
         'targeted_p95_after_ms': after_targeted['p95_ms'],
         'targeted_p95_speedup': round(targeted_speedup, 2),
+        'alerts_table_p95_before_ms': before_alerts['p95_ms'],
+        'alerts_table_p95_after_ms': after_alerts['p95_ms'],
+        'alerts_table_p95_speedup': round(alerts_speedup, 2),
         'pooled_p95_speedup': round(pooled_speedup, 2),
     }
     path = write_results('query_benchmark', payload, args.json)
