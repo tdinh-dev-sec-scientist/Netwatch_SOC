@@ -1,0 +1,2048 @@
+{
+  "benchmark": "soak",
+  "environment": {
+    "generated_at": "2026-09-02T19:41:24.154332+00:00",
+    "git_revision": "6508d60",
+    "python": "3.11.15",
+    "platform": "Linux-6.18.44-fc-v22-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "cpu_count": 4,
+    "numpy": "2.4.6",
+    "total_memory_mb": 16075,
+    "postgres_version": "16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)",
+    "pg_synchronous_commit": "on",
+    "pg_shared_buffers": "128MB",
+    "pg_work_mem": "4MB",
+    "pg_max_wal_size": "1GB",
+    "pg_wal_level": "replica",
+    "pg_effective_cache_size": "4GB"
+  },
+  "settings": {
+    "database_url": null,
+    "json": null,
+    "keep_data": false,
+    "minutes": 10.0,
+    "rate": 5000.0,
+    "batch_size": 2000,
+    "persist_workers": 2,
+    "chunk_size": 256,
+    "queue_size": 16,
+    "sample_interval_s": 5.0,
+    "max_rss_mb": 1024.0,
+    "drop_on_overflow": false,
+    "seed": 7,
+    "reset": true
+  },
+  "elapsed_s": 601.488,
+  "throughput_pps": 3141.9,
+  "accounting": {
+    "frames_captured": 1889798,
+    "frames_enqueued": 1889798,
+    "packets_parsed": 1889798,
+    "packets_persisted": 1889798,
+    "packets_dropped": 0,
+    "packets_parse_failed": 0,
+    "packets_write_failed": 0,
+    "alerts_persisted": 75,
+    "in_flight": 0
+  },
+  "accounting_balanced": true,
+  "zero_dropped_frames": true,
+  "latency_end_to_end_ms": {
+    "samples": 1889798,
+    "mean_ms": 1809.6696,
+    "min_ms": 218.1402,
+    "p50_ms": 1759.7366,
+    "p95_ms": 2403.8711,
+    "p99_ms": 2576.4052,
+    "max_ms": 3000.4467
+  },
+  "resources": {
+    "available": true,
+    "peak_rss_mb": 212.16,
+    "mean_cpu_percent": 101.13,
+    "samples": 584,
+    "cpu_count": 4
+  },
+  "queues": [
+    {
+      "name": "capture->parse",
+      "capacity": 16,
+      "policy": "block",
+      "depth": 0,
+      "utilization": 0.0,
+      "high_water": 16,
+      "high_water_utilization": 1.0,
+      "chunks_enqueued": 7779,
+      "enqueued": 1889798,
+      "dequeued": 1889798,
+      "dropped": 0,
+      "block_events": 7672,
+      "blocked_s": 282.554
+    },
+    {
+      "name": "parse->rules",
+      "capacity": 16,
+      "policy": "block",
+      "depth": 0,
+      "utilization": 0.0,
+      "high_water": 4,
+      "high_water_utilization": 0.25,
+      "chunks_enqueued": 7779,
+      "enqueued": 1889798,
+      "dequeued": 1889798,
+      "dropped": 0,
+      "block_events": 0,
+      "blocked_s": 0.0
+    },
+    {
+      "name": "rules->persist",
+      "capacity": 24,
+      "policy": "block",
+      "depth": 0,
+      "utilization": 0.0,
+      "high_water": 6,
+      "high_water_utilization": 0.25,
+      "chunks_enqueued": 7779,
+      "enqueued": 1889798,
+      "dequeued": 1889798,
+      "dropped": 0,
+      "block_events": 0,
+      "blocked_s": 0.0
+    },
+    {
+      "name": "persist->serve",
+      "capacity": 256,
+      "policy": "drop",
+      "depth": 0,
+      "utilization": 0.0,
+      "high_water": 1,
+      "high_water_utilization": 0.0039,
+      "chunks_enqueued": 2132,
+      "enqueued": 2387,
+      "dequeued": 2132,
+      "dropped": 0,
+      "block_events": 0,
+      "blocked_s": 0.0
+    }
+  ],
+  "stages": [
+    {
+      "stage": "capture",
+      "workers": 1,
+      "items_in": 0,
+      "items_out": 1889798,
+      "errors": 0,
+      "busy_s": 282.9796,
+      "queue_wait_s": 0.0,
+      "service_ms": {
+        "samples": 0,
+        "mean_ms": 0.0,
+        "min_ms": 0.0,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0,
+        "p99_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "frames_captured": 1889798,
+      "frames_enqueued": 1889798,
+      "frames_dropped": 0,
+      "chunks_emitted": 7779,
+      "chunk_size": 256
+    },
+    {
+      "stage": "parse",
+      "workers": 1,
+      "items_in": 1889798,
+      "items_out": 1889798,
+      "errors": 0,
+      "busy_s": 599.3055,
+      "queue_wait_s": 1.2797,
+      "service_ms": {
+        "samples": 7779,
+        "mean_ms": 0.3277,
+        "min_ms": 0.0338,
+        "p50_ms": 0.3038,
+        "p95_ms": 0.5476,
+        "p99_ms": 0.8592,
+        "max_ms": 10.6257
+      },
+      "parse_failures": 0,
+      "parse_errors": 0
+    },
+    {
+      "stage": "rules",
+      "workers": 1,
+      "items_in": 1889798,
+      "items_out": 1889798,
+      "errors": 0,
+      "busy_s": 356.0358,
+      "queue_wait_s": 244.1542,
+      "service_ms": {
+        "samples": 7779,
+        "mean_ms": 0.1917,
+        "min_ms": 0.014,
+        "p50_ms": 0.1806,
+        "p95_ms": 0.3613,
+        "p99_ms": 0.4935,
+        "max_ms": 1.4772
+      },
+      "findings_total": 75,
+      "packets_analyzed": 1889798,
+      "detector_errors": 0
+    },
+    {
+      "stage": "persist",
+      "workers": 2,
+      "items_in": 1889798,
+      "items_out": 1889798,
+      "errors": 0,
+      "busy_s": 533.3829,
+      "queue_wait_s": 668.1951,
+      "service_ms": {
+        "samples": 7779,
+        "mean_ms": 0.2849,
+        "min_ms": 0.0001,
+        "p50_ms": 0.01,
+        "p95_ms": 1.3024,
+        "p99_ms": 1.9068,
+        "max_ms": 7.3352
+      },
+      "packets_persisted": 1889798,
+      "alerts_persisted": 75,
+      "packets_failed": 0,
+      "batches_committed": 2132,
+      "batches_failed": 0,
+      "batch_size": 2000,
+      "writer_stats": [
+        {
+          "batches_written": 1066,
+          "packets_written": 1007701,
+          "alerts_written": 40,
+          "write_seconds": 258.6157,
+          "deadlock_retries": 0,
+          "mean_batch_ms": 242.604,
+          "host_cache_entries": 0
+        },
+        {
+          "batches_written": 1066,
+          "packets_written": 882097,
+          "alerts_written": 35,
+          "write_seconds": 268.0,
+          "deadlock_retries": 0,
+          "mean_batch_ms": 251.407,
+          "host_cache_entries": 0
+        }
+      ]
+    },
+    {
+      "stage": "serve",
+      "workers": 1,
+      "items_in": 2132,
+      "items_out": 0,
+      "errors": 0,
+      "busy_s": 0.0361,
+      "queue_wait_s": 601.3572,
+      "service_ms": {
+        "samples": 2132,
+        "mean_ms": 0.0169,
+        "min_ms": 0.0084,
+        "p50_ms": 0.0154,
+        "p95_ms": 0.0259,
+        "p99_ms": 0.0519,
+        "max_ms": 0.1218
+      },
+      "feed_capacity": 500,
+      "feed_size": 75,
+      "feed_evictions": 0,
+      "batches_seen": 2132,
+      "packets_seen": 1889798,
+      "alerts_seen": 75,
+      "last_commit_at": 1788378685.6000795,
+      "packets_per_s_10s": 2340.4,
+      "alerts_per_s_10s": 0.0
+    }
+  ],
+  "samples": [
+    {
+      "at": 0.01,
+      "captured": 1,
+      "persisted": 0,
+      "dropped": 0,
+      "in_flight": 1,
+      "queue_depths": {
+        "capture->parse": 0,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 0.0,
+      "cpu_percent": 0.0
+    },
+    {
+      "at": 5.1,
+      "captured": 24870,
+      "persisted": 17315,
+      "dropped": 0,
+      "in_flight": 7555,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 100.35,
+      "cpu_percent": 102.25
+    },
+    {
+      "at": 10.18,
+      "captured": 48671,
+      "persisted": 41907,
+      "dropped": 0,
+      "in_flight": 6764,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 106.81,
+      "cpu_percent": 101.01
+    },
+    {
+      "at": 15.36,
+      "captured": 70961,
+      "persisted": 64935,
+      "dropped": 0,
+      "in_flight": 6026,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 109.37,
+      "cpu_percent": 100.81
+    },
+    {
+      "at": 20.5,
+      "captured": 91911,
+      "persisted": 85289,
+      "dropped": 0,
+      "in_flight": 6622,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 111.2,
+      "cpu_percent": 100.98
+    },
+    {
+      "at": 25.62,
+      "captured": 113910,
+      "persisted": 108039,
+      "dropped": 0,
+      "in_flight": 5871,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 113.14,
+      "cpu_percent": 100.71
+    },
+    {
+      "at": 30.78,
+      "captured": 136798,
+      "persisted": 130241,
+      "dropped": 0,
+      "in_flight": 6557,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 115.89,
+      "cpu_percent": 100.74
+    },
+    {
+      "at": 35.91,
+      "captured": 159937,
+      "persisted": 153793,
+      "dropped": 0,
+      "in_flight": 6144,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 119.09,
+      "cpu_percent": 100.85
+    },
+    {
+      "at": 41.03,
+      "captured": 183637,
+      "persisted": 176993,
+      "dropped": 0,
+      "in_flight": 6644,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 121.55,
+      "cpu_percent": 100.93
+    },
+    {
+      "at": 46.24,
+      "captured": 207019,
+      "persisted": 200533,
+      "dropped": 0,
+      "in_flight": 6486,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 123.67,
+      "cpu_percent": 101.02
+    },
+    {
+      "at": 51.36,
+      "captured": 227222,
+      "persisted": 220066,
+      "dropped": 0,
+      "in_flight": 7156,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 2,
+        "persist->serve": 0
+      },
+      "rss_mb": 125.24,
+      "cpu_percent": 100.99
+    },
+    {
+      "at": 56.5,
+      "captured": 246543,
+      "persisted": 241285,
+      "dropped": 0,
+      "in_flight": 5258,
+      "queue_depths": {
+        "capture->parse": 15,
+        "parse->rules": 1,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 127.01,
+      "cpu_percent": 100.91
+    },
+    {
+      "at": 61.52,
+      "captured": 265498,
+      "persisted": 257910,
+      "dropped": 0,
+      "in_flight": 7588,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 2,
+        "persist->serve": 0
+      },
+      "rss_mb": 127.95,
+      "cpu_percent": 100.92
+    },
+    {
+      "at": 66.64,
+      "captured": 286468,
+      "persisted": 280778,
+      "dropped": 0,
+      "in_flight": 5690,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 129.54,
+      "cpu_percent": 100.9
+    },
+    {
+      "at": 71.86,
+      "captured": 308882,
+      "persisted": 303186,
+      "dropped": 0,
+      "in_flight": 5696,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 1,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 131.38,
+      "cpu_percent": 100.91
+    },
+    {
+      "at": 77.03,
+      "captured": 329669,
+      "persisted": 323858,
+      "dropped": 0,
+      "in_flight": 5811,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 132.7,
+      "cpu_percent": 100.98
+    },
+    {
+      "at": 82.19,
+      "captured": 346584,
+      "persisted": 341236,
+      "dropped": 0,
+      "in_flight": 5348,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 134.09,
+      "cpu_percent": 100.94
+    },
+    {
+      "at": 87.38,
+      "captured": 363867,
+      "persisted": 357586,
+      "dropped": 0,
+      "in_flight": 6281,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 135.79,
+      "cpu_percent": 100.86
+    },
+    {
+      "at": 92.49,
+      "captured": 382741,
+      "persisted": 376085,
+      "dropped": 0,
+      "in_flight": 6656,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 137.25,
+      "cpu_percent": 100.87
+    },
+    {
+      "at": 97.66,
+      "captured": 402335,
+      "persisted": 395775,
+      "dropped": 0,
+      "in_flight": 6560,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 138.29,
+      "cpu_percent": 100.94
+    },
+    {
+      "at": 102.75,
+      "captured": 421001,
+      "persisted": 415491,
+      "dropped": 0,
+      "in_flight": 5510,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 140.59,
+      "cpu_percent": 100.93
+    },
+    {
+      "at": 107.85,
+      "captured": 438666,
+      "persisted": 433790,
+      "dropped": 0,
+      "in_flight": 4876,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 142.12,
+      "cpu_percent": 100.98
+    },
+    {
+      "at": 113.02,
+      "captured": 458118,
+      "persisted": 452373,
+      "dropped": 0,
+      "in_flight": 5745,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 144.12,
+      "cpu_percent": 100.97
+    },
+    {
+      "at": 118.22,
+      "captured": 477340,
+      "persisted": 472051,
+      "dropped": 0,
+      "in_flight": 5289,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 145.77,
+      "cpu_percent": 101.01
+    },
+    {
+      "at": 123.35,
+      "captured": 497045,
+      "persisted": 491236,
+      "dropped": 0,
+      "in_flight": 5809,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 147.05,
+      "cpu_percent": 101.03
+    },
+    {
+      "at": 128.52,
+      "captured": 514909,
+      "persisted": 509273,
+      "dropped": 0,
+      "in_flight": 5636,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 148.6,
+      "cpu_percent": 101.04
+    },
+    {
+      "at": 133.77,
+      "captured": 534669,
+      "persisted": 528674,
+      "dropped": 0,
+      "in_flight": 5995,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 149.38,
+      "cpu_percent": 101.04
+    },
+    {
+      "at": 138.94,
+      "captured": 552023,
+      "persisted": 545608,
+      "dropped": 0,
+      "in_flight": 6415,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 150.49,
+      "cpu_percent": 101.05
+    },
+    {
+      "at": 144.09,
+      "captured": 570364,
+      "persisted": 565184,
+      "dropped": 0,
+      "in_flight": 5180,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 152.59,
+      "cpu_percent": 101.03
+    },
+    {
+      "at": 149.31,
+      "captured": 590945,
+      "persisted": 584289,
+      "dropped": 0,
+      "in_flight": 6656,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 154.73,
+      "cpu_percent": 101.03
+    },
+    {
+      "at": 154.55,
+      "captured": 611326,
+      "persisted": 605438,
+      "dropped": 0,
+      "in_flight": 5888,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 156.41,
+      "cpu_percent": 101.07
+    },
+    {
+      "at": 159.67,
+      "captured": 631339,
+      "persisted": 625330,
+      "dropped": 0,
+      "in_flight": 6009,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 1,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 158.8,
+      "cpu_percent": 101.09
+    },
+    {
+      "at": 164.77,
+      "captured": 651200,
+      "persisted": 644564,
+      "dropped": 0,
+      "in_flight": 6636,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 159.93,
+      "cpu_percent": 101.07
+    },
+    {
+      "at": 169.92,
+      "captured": 670478,
+      "persisted": 664005,
+      "dropped": 0,
+      "in_flight": 6473,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 161.95,
+      "cpu_percent": 101.08
+    },
+    {
+      "at": 174.95,
+      "captured": 688522,
+      "persisted": 681861,
+      "dropped": 0,
+      "in_flight": 6661,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 163.77,
+      "cpu_percent": 101.05
+    },
+    {
+      "at": 180.18,
+      "captured": 706486,
+      "persisted": 701192,
+      "dropped": 0,
+      "in_flight": 5294,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 165.53,
+      "cpu_percent": 101.07
+    },
+    {
+      "at": 185.37,
+      "captured": 724046,
+      "persisted": 718516,
+      "dropped": 0,
+      "in_flight": 5530,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 165.8,
+      "cpu_percent": 101.04
+    },
+    {
+      "at": 190.64,
+      "captured": 742124,
+      "persisted": 735995,
+      "dropped": 0,
+      "in_flight": 6129,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 167.49,
+      "cpu_percent": 101.01
+    },
+    {
+      "at": 195.8,
+      "captured": 759800,
+      "persisted": 753456,
+      "dropped": 0,
+      "in_flight": 6344,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 168.82,
+      "cpu_percent": 101.04
+    },
+    {
+      "at": 200.99,
+      "captured": 777695,
+      "persisted": 771293,
+      "dropped": 0,
+      "in_flight": 6402,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 170.07,
+      "cpu_percent": 101.04
+    },
+    {
+      "at": 206.22,
+      "captured": 797841,
+      "persisted": 790501,
+      "dropped": 0,
+      "in_flight": 7340,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 171.91,
+      "cpu_percent": 101.04
+    },
+    {
+      "at": 211.36,
+      "captured": 815788,
+      "persisted": 809883,
+      "dropped": 0,
+      "in_flight": 5905,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 173.49,
+      "cpu_percent": 101.08
+    },
+    {
+      "at": 216.59,
+      "captured": 832764,
+      "persisted": 826031,
+      "dropped": 0,
+      "in_flight": 6733,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 174.71,
+      "cpu_percent": 101.09
+    },
+    {
+      "at": 221.79,
+      "captured": 848136,
+      "persisted": 841797,
+      "dropped": 0,
+      "in_flight": 6339,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 176.32,
+      "cpu_percent": 101.1
+    },
+    {
+      "at": 226.85,
+      "captured": 864388,
+      "persisted": 858383,
+      "dropped": 0,
+      "in_flight": 6005,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 177.82,
+      "cpu_percent": 101.1
+    },
+    {
+      "at": 231.99,
+      "captured": 882021,
+      "persisted": 876978,
+      "dropped": 0,
+      "in_flight": 5043,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 179.13,
+      "cpu_percent": 101.11
+    },
+    {
+      "at": 237.12,
+      "captured": 898612,
+      "persisted": 893264,
+      "dropped": 0,
+      "in_flight": 5348,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 180.52,
+      "cpu_percent": 101.13
+    },
+    {
+      "at": 242.36,
+      "captured": 915931,
+      "persisted": 910357,
+      "dropped": 0,
+      "in_flight": 5574,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 181.99,
+      "cpu_percent": 101.12
+    },
+    {
+      "at": 247.57,
+      "captured": 932327,
+      "persisted": 926843,
+      "dropped": 0,
+      "in_flight": 5484,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 183.54,
+      "cpu_percent": 101.13
+    },
+    {
+      "at": 252.8,
+      "captured": 948724,
+      "persisted": 942414,
+      "dropped": 0,
+      "in_flight": 6310,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 184.48,
+      "cpu_percent": 101.05
+    },
+    {
+      "at": 257.95,
+      "captured": 967338,
+      "persisted": 961311,
+      "dropped": 0,
+      "in_flight": 6027,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 185.62,
+      "cpu_percent": 101.05
+    },
+    {
+      "at": 263.1,
+      "captured": 985985,
+      "persisted": 979411,
+      "dropped": 0,
+      "in_flight": 6574,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 187.52,
+      "cpu_percent": 101.05
+    },
+    {
+      "at": 268.22,
+      "captured": 1003505,
+      "persisted": 997863,
+      "dropped": 0,
+      "in_flight": 5642,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 189.12,
+      "cpu_percent": 101.07
+    },
+    {
+      "at": 273.44,
+      "captured": 1021113,
+      "persisted": 1015578,
+      "dropped": 0,
+      "in_flight": 5535,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 1,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 190.56,
+      "cpu_percent": 101.07
+    },
+    {
+      "at": 278.71,
+      "captured": 1038339,
+      "persisted": 1032104,
+      "dropped": 0,
+      "in_flight": 6235,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 192.06,
+      "cpu_percent": 101.09
+    },
+    {
+      "at": 283.83,
+      "captured": 1055637,
+      "persisted": 1050571,
+      "dropped": 0,
+      "in_flight": 5066,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 193.67,
+      "cpu_percent": 101.11
+    },
+    {
+      "at": 289.05,
+      "captured": 1070845,
+      "persisted": 1065546,
+      "dropped": 0,
+      "in_flight": 5299,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 194.34,
+      "cpu_percent": 101.12
+    },
+    {
+      "at": 294.21,
+      "captured": 1086688,
+      "persisted": 1079882,
+      "dropped": 0,
+      "in_flight": 6806,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 195.89,
+      "cpu_percent": 101.1
+    },
+    {
+      "at": 299.33,
+      "captured": 1103863,
+      "persisted": 1097910,
+      "dropped": 0,
+      "in_flight": 5953,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 197.77,
+      "cpu_percent": 101.11
+    },
+    {
+      "at": 304.44,
+      "captured": 1119753,
+      "persisted": 1114420,
+      "dropped": 0,
+      "in_flight": 5333,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 198.17,
+      "cpu_percent": 101.13
+    },
+    {
+      "at": 309.64,
+      "captured": 1135341,
+      "persisted": 1129810,
+      "dropped": 0,
+      "in_flight": 5531,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 198.55,
+      "cpu_percent": 101.11
+    },
+    {
+      "at": 314.81,
+      "captured": 1150676,
+      "persisted": 1144815,
+      "dropped": 0,
+      "in_flight": 5861,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 198.75,
+      "cpu_percent": 101.11
+    },
+    {
+      "at": 319.93,
+      "captured": 1165469,
+      "persisted": 1159942,
+      "dropped": 0,
+      "in_flight": 5527,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 198.89,
+      "cpu_percent": 101.11
+    },
+    {
+      "at": 325.1,
+      "captured": 1180731,
+      "persisted": 1174711,
+      "dropped": 0,
+      "in_flight": 6020,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 199.05,
+      "cpu_percent": 101.11
+    },
+    {
+      "at": 330.29,
+      "captured": 1195297,
+      "persisted": 1190264,
+      "dropped": 0,
+      "in_flight": 5033,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 199.27,
+      "cpu_percent": 101.12
+    },
+    {
+      "at": 335.48,
+      "captured": 1209727,
+      "persisted": 1204094,
+      "dropped": 0,
+      "in_flight": 5633,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 199.3,
+      "cpu_percent": 101.12
+    },
+    {
+      "at": 340.7,
+      "captured": 1224833,
+      "persisted": 1219483,
+      "dropped": 0,
+      "in_flight": 5350,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 199.55,
+      "cpu_percent": 101.13
+    },
+    {
+      "at": 345.8,
+      "captured": 1240360,
+      "persisted": 1234883,
+      "dropped": 0,
+      "in_flight": 5477,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 200.03,
+      "cpu_percent": 101.13
+    },
+    {
+      "at": 350.97,
+      "captured": 1256024,
+      "persisted": 1250500,
+      "dropped": 0,
+      "in_flight": 5524,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 200.37,
+      "cpu_percent": 101.14
+    },
+    {
+      "at": 356.13,
+      "captured": 1271295,
+      "persisted": 1265645,
+      "dropped": 0,
+      "in_flight": 5650,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 200.95,
+      "cpu_percent": 101.14
+    },
+    {
+      "at": 361.35,
+      "captured": 1287219,
+      "persisted": 1281019,
+      "dropped": 0,
+      "in_flight": 6200,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 201.3,
+      "cpu_percent": 101.14
+    },
+    {
+      "at": 366.47,
+      "captured": 1301001,
+      "persisted": 1296212,
+      "dropped": 0,
+      "in_flight": 4789,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 201.34,
+      "cpu_percent": 101.15
+    },
+    {
+      "at": 371.64,
+      "captured": 1316094,
+      "persisted": 1311064,
+      "dropped": 0,
+      "in_flight": 5030,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 201.51,
+      "cpu_percent": 101.15
+    },
+    {
+      "at": 376.78,
+      "captured": 1329417,
+      "persisted": 1324464,
+      "dropped": 0,
+      "in_flight": 4953,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 201.59,
+      "cpu_percent": 101.14
+    },
+    {
+      "at": 382.02,
+      "captured": 1343612,
+      "persisted": 1337921,
+      "dropped": 0,
+      "in_flight": 5691,
+      "queue_depths": {
+        "capture->parse": 13,
+        "parse->rules": 4,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 201.81,
+      "cpu_percent": 101.15
+    },
+    {
+      "at": 387.2,
+      "captured": 1356620,
+      "persisted": 1351628,
+      "dropped": 0,
+      "in_flight": 4992,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 201.94,
+      "cpu_percent": 101.14
+    },
+    {
+      "at": 392.36,
+      "captured": 1371734,
+      "persisted": 1366015,
+      "dropped": 0,
+      "in_flight": 5719,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 202.16,
+      "cpu_percent": 101.14
+    },
+    {
+      "at": 397.62,
+      "captured": 1384451,
+      "persisted": 1379271,
+      "dropped": 0,
+      "in_flight": 5180,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 202.39,
+      "cpu_percent": 101.14
+    },
+    {
+      "at": 402.76,
+      "captured": 1398420,
+      "persisted": 1393535,
+      "dropped": 0,
+      "in_flight": 4885,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 1,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 202.79,
+      "cpu_percent": 101.15
+    },
+    {
+      "at": 407.84,
+      "captured": 1410504,
+      "persisted": 1405803,
+      "dropped": 0,
+      "in_flight": 4701,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 202.97,
+      "cpu_percent": 101.15
+    },
+    {
+      "at": 413.05,
+      "captured": 1425293,
+      "persisted": 1420062,
+      "dropped": 0,
+      "in_flight": 5231,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 203.44,
+      "cpu_percent": 101.16
+    },
+    {
+      "at": 418.22,
+      "captured": 1438229,
+      "persisted": 1432665,
+      "dropped": 0,
+      "in_flight": 5564,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 203.73,
+      "cpu_percent": 101.18
+    },
+    {
+      "at": 423.41,
+      "captured": 1452357,
+      "persisted": 1446739,
+      "dropped": 0,
+      "in_flight": 5618,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 204.2,
+      "cpu_percent": 101.18
+    },
+    {
+      "at": 428.43,
+      "captured": 1464689,
+      "persisted": 1458912,
+      "dropped": 0,
+      "in_flight": 5777,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 204.63,
+      "cpu_percent": 101.18
+    },
+    {
+      "at": 433.57,
+      "captured": 1479028,
+      "persisted": 1472962,
+      "dropped": 0,
+      "in_flight": 6066,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 204.99,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 438.6,
+      "captured": 1491064,
+      "persisted": 1485717,
+      "dropped": 0,
+      "in_flight": 5347,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 205.07,
+      "cpu_percent": 101.18
+    },
+    {
+      "at": 443.76,
+      "captured": 1506528,
+      "persisted": 1500192,
+      "dropped": 0,
+      "in_flight": 6336,
+      "queue_depths": {
+        "capture->parse": 15,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 205.45,
+      "cpu_percent": 101.18
+    },
+    {
+      "at": 448.94,
+      "captured": 1520873,
+      "persisted": 1515598,
+      "dropped": 0,
+      "in_flight": 5275,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 205.62,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 454.09,
+      "captured": 1533067,
+      "persisted": 1527257,
+      "dropped": 0,
+      "in_flight": 5810,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 205.7,
+      "cpu_percent": 101.2
+    },
+    {
+      "at": 459.16,
+      "captured": 1546251,
+      "persisted": 1540458,
+      "dropped": 0,
+      "in_flight": 5793,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 205.88,
+      "cpu_percent": 101.21
+    },
+    {
+      "at": 464.27,
+      "captured": 1561247,
+      "persisted": 1555449,
+      "dropped": 0,
+      "in_flight": 5798,
+      "queue_depths": {
+        "capture->parse": 15,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 206.21,
+      "cpu_percent": 101.21
+    },
+    {
+      "at": 469.35,
+      "captured": 1574185,
+      "persisted": 1568681,
+      "dropped": 0,
+      "in_flight": 5504,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 1,
+        "persist->serve": 0
+      },
+      "rss_mb": 206.51,
+      "cpu_percent": 101.22
+    },
+    {
+      "at": 474.45,
+      "captured": 1588291,
+      "persisted": 1582206,
+      "dropped": 0,
+      "in_flight": 6085,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 206.79,
+      "cpu_percent": 101.22
+    },
+    {
+      "at": 479.67,
+      "captured": 1600379,
+      "persisted": 1594691,
+      "dropped": 0,
+      "in_flight": 5688,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 207.03,
+      "cpu_percent": 101.22
+    },
+    {
+      "at": 484.82,
+      "captured": 1611764,
+      "persisted": 1606701,
+      "dropped": 0,
+      "in_flight": 5063,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 207.26,
+      "cpu_percent": 101.2
+    },
+    {
+      "at": 489.94,
+      "captured": 1623394,
+      "persisted": 1619062,
+      "dropped": 0,
+      "in_flight": 4332,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 207.4,
+      "cpu_percent": 101.21
+    },
+    {
+      "at": 495.04,
+      "captured": 1637785,
+      "persisted": 1632283,
+      "dropped": 0,
+      "in_flight": 5502,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 207.75,
+      "cpu_percent": 101.21
+    },
+    {
+      "at": 500.21,
+      "captured": 1651929,
+      "persisted": 1645577,
+      "dropped": 0,
+      "in_flight": 6352,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 207.92,
+      "cpu_percent": 101.21
+    },
+    {
+      "at": 505.33,
+      "captured": 1666659,
+      "persisted": 1660637,
+      "dropped": 0,
+      "in_flight": 6022,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 208.17,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 510.46,
+      "captured": 1680217,
+      "persisted": 1674981,
+      "dropped": 0,
+      "in_flight": 5236,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 208.34,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 515.61,
+      "captured": 1693678,
+      "persisted": 1688545,
+      "dropped": 0,
+      "in_flight": 5133,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 208.48,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 520.86,
+      "captured": 1706530,
+      "persisted": 1701067,
+      "dropped": 0,
+      "in_flight": 5463,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 208.68,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 526.02,
+      "captured": 1718836,
+      "persisted": 1714176,
+      "dropped": 0,
+      "in_flight": 4660,
+      "queue_depths": {
+        "capture->parse": 15,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 209.02,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 531.03,
+      "captured": 1731389,
+      "persisted": 1725907,
+      "dropped": 0,
+      "in_flight": 5482,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 209.53,
+      "cpu_percent": 101.2
+    },
+    {
+      "at": 536.15,
+      "captured": 1744233,
+      "persisted": 1739382,
+      "dropped": 0,
+      "in_flight": 4851,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 209.98,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 541.34,
+      "captured": 1756351,
+      "persisted": 1751165,
+      "dropped": 0,
+      "in_flight": 5186,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 210.31,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 546.56,
+      "captured": 1767895,
+      "persisted": 1762922,
+      "dropped": 0,
+      "in_flight": 4973,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 210.31,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 551.65,
+      "captured": 1779337,
+      "persisted": 1774252,
+      "dropped": 0,
+      "in_flight": 5085,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 210.36,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 556.92,
+      "captured": 1790917,
+      "persisted": 1785558,
+      "dropped": 0,
+      "in_flight": 5359,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 210.38,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 562.09,
+      "captured": 1804118,
+      "persisted": 1798722,
+      "dropped": 0,
+      "in_flight": 5396,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 210.58,
+      "cpu_percent": 101.18
+    },
+    {
+      "at": 567.1,
+      "captured": 1816882,
+      "persisted": 1810984,
+      "dropped": 0,
+      "in_flight": 5898,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 210.93,
+      "cpu_percent": 101.18
+    },
+    {
+      "at": 572.24,
+      "captured": 1829700,
+      "persisted": 1824617,
+      "dropped": 0,
+      "in_flight": 5083,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 211.02,
+      "cpu_percent": 101.19
+    },
+    {
+      "at": 577.39,
+      "captured": 1841394,
+      "persisted": 1836796,
+      "dropped": 0,
+      "in_flight": 4598,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 211.21,
+      "cpu_percent": 101.18
+    },
+    {
+      "at": 582.57,
+      "captured": 1853414,
+      "persisted": 1848870,
+      "dropped": 0,
+      "in_flight": 4544,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 211.37,
+      "cpu_percent": 101.18
+    },
+    {
+      "at": 587.78,
+      "captured": 1864025,
+      "persisted": 1858862,
+      "dropped": 0,
+      "in_flight": 5163,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 211.48,
+      "cpu_percent": 101.14
+    },
+    {
+      "at": 592.96,
+      "captured": 1874654,
+      "persisted": 1869580,
+      "dropped": 0,
+      "in_flight": 5074,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 211.74,
+      "cpu_percent": 101.13
+    },
+    {
+      "at": 598.13,
+      "captured": 1886107,
+      "persisted": 1880744,
+      "dropped": 0,
+      "in_flight": 5363,
+      "queue_depths": {
+        "capture->parse": 16,
+        "parse->rules": 0,
+        "rules->persist": 0,
+        "persist->serve": 0
+      },
+      "rss_mb": 211.99,
+      "cpu_percent": 101.14
+    }
+  ],
+  "rows_before": {
+    "alert_techniques": 0,
+    "alerts": 0,
+    "flows": 0,
+    "hosts": 0,
+    "mitre_techniques": 15,
+    "packets": 0,
+    "pipeline_runs": 0,
+    "protocol_stats": 0,
+    "protocols": 22,
+    "threat_types": 17
+  },
+  "rows_after": {
+    "alert_techniques": 79,
+    "alerts": 75,
+    "flows": 78999,
+    "hosts": 711,
+    "mitre_techniques": 15,
+    "packets": 1889798,
+    "pipeline_runs": 0,
+    "protocol_stats": 197,
+    "protocols": 22,
+    "threat_types": 17
+  },
+  "failures": []
+}

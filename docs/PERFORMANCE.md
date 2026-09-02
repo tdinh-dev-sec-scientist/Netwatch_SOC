@@ -250,3 +250,51 @@ overview:  629 ms  →  88 ms
 ```
 
 Full before/after results are in [Measured results](../Readme.MD#measured-results).
+
+---
+
+## Step 9 — what the soak found
+
+A ten-minute soak at 5,000 offered packets/sec, starting from an empty
+database:
+
+```
+Packets generated:   1,889,798
+Packets processed:   1,889,798
+Packets dropped:     0
+Packets failed:      0
+identity holds:      True
+Throughput:          3,141.9 packets/sec
+Peak memory:         212.2 MB   (100.3 -> 212.0 MB over 117 samples)
+```
+
+Two things the burst benchmark could not have shown.
+
+**Memory is bounded, and the shape proves it.** RSS rose fast and then
+flattened: +15 MB per 50 s over the first third, +2.4 MB per 50 s over the
+last. That is caches filling to their configured bounds — the writer's
+`ip -> host_id` and geo caches, the memoised `is_internal` table, SQLAlchemy's
+compiled-statement cache — not a leak, which would keep the slope constant.
+The soak test fails the run if peak RSS exceeds a configurable ceiling.
+
+**Throughput falls as the fact table grows.** Measured across the run:
+
+| window | packets/sec | `packets` rows at end of window |
+|---|---:|---:|
+| first half | 3,668 | ~950,000 |
+| second half | 2,620 | ~1,890,000 |
+
+Compare ~7,500 packets/sec on the burst benchmark, where no run appends more
+than a few hundred thousand rows. The cause is index maintenance: five indexes
+plus three foreign-key checks per packet row, over a b-tree that keeps getting
+deeper, and a heap that stops fitting in `shared_buffers`.
+
+The queue snapshot says the same thing from the other side —
+`capture->parse` sat at 16/16 for the whole run and the capture stage spent
+282 s of 601 s blocked. The source was backpressured, which is the system
+working as designed: it slowed the producer instead of losing a packet.
+
+**The identified next step is partitioning `packets` by time.** Declarative
+range partitioning keeps each partition's indexes small enough to stay
+resident, and turns retention into `DROP PARTITION` instead of a mass `DELETE`.
+It is not implemented here, and this section is where that would be measured.
