@@ -420,7 +420,7 @@ Three qualifications, because the headline alone would mislead:
 
 ```
 435 tests, all passing
-89.8% statement+branch coverage over netwatch/
+89.5% statement + branch coverage over netwatch/
 ruff check: all checks passed
 ```
 
