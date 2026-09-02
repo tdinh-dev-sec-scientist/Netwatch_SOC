@@ -1,391 +1,338 @@
-# NetWatch SOC — Network Threat Detection Platform
+# NetWatch — packet processing pipeline and REST API
 
-A network security monitoring platform: deep packet inspection over 21 protocols,
-17 modular threat detectors mapped to MITRE ATT&CK, an indexed 8-table SQLite
-store, a 24-endpoint REST API, and a 9-module analyst dashboard.
+A network security monitoring system built as a real streaming pipeline: raw
+Ethernet frames in at one end, deep packet inspection over 21 protocols, 17
+threat detectors mapped to MITRE ATT&CK, normalized persistence in PostgreSQL,
+and a REST API out the other end.
 
-## ⚙️ Architecture & Production Engineering
+```
+ capture ──► protocol parsing ──► rules evaluation ──► persistence ──► REST API
+    │             │                     │                   │              │
+ FrameSource  ProtocolAnalyzer     RulesEngine         BatchWriter     Flask + repository
+ bytes + ts   21 protocols         17 detectors        COPY into       27 endpoints,
+              flat field dict      ATT&CK-mapped       10 tables       pagination, filters
+    └── bounded queue ──┴── bounded queue ──┴── bounded queue ──┴── bounded queue ──┘
+                        backpressure propagates left
+```
 
-Netwatch SOC is engineered to transition from a local script to a hardened, containerized micro-architecture designed to overcome common edge-cases like SQLite concurrency limits.
-
-### Key Engineering Decisions:
-* **Split-Topology Design:** Solved SQLite's single-writer bottleneck by decoupling the data ingestion pipeline (Headless Engine container as the sole writer) from the API/Dashboard tier (Multiple reader processes via SQLite WAL mode).
-* **Boot-Time Safety Guards:** Implemented a custom Gunicorn worker check that aborts startup (`exit 1`) if an unsafe multi-worker configuration is deployed alongside the active simulation engine, preventing silent packet duplication and write-lock corruptions.
-* **Security Hardening (DevSecOps):** 
-  * Dropped all unnecessary Linux capabilities (`cap_drop: ALL`).
-  * Enforced a read-only root filesystem with `tmpfs` mounts.
-  * Strictly restricted `NET_RAW` and `NET_ADMIN` privileges exclusively to the packet-capturing engine.
+Every number in this file was measured on the machine described in
+[Measured results](#measured-results) by the scripts in `benchmarks/`, and the
+raw JSON each one produced is committed under `benchmarks/results/`. Nothing
+here is a target, an estimate, or a round number chosen for effect.
 
 ---
 
 ## Quick start
 
 ```bash
+# 1. a PostgreSQL to talk to
+docker compose up -d db
+
+# 2. the application
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
+export NETWATCH_DATABASE_URL=postgresql+psycopg://netwatch:netwatch@localhost:5432/netwatch
 
-python App.py                 # dashboard + live simulation → http://127.0.0.1:5001
-pytest                        # 249 tests
-python benchmark.py           # reproducible throughput + query-latency benchmark
+alembic upgrade head            # schema
+python -m netwatch.cli seed     # reference data (protocols, detectors, ATT&CK)
+
+python -m netwatch.cli engine    # the pipeline, no HTTP
+python -m netwatch.cli api       # the REST API + dashboard on :5001
 ```
 
-`NETWATCH_SIMULATE=0 python App.py` runs the API without generating traffic.
+Or the whole stack at once:
+
+```bash
+docker compose up -d --build    # postgres + migrations + engine + API
+curl -s localhost:5001/api/health | jq
+```
+
+```bash
+pytest                                   # the suite
+pytest --cov                             # with coverage
+python -m benchmarks.pipeline_benchmark  # end-to-end throughput
+python -m benchmarks.soak_test           # sustained load + loss accounting
+python -m benchmarks.query_benchmark     # index before/after at scale
+```
 
 ---
 
-## Architecture
+## The pipeline
 
-```
- frames.py ──────► ProtocolAnalyzer ──────► ThreatDetector ──────► DB_Manager ──────► App.py ──────► Dashboard.html
- (or a live       parses raw bytes         17 detectors,           8 tables,          21 REST        9 modules
-  capture)        into 21 protocols        bounded state           batched writes     endpoints
-```
+Five stages, each with its own worker pool, joined by four bounded queues.
 
-The pipeline moves **raw Ethernet frames**, not pre-labelled records. `frames.py`
-builds real wire-format bytes (correct IPv4/TCP/UDP/ICMP checksums, conformant
-DNS/TLS/SNMP/DHCP encodings) and the analyzer decodes them with no knowledge of
-how they were produced. That is what makes the DPI layer and the detectors
-independently testable — and it means swapping in a live capture changes nothing
-downstream:
-
-```python
-from scapy.all import AsyncSniffer
-AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
-```
-
-### Data flow for one packet
-
-1. **Parse** — `ProtocolAnalyzer.parse()` walks Ethernet → IPv4/IPv6/ARP →
-   TCP/UDP/ICMP → L7, returning a flat dict of extracted fields.
-2. **Detect** — `ThreatDetector.analyze()` feeds the parsed packet to all 17
-   detectors. Each keeps bounded sliding-window state and returns `Finding`
-   objects with severity, confidence, evidence and ATT&CK technique IDs.
-3. **Persist** — `PacketSimulator` buffers packets and findings, then
-   `DatabaseManager.persist_batch()` writes them in one transaction: the packet
-   row, the flow upsert, the host upsert, the protocol rollup, the alert, and
-   the alert↔technique links.
-4. **Serve** — Flask endpoints query SQLite; the dashboard renders the result.
-
-### Files
-
-| File | Role |
-|---|---|
-| `frames.py` | Wire-format frame construction (the capture-layer stand-in) |
-| `ProtocolAnalyzer.py` | Deep packet inspection: 21 protocols |
-| `detectors/` | 17 detectors, one module per threat family |
-| `ThreatDetector.py` | Engine: registry, dispatch, state expiry, introspection |
-| `mitre.py` | ATT&CK catalog with a written rationale per technique |
-| `DB_Manager.py` | 8-table schema, batched writes, all read queries |
-| `geoip.py` | Coarse prefix→country enrichment (**not** a geolocation DB) |
-| `config.py` | Every detection threshold, overridable via `NETWATCH_CONFIG` |
-| `PacketSimulator.py` | Traffic generation, attack scenarios, engine loop |
-| `App.py` | Flask app, 21 REST endpoints |
-| `benchmark.py` | Reproducible performance measurement |
-
----
-
-## Measured results
-
-Produced by `python benchmark.py` on the machine described below. Re-run it and
-you will get numbers of the same shape; absolute throughput is hardware-dependent.
-
-```
-Environment : Python 3.11.15, Linux x86_64, single-threaded
-Command     : python benchmark.py --iterations 5 --packets 20000
-Dataset     : 106,690 packets, 120 alerts, 135 technique links
-```
-
-| Claim | Target | Measured | Status |
+| Stage | Does | Workers | Why that number |
 |---|---|---|---|
-| Threat types | 15+ | **17** (all 17 proven by a scenario) | ✅ |
-| Protocols inspected | 15+ | **21** | ✅ |
-| ATT&CK techniques | 12 | **15** across 9 tactics | ✅ |
-| SQLite tables | 8 | **8**, all written by the pipeline | ✅ |
-| Indexes | — | **24**, usage asserted by `EXPLAIN QUERY PLAN` | ✅ |
-| REST endpoints | 14+ | **24** | ✅ |
-| Dashboard modules | 8+ | **9** | ✅ |
-| Throughput | 5,000 pkt/min | **286,603 pkt/min** mean (243,736–363,916) | ✅ |
-| Query latency | < 50 ms | **p50 0.11 ms · p95 0.84 ms · max 1.34 ms** | ✅ |
-| False positives | — | **0** across 240,000 benign packets, 8 seeds | ✅ |
+| `capture` | pulls `(ts, frame_bytes)` from a `FrameSource`, groups into chunks | 1 | one source, one reader |
+| `parse` | Ethernet → IP → TCP/UDP/ICMP → L7 into a flat field dict | 1 (configurable) | pure-Python CPU; more threads do not help under the GIL |
+| `rules` | every detector over every packet | 1 (configurable) | detector state is per-source sliding windows; sharding it changes what the detectors see |
+| `persist` | batches and commits to PostgreSQL | 2 (configurable) | psycopg releases the GIL on socket waits, so these genuinely overlap with parsing |
+| `serve` | maintains the live view the API reads | 1 | bookkeeping only |
 
-At a larger scale — 248,028 packets and 3,776 alerts, produced by relaxing
-detector cooldowns so more real detections are retained — latency stays within
-target: **p50 0.45 ms, p95 3.63 ms, p99 4.00 ms, max 5.60 ms**, throughput
-278,919 pkt/min.
+### Why the queues are bounded
 
-```bash
-# reproduce the scale run
-python - <<'EOF'
-import json, config
-json.dump({k: {'cooldown_s': 0} for k, v in config.DEFAULTS.items()
-           if isinstance(v, dict) and 'cooldown_s' in v}, open('lowcooldown.json','w'))
-EOF
-NETWATCH_CONFIG=lowcooldown.json python benchmark.py --iterations 6 --packets 40000
+An unbounded queue does not fail when a stage falls behind. It grows, quietly,
+until the OOM killer decides the matter. A bounded queue forces the operator to
+choose what happens instead:
+
+* **`BLOCK`** (default) — the producer waits. Slowness propagates backwards to
+  the source. Nothing is lost; the offered rate falls to what the slowest stage
+  can sustain. This is backpressure.
+* **`DROP`** — the producer gives up after a timeout and the frame is
+  **counted**. Loss is bounded, visible, and attributable to a named queue.
+  This is what you want when the source is a NIC that will not wait for you.
+
+The queue between persistence and the API-facing stage is deliberately `DROP`:
+a slow dashboard must never be able to stall the write path. Its losses are
+counted separately as feed evictions and are never conflated with packet loss.
+
+### The loss ledger
+
+Every frame the capture stage pulls off its source ends up in exactly one
+bucket, and the identity is asserted rather than assumed:
+
+```
+frames_captured == packets_persisted
+                 + packets_dropped        (a queue refused it)
+                 + packets_parse_failed   (the analyzer could not decode it)
+                 + packets_write_failed   (its batch did not commit)
 ```
 
-Throughput is measured end-to-end — parse **and** detect **and** batched
-SQLite persistence — over `--iterations` independent runs, reported as mean,
-median, min, max and standard deviation. Query latency covers all 22 queries
-that back the REST API, run against the dataset the throughput phase actually
-wrote, reported as p50/p95/p99.
+`Pipeline.verify_accounting()` checks it, `benchmarks/soak_test.py` fails the
+run if it does not hold, and `tests/test_pipeline.py` asserts it under clean
+runs, garbage input, a failing writer, and forced overflow.
 
-Reproduce with a JSON record:
+Dropped and failed are kept apart on purpose. "We are overloaded" and "we are
+being sent something we do not understand" are different incidents.
 
-```bash
-python benchmark.py --iterations 5 --packets 20000 --json results.json
+### Shutdown is a drain, not a kill
+
+`stop()` tells the capture stage to stop pulling. Capture exits, closes the
+parse queue, which ends the parse workers, which close the rules queue, and so
+on down the chain. Each stage finishes the work already in front of it, and the
+persistence stage commits its partially-filled batch on the way out. That is
+why the identity holds exactly at the end of a run, and why `docker stop`
+drains instead of discarding.
+
+---
+
+## Database
+
+Ten tables in PostgreSQL behind SQLAlchemy 2.0, migrated with Alembic.
+
+**Reference** (small, seeded per deploy, joined constantly)
+`protocols` · `threat_types` · `mitre_techniques`
+
+**Observation** (written by the pipeline)
+`hosts` · `packets` · `flows` · `alerts` · `alert_techniques`
+
+**Derived / operational**
+`protocol_stats` (per-minute rollup) · `pipeline_runs` (measured windows)
+
+`packets`, `flows` and `alerts` reference `hosts` by surrogate key rather than
+repeating a text address on every row: at a million packets that is the
+difference between storing an address once and storing it two million times,
+and it makes "everything about this host" one indexed join instead of string
+comparison across three tables. The same argument applies to `protocols` and
+`threat_types`, which additionally carry attributes — risk band, default
+severity — that would otherwise be duplicated per row or live only in Python.
+
+There is deliberately no `threats` table. A "threat" is an aggregation over
+alerts grouped by (source host, threat type); materialising it would be a
+denormalised copy of rows `alerts` already holds.
+
+### The write path
+
+The ORM's unit of work is the wrong tool for an append-only firehose: one
+INSERT round trip per packet is the pipeline stalling on the network rather
+than on PostgreSQL. So the models are declared with the ORM — they give
+migrations, constraints and typed reads — and written through SQLAlchemy Core
+plus psycopg's `COPY`. One batch is one transaction:
+
+1. upsert hosts in a single statement that both resolves surrogate ids and
+   folds the batch's counters in (`RETURNING` gives the id map the child rows
+   need, without a second round trip and without a race)
+2. `COPY` the packets
+3. upsert flows through a session-scoped staging table
+4. upsert the per-minute protocol rollup
+5. insert alerts `RETURNING` ids, their technique links, and the host
+   threat-score updates they imply
+
+Every upsert sorts its rows by the conflict key, so concurrent writers take row
+locks in the same order. Without that, two batches touching an overlapping host
+population deadlock and PostgreSQL aborts one of them — which is exactly what
+happened the first time the benchmark ran with more than one writer.
+
+---
+
+## REST API
+
+27 endpoints under `/api` (plus a self-describing index at `/api`).
+
+Conventions, applied everywhere:
+
+* **Pagination.** Collections return `total`, `count`, `limit`, `offset`,
+  `has_more`, `next_offset` alongside the named array, so a caller can page
+  without guessing when to stop.
+* **Filtering and sorting.** Sort keys and enumerated values resolve against
+  allow-lists to fixed column objects before they reach SQL. An unknown value
+  is a 400 that names what was allowed, never a SQL fragment.
+* **One error contract.** Every failure — bad parameter, missing resource,
+  unhandled exception — leaves as
+  `{"error": {"code", "message", "details"}, "status"}`. `code` is stable and
+  machine-readable; driver messages and stack traces never reach a client.
+* **Timestamps twice.** `ts` as a unix float for charting, `ts_iso` as RFC 3339
+  for humans.
+
+```
+GET  /api/health                          GET  /api/hosts
+GET  /api/stats/overview                  GET  /api/hosts/<ip>
+GET  /api/stats/throughput                GET  /api/geo
+GET  /api/stats/protocols                 GET  /api/flows
+GET  /api/stats/severity                  GET  /api/packets
+GET  /api/stats/timeline                  GET  /api/pipeline/metrics
+GET  /api/alerts                          GET  /api/pipeline/runs
+GET  /api/alerts/<id>                     GET  /api/live/alerts
+GET  /api/alerts/stats                    GET  /api/detectors
+POST /api/alerts/<id>/acknowledge         GET  /api/protocols
+POST /api/alerts/acknowledge              GET  /api/scenarios
+GET  /api/threats/summary                 GET  /api/mitre/techniques
+GET  /api/threats/types                   GET  /api/mitre/techniques/<id>
+                                          GET  /api/mitre/coverage
 ```
 
-The benchmark exits non-zero if either target is missed, so it can gate CI.
+`/api/pipeline/metrics` answers the observability questions directly, without a
+query: how many packets entered, how many were processed, how many were
+dropped, which stage is slow, how full the queues are, what the end-to-end
+latency distribution looks like, and what the process is spending in CPU and
+resident memory.
 
 ---
 
-## Detection engine — 17 threat types
+## Detection
 
-Each detector lives in its own module under `detectors/`, declares the ATT&CK
-techniques it can emit, and is tuned by one section of `config.py`.
+17 detectors over 21 decoded protocols, each mapped to MITRE ATT&CK. Nothing is
+inferred from port numbers alone — ports only choose which decoder to *attempt*,
+and every decoder validates the bytes it is given before claiming the protocol.
 
-| Threat type | Signal used | ATT&CK |
-|---|---|---|
-| `port_scan` | Distinct destination ports on one host in a window | T1046 |
-| `network_recon` | Many hosts within one /24 on a narrow port set; ICMP sweep | T1595 |
-| `brute_force` | In-protocol auth failures (FTP 530, SMTP 535, POP3 `-ERR`, IMAP `NO`, HTTP 401); SSH session bursts | T1110, T1078 |
-| `credential_attack` | Many usernames from one source; one username across many hosts; cleartext credentials | T1110, T1078 |
-| `c2_beacon` | Coefficient of variation of inter-arrival times on one channel | T1071.001 |
-| `dns_tunnel` | Oversized label **and** high entropy / TXT-NULL-ANY / volume | T1071.004, T1048 |
-| `suspicious_dns` | NXDOMAIN ratio; repeated high-entropy SLD lookups | T1071.004 |
-| `icmp_tunnel` | Oversized, high-entropy echo payloads, repeated | T1572, T1048 |
-| `protocol_tunnel` | L7 identified by signature on a mismatched port | T1572 |
-| `tls_anomaly` | Obsolete version, absent SNI, tiny cipher list (scored together) | T1573 |
-| `data_exfil` | Outbound internal→external byte volume in a window | T1041 |
-| `lateral_movement` | Internal→internal admin-service fan-out | T1021 |
-| `syn_flood` | SYN rate **and** SYN:completed-handshake ratio | T1498 |
-| `udp_flood` | UDP packet rate to one destination | T1498 |
-| `amplification` | Response:request byte ratio on NTP/DNS/SNMP | T1498.002 |
-| `http_anomaly` | SQLi / traversal / XSS / command injection / JNDI / scanner UA | T1190 |
-| `arp_spoof` | IP↔MAC binding conflict; gratuitous ARP flood | T1557.002 |
+Detector state is bounded by construction: every per-key structure prunes on
+access and is swept on a timer, so a long-running engine does not grow.
 
-### What the detectors deliberately do *not* alert on
-
-The thresholds were tuned against a benign corpus, and the negative cases are
-tested (`tests/test_detectors.py`):
-
-- Long, numerous CDN hostnames — **not** DNS tunnelling (an oversized label is
-  required, not merely high entropy and volume).
-- High SYN volume that completes its handshakes — **not** a SYN flood.
-- Large inbound downloads — **not** exfiltration (direction is checked).
-- Ordinary browsing across many networks — **not** a host sweep (targets must
-  cluster in one /24).
-- Service replies fanning out across ephemeral ports — **not** a port scan.
-- Repeated access to a single file server — **not** lateral movement (fan-out
-  across hosts is required).
-
-**Measured false-positive rate: 0 alerts across 240,000 benign packets** over
-8 independent seeds.
-
-```bash
-pytest tests/test_detectors.py::test_no_false_positives_on_benign_background
-```
-
-Every threshold is configurable without touching detection logic:
-
-```bash
-NETWATCH_CONFIG=thresholds.json python App.py
-# {"port_scan": {"distinct_ports": 30}, "c2_beacon": {"max_jitter_ratio": 0.08}}
-```
-
----
-
-## Deep packet inspection — 21 protocols
-
-Identification is **signature-first**: a protocol running on a non-standard port
-is still named correctly (and flags `nonstandard_port`, which feeds the
-tunnelling detector). Port numbers only choose which decoder to *attempt*; every
-decoder validates the bytes before claiming the protocol.
-
-| Layer | Protocol | Extracted |
-|---|---|---|
-| L2 | **Ethernet** | src/dst MAC, ethertype |
-| L2 | **ARP** | opcode, sender/target MAC+IP, gratuitous flag |
-| L3 | **IPv4** | addresses, TTL, protocol, ID, flags, fragment offset |
-| L3 | **IPv6** | addresses, hop limit, next header, flow label |
-| L4 | **TCP** | ports, flags, seq, ack, window, payload length |
-| L4 | **UDP** | ports, length |
-| L4 | **ICMP** | type, code, echo id/seq, payload length + entropy |
-| L7 | **DNS** | qname, qtype, qr, rcode, answer count, max label length, label entropy |
-| L7 | **HTTP** | method, URI, version, Host, User-Agent, status, Authorization, Content-Length |
-| L7 | **TLS** | record type, version, handshake type, **SNI**, cipher-suite count |
-| L7 | **SSH** | protocol version, software string, binary message type |
-| L7 | **FTP** | command, argument, response code |
-| L7 | **SMTP** | command, argument, response code |
-| L7 | **POP3** | command, `+OK`/`-ERR` status |
-| L7 | **IMAP** | tag, command, `OK`/`NO`/`BAD` status |
-| L7 | **SNMP** | version, community string, PDU type (BER-decoded) |
-| L7 | **NTP** | mode, version, request code, monlist + response flags |
-| L7 | **TELNET** | negotiation option count, cleartext |
-| L7 | **SMB** | dialect (SMB1/SMB2), command |
-| L7 | **RDP** | TPKT length, X.224 type, `mstshash` cookie |
-| L7 | **DHCP** | op, message type, client MAC |
-| L7 | **QUIC** | long-header flag, version, DCID length |
-
-Shannon entropy is computed for every payload and drives the tunnelling and
-exfiltration detectors.
-
-Malformed input is handled explicitly: `parse()` raises `ParseError` on frames
-too short or malformed to yield a usable L3 record, `safe_parse()` returns
-`None` and counts the failure, and truncated *upper* layers degrade gracefully —
-the packet keeps what was decoded and gains a `truncated` flag.
-
----
-
-## MITRE ATT&CK — 15 techniques
-
-`mitre.py` is the single source of truth and is loaded into the
-`mitre_techniques` table at startup. Every technique carries a written
-**rationale** explaining why the network evidence corresponds to it; the
-rationale is served by the API and shown in the dashboard, so a mapping can be
-audited rather than taken on trust.
-
-Two invariants are enforced by tests:
-
-- **No orphan techniques** — every catalogued technique is reachable from at
-  least one detector (`test_every_catalogued_technique_is_reachable_from_a_detector`).
-- **No invented IDs** — the engine refuses to start if a detector names a
-  technique missing from the catalog (`ThreatDetector._validate_technique_references`).
-
-| ID | Name | Tactic | Raised by |
-|---|---|---|---|
-| T1595 | Active Scanning | Reconnaissance | `network_recon` |
-| T1190 | Exploit Public-Facing Application | Initial Access | `http_anomaly` |
-| T1078 | Valid Accounts | Defense Evasion | `brute_force`, `credential_attack` |
-| T1110 | Brute Force | Credential Access | `brute_force`, `credential_attack` |
-| T1557.002 | ARP Cache Poisoning | Credential Access | `arp_spoof` |
-| T1046 | Network Service Discovery | Discovery | `port_scan` |
-| T1021 | Remote Services | Lateral Movement | `lateral_movement` |
-| T1071.001 | Application Layer Protocol: Web | Command and Control | `c2_beacon` |
-| T1071.004 | Application Layer Protocol: DNS | Command and Control | `dns_tunnel`, `suspicious_dns` |
-| T1572 | Protocol Tunneling | Command and Control | `icmp_tunnel`, `protocol_tunnel` |
-| T1573 | Encrypted Channel | Command and Control | `tls_anomaly` |
-| T1041 | Exfiltration Over C2 Channel | Exfiltration | `data_exfil` |
-| T1048 | Exfiltration Over Alternative Protocol | Exfiltration | `dns_tunnel`, `icmp_tunnel` |
-| T1498 | Network Denial of Service | Impact | `syn_flood`, `udp_flood` |
-| T1498.002 | Reflection Amplification | Impact | `amplification` |
-
----
-
-## Database — 8 tables
-
-Every table is written by the live pipeline; this is asserted by
-`test_all_eight_tables_are_actually_populated`.
-
-| # | Table | Purpose | Key indexes |
-|---|---|---|---|
-| 1 | `packets` | Every processed packet with decoded L7 summary | `ts`, `(src_ip,ts)`, `(dst_ip,ts)`, `(protocol,ts)`, `(is_malicious,ts)` |
-| 2 | `connections` | Flow records keyed on the 5-tuple, upserted per batch | `last_seen`, `(src_ip,last_seen)`, `bytes` |
-| 3 | `hosts` | Host inventory, geo enrichment, rollup counters, threat score | `country`, `packets_sent`, `threat_score` |
-| 4 | `alerts` | Detector findings with JSON evidence | `ts`, `(severity,ts)`, `(threat_type,ts)`, `(src_ip,ts)`, `(acknowledged,ts)` |
-| 5 | `mitre_techniques` | ATT&CK catalog (reference table) | `tactic` |
-| 6 | `alert_techniques` | Many-to-many alert↔technique with confidence | `(technique_id,ts)`, `ts` |
-| 7 | `protocol_stats` | Per-minute protocol rollup backing the charts | `bucket` |
-| 8 | `performance_metrics` | Measured throughput and query latency | `ts`, `(source,ts)` |
-
-**22 indexes.** WAL journal mode, one long-lived writer connection under a lock
-plus thread-local reader connections, and foreign keys enforced.
-
-### Design notes
-
-- **There is no `threats` table.** A "threat" is an aggregation over alerts
-  grouped by `(src_ip, threat_type)`; `get_threat_summary()` derives it with an
-  indexed query. Materialising it would duplicate data `alerts` already holds.
-  The previous schema had this table and never wrote a single row to it.
-- **`protocol_stats` is a genuine rollup, not a convenience copy.** It is what
-  keeps the throughput and protocol charts fast as `packets` grows — those
-  queries never scan the packet table. `test_protocol_stats_rollup_matches_packets`
-  asserts the rollup agrees with the raw rows.
-- **Batched writes.** One transaction per batch rather than per packet; this is
-  the single largest throughput factor.
-- **Index usage is tested, not assumed** — `test_hot_queries_use_an_index` runs
-  `EXPLAIN QUERY PLAN` over the hot queries and fails on a full table scan.
-
----
-
-## REST API — 24 endpoints
-
-All read from SQLite. Empty database returns empty collections, never filler.
-Invalid parameters return `400` with a message; unknown resources return `404`.
-
-| Method | Route | Notes |
-|---|---|---|
-| GET | `/api/health` | Schema, index count, row counts, engine state |
-| GET | `/api/stats/overview` | Live counters |
-| GET | `/api/stats/throughput` | `?minutes=1..10080` |
-| GET | `/api/stats/protocols` | `?minutes=` |
-| GET | `/api/stats/severity` | `?hours=1..720` |
-| GET | `/api/stats/timeline` | `?hours=`, `?bucket_s=` |
-| GET | `/api/alerts` | `?limit&offset&severity&threat_type&src_ip&acknowledged` |
-| GET | `/api/alerts/<id>` | Detail + techniques + related packets |
-| POST | `/api/alerts/<id>/acknowledge` | |
-| GET | `/api/alerts/stats` | Grouped by threat type |
-| GET | `/api/threats/summary` | Aggregated per source + threat type |
-| GET | `/api/threats/types` | Detector catalog joined with live counts |
-| GET | `/api/mitre/techniques` | Catalog + observed counts |
-| GET | `/api/mitre/techniques/<id>` | Detail, detectors, recent alerts |
-| GET | `/api/mitre/coverage` | Grouped by tactic |
-| GET | `/api/hosts/top` | `?order=packets_sent\|bytes_sent\|threat_score\|alert_count` |
-| GET | `/api/hosts/<ip>` | Protocols, peers, alerts |
-| GET | `/api/geo` | Country rollup |
-| GET | `/api/connections` | `?order&src_ip&limit` |
-| GET | `/api/packets` | `?protocol&src_ip&dst_ip&malicious_only` |
-| GET | `/api/performance` | Measured history + live counters |
-| GET | `/api/detectors` | Per-detector counters |
-| GET | `/api/protocols` | Supported protocols + parse counts |
-| GET | `/api/scenarios` | Replayable attack scenarios |
-
-All filters are parameterised; `test_sql_injection_in_filters_is_parameterised`
-confirms injection attempts are treated as literal values.
-
----
-
-## Dashboard — 9 modules
-
-Every module fetches from the API; there is no seeded or placeholder data in the
-template, and `test_no_hardcoded_sample_data` enforces it.
-
-1. **Threat Overview** — KPIs, throughput, severity mix, active threats
-2. **Recent Alerts** — filterable queue, acknowledge, technique chips
-3. **Threat Distribution** — alerts by type + full detector catalog
-4. **MITRE ATT&CK Coverage** — matrix by tactic, click through to technique detail
-5. **Protocol Analysis** — traffic by protocol + DPI coverage table
-6. **Source / Destination IP Analysis** — talkers, threat scores, geography, flows
-7. **Activity Trends** — stacked severity timeline, byte volume
-8. **Detection Performance** — measured throughput, query latency, DB health
-9. **Live Packet Log** — decoded L7 fields per packet
-
-Clicking an alert, host or technique opens a detail drawer showing the evidence,
-the ATT&CK mapping *with its rationale*, and the related packets.
+The rules stage dispatches by protocol. Most detectors open with a protocol
+guard and return immediately — an ARP spoofing rule has nothing to say about a
+TLS record — so calling all seventeen for every packet spent most of the stage's
+time entering and leaving functions. Each detector declares the protocols it can
+fire on; the guard stays in `inspect()` as well, so the hint can only remove
+work, never change a verdict.
 
 ---
 
 ## Testing
 
-```bash
-pytest                                  # 249 tests
-pytest tests/test_detectors.py -v       # every detector + false-positive control
-pytest tests/test_database.py -v        # schema, indexes, query plans, latency
-```
+The suite runs against a real PostgreSQL. Nothing is mocked: the schema, the
+constraints, the `COPY` write path and the query plans are all PostgreSQL
+behaviour, and a fake would only prove the fake works.
 
 | File | Covers |
 |---|---|
-| `test_protocol_analyzer.py` | Every protocol, entropy, malformed/truncated input |
-| `test_detectors.py` | Each detector fires on its scenario; negative cases; thresholds; state bounding; detector isolation |
-| `test_mitre.py` | Catalog integrity, no orphans, no invented IDs, DB linkage |
-| `test_database.py` | 8 tables populated, rollup consistency, index usage, <50 ms, transactionality |
-| `test_api.py` | All endpoints, schemas, pagination, 400/404, SQL injection |
-| `test_dashboard.py` | Each module wired to a working endpoint, escaping, no mock data |
-| `test_benchmark.py` | Determinism, targets met, results persisted |
+| `test_protocol_analyzer.py` | wire-format decoding, malformed input, entropy |
+| `test_detectors.py` | every scenario's ground truth, thresholds, false-positive control over 20k benign packets |
+| `test_mitre.py` | ATT&CK catalog integrity and alert→technique links |
+| `test_schema.py` | constraints, foreign keys, the enum, index presence, drop/recreate |
+| `test_writer.py` | batch atomicity, per-batch aggregation, concurrent writers |
+| `test_repository.py` | pagination, filtering, sorting, aggregates, query plans |
+| `test_queues.py` | capacity, backpressure, drop accounting, shutdown |
+| `test_metrics.py` | histogram accuracy (asserted within 5%), rate window |
+| `test_pipeline.py` | the loss identity under clean runs, garbage, writer failure and forced overflow; graceful drain |
+| `test_capture.py` | frame sources, determinism from a seed |
+| `test_api.py` | every route, the pagination envelope, the error contract |
+| `test_benchmarks.py` | the benchmark harness itself |
+| `test_dashboard.py` | every dashboard module is backed by a working endpoint |
+| `test_config_and_cli.py` | config merging, URL normalisation, the CLI |
 
-Fixtures are seeded (`TrafficGenerator(seed=…)` reproduces byte-identical
-traffic), and the attack scenarios double as ground truth: each has a known
-expected threat type, asserted end to end.
+Two isolation schemas inside one database: one populated once per session by
+running the real pipeline, one truncated before each test that needs a clean
+slate.
 
 ---
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push:
+
+* **lint** — `ruff check` (line length, import ordering, unused code, bug
+  patterns) and `compileall`. `ruff format` is deliberately *not* enforced;
+  this codebase aligns tables and argument lists by hand and a formatter would
+  flatten that without making anything more correct.
+* **test** — Python 3.11 and 3.12 against a `postgres:16` service container.
+  Applies the migrations, downgrades to base, applies them again, then runs the
+  suite with coverage and a floor.
+* **benchmarks** — smoke runs of all three benchmarks. A shared CI runner is
+  the wrong place to measure throughput, so this job asserts the harness still
+  runs and the loss ledger still balances; the numbers below come from the
+  documented local runs.
+* **docker** — builds the runtime image, runs the test stage inside it, brings
+  the compose stack up with `--wait`, and probes `/api/health` and
+  `/api/stats/overview` to prove the containers actually talk to each other.
+
+---
+
+## Containers
+
+Multi-stage build: `builder` resolves dependencies into a venv, `test` runs the
+suite inside the image, `runtime` ships the venv plus source with no compilers
+or package managers. Runs as a fixed unprivileged uid, on a read-only root
+filesystem, with every Linux capability dropped and privilege escalation
+blocked.
+
+The compose stack is the split topology — `db`, a one-shot `migrate`, one
+`engine` that owns ingest, and a stateless `api` tier that scales with
+`--scale api=N`. That separation is the point of moving off SQLite: with a
+single-writer file database the API had to live inside the writer's process.
+
+---
+
+## Measured results
+
+MEASURED_RESULTS_PLACEHOLDER
+
+---
+
+## Reproducing
+
+```bash
+docker compose up -d db
+export NETWATCH_DATABASE_URL=postgresql+psycopg://netwatch:netwatch@localhost:5432/netwatch
+alembic upgrade head && python -m netwatch.cli seed
+
+python -m benchmarks.pipeline_benchmark --packets 40000 --repeats 3
+python -m benchmarks.pipeline_benchmark --sweep         # the worker/batch matrix
+python -m benchmarks.soak_test --minutes 10 --rate 4000
+python -m benchmarks.query_benchmark --alerts 400000 --packets 600000
+```
+
+Workloads are seeded, so `--seed` reproduces byte-identical traffic. Each run
+writes JSON to `benchmarks/results/` recording the machine, the PostgreSQL
+settings in force (including `synchronous_commit`), and every number reported.
+
+---
+
+## Honest limitations
+
+* **Traffic is synthetic.** `TrafficGenerator` builds real wire-format frames
+  with correct checksums and conformant protocol encodings, and nothing
+  downstream knows they were generated — but they are not a packet capture from
+  a real network. Substituting a live source is a `FrameSource` subclass; the
+  throughput numbers would then also depend on the NIC and the capture path.
+* **Throughput is bound by Python, not by PostgreSQL.** Parsing and rule
+  evaluation are pure-Python CPU work under the GIL. Adding parse threads does
+  not help, and the honest way to scale the CPU stages is more pipeline
+  processes, not more threads.
+* **The API has no authentication or rate limiting.** Ports bind to loopback
+  by default; put a reverse proxy in front before exposing it.
+* **Alerts for the database benchmark are loaded synthetically.** Real
+  detectors have cooldowns precisely so one attack does not become ten thousand
+  duplicate rows, so measuring index behaviour at hundreds of thousands of rows
+  needs a loader (`netwatch/db/seed.py`). It is structurally faithful — same
+  foreign keys, same severity and threat-type mix, skewed source distribution —
+  but it is generated, and the benchmark says so.

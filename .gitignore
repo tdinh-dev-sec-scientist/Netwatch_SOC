@@ -1,12 +1,27 @@
 __pycache__/
 *.pyc
+*.pyo
 .venv/
-.venv_fresh/
 venv/
 .DS_Store
-netwatch.db
-netwatch.db-wal
-netwatch.db-shm
-benchmark_results.json
-results.json
+
+# Coverage and test artefacts
 .pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+junit.xml
+
+# Local overrides and credentials
+.env
+.env.*
+docker-compose.override.yml
+
+# Legacy SQLite artefacts from before the PostgreSQL migration
+*.db
+*.db-wal
+*.db-shm
+
+# Benchmark results are committed on purpose — every number in the README has
+# its raw JSON next to it — so nothing under benchmarks/results/ is ignored.
