@@ -154,7 +154,7 @@ class SuspiciousDNSDetector(Detector):
         qname = pkt.get('dns_qname')
         if not qname:
             return findings
-        labels = [l for l in qname.split('.') if l]
+        labels = [part for part in qname.split('.') if part]
         if len(labels) < 2:
             return findings
         sld = labels[-2]

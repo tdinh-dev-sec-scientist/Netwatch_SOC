@@ -44,7 +44,7 @@ class C2BeaconDetector(Detector):
             return []
 
         stamps = list(self._channels.timestamps(key))
-        intervals = [b - a for a, b in zip(stamps, stamps[1:])]
+        intervals = [b - a for a, b in zip(stamps, stamps[1:], strict=False)]
         if len(intervals) < self.cfg['min_callbacks'] - 1:
             return []
 

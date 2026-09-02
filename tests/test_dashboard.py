@@ -7,7 +7,7 @@ import pytest
 
 TEMPLATE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'templates', 'Dashboard.html')
+    'netwatch', 'templates', 'Dashboard.html')
 
 # Module id in the template -> the endpoints its loader calls.
 MODULES = {
@@ -17,9 +17,10 @@ MODULES = {
     'threats': ['/api/threats/types', '/api/alerts/stats'],
     'mitre': ['/api/mitre/coverage', '/api/mitre/techniques'],
     'protocols': ['/api/stats/protocols', '/api/protocols'],
-    'hosts': ['/api/hosts/top', '/api/geo', '/api/connections'],
+    'hosts': ['/api/hosts', '/api/geo', '/api/flows'],
     'timeline': ['/api/stats/timeline', '/api/stats/throughput'],
-    'performance': ['/api/performance', '/api/health'],
+    'performance': ['/api/pipeline/runs', '/api/health',
+                    '/api/pipeline/metrics'],
     'packets': ['/api/packets'],
 }
 

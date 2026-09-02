@@ -20,8 +20,21 @@ chooses which:
 
 Every drop is counted. Nothing in this module discards an item without
 incrementing a counter that the pipeline's accounting identity checks.
+
+**Queues carry chunks, not single packets.** Profiling the first working
+version found the pipeline capped at ~3,500 packets/sec with the database
+replaced by a no-op writer: almost all of the time was the producer/consumer
+handshake itself. One `queue.Queue` put and get per packet per boundary is
+six lock acquisitions and, once a queue is full, roughly one futex sleep and
+wake per packet — which dwarfs the ~27 microseconds it takes to parse one.
+Passing lists of packets amortises each synchronisation over the whole chunk.
+
+Capacity is therefore counted in chunks, while `enqueued`, `dequeued` and
+`dropped` are counted in packets, because the loss ledger has to balance in
+packets. `put()` takes the item's weight for exactly that reason.
 """
 
+import contextlib
 import queue
 import threading
 import time
@@ -54,23 +67,27 @@ class BoundedStageQueue:
         if capacity < 1:
             raise ValueError('queue capacity must be >= 1')
         self.name = name
-        self.capacity = capacity
+        self.capacity = capacity          # in chunks
         self.policy = policy
         self.put_timeout_s = put_timeout_s
         self._q = queue.Queue(maxsize=capacity)
         self._lock = threading.Lock()
         self._closed = threading.Event()
-        self.enqueued = 0
+        self.enqueued = 0                 # in packets
         self.dequeued = 0
         self.dropped = 0
+        self.chunks_enqueued = 0
         self.block_events = 0
         self.blocked_ns = 0
         self.high_water = 0
 
     # ── producer side ────────────────────────────────────────────────────────
 
-    def put(self, item):
+    def put(self, item, weight=1):
         """Enqueue `item`. Returns True if accepted, False if dropped.
+
+        `weight` is how many packets the item represents, so the counters
+        stay in packets even though the capacity is in chunks.
 
         Under BLOCK this waits as long as it takes, retrying around the
         timeout so a closing pipeline can still interrupt it. Under DROP it
@@ -79,11 +96,11 @@ class BoundedStageQueue:
         try:
             self._q.put_nowait(item)
         except queue.Full:
-            return self._put_slow(item)
-        self._after_put()
+            return self._put_slow(item, weight)
+        self._after_put(weight)
         return True
 
-    def _put_slow(self, item):
+    def _put_slow(self, item, weight=1):
         started = time.perf_counter_ns()
         with self._lock:
             self.block_events += 1
@@ -97,7 +114,7 @@ class BoundedStageQueue:
                         # here is what lets a shutdown interrupt backpressure
                         # instead of deadlocking on it.
                         with self._lock:
-                            self.dropped += 1
+                            self.dropped += weight
                         return False
                     try:
                         self._q.put(item, timeout=self.put_timeout_s)
@@ -106,20 +123,20 @@ class BoundedStageQueue:
                         continue
         except queue.Full:
             with self._lock:
-                self.dropped += 1
+                self.dropped += weight
                 self.blocked_ns += time.perf_counter_ns() - started
             return False
         with self._lock:
             self.blocked_ns += time.perf_counter_ns() - started
-        self._after_put()
+        self._after_put(weight)
         return True
 
-    def _after_put(self):
+    def _after_put(self, weight=1):
         with self._lock:
-            self.enqueued += 1
+            self.enqueued += weight
+            self.chunks_enqueued += 1
             depth = self._q.qsize()
-            if depth > self.high_water:
-                self.high_water = depth
+            self.high_water = max(self.high_water, depth)
 
     # ── consumer side ────────────────────────────────────────────────────────
 
@@ -138,7 +155,7 @@ class BoundedStageQueue:
         if item is _SENTINEL:
             raise Closed
         with self._lock:
-            self.dequeued += 1
+            self.dequeued += len(item) if isinstance(item, list) else 1
         return item
 
     # ── lifecycle ────────────────────────────────────────────────────────────
@@ -147,12 +164,10 @@ class BoundedStageQueue:
         """Signal end-of-stream to `consumers` waiting workers."""
         self._closed.set()
         for _ in range(consumers):
-            try:
+            # Consumers also exit on the closed flag once drained, so a
+            # full queue at shutdown is survivable, not a hang.
+            with contextlib.suppress(queue.Full):
                 self._q.put(_SENTINEL, timeout=2.0)
-            except queue.Full:
-                # Consumers also exit on the closed flag once drained, so a
-                # full queue at shutdown is survivable, not a hang.
-                pass
 
     @property
     def closed(self):
@@ -173,6 +188,7 @@ class BoundedStageQueue:
             'utilization': self.utilization(),
             'high_water': self.high_water,
             'high_water_utilization': round(self.high_water / self.capacity, 4),
+            'chunks_enqueued': self.chunks_enqueued,
             'enqueued': self.enqueued,
             'dequeued': self.dequeued,
             'dropped': self.dropped,

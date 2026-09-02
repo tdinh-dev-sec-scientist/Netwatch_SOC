@@ -43,10 +43,8 @@ class Histogram:
     def record(self, value_ms):
         self.count += 1
         self.total += value_ms
-        if value_ms < self.min_ms:
-            self.min_ms = value_ms
-        if value_ms > self.max_ms:
-            self.max_ms = value_ms
+        self.min_ms = min(self.min_ms, value_ms)
+        self.max_ms = max(self.max_ms, value_ms)
         if value_ms <= _MIN_MS:
             idx = 0
         else:

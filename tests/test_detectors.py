@@ -3,15 +3,13 @@
 import collections
 
 import pytest
+from conftest import BASE_TS, SEED, run_scenario
 
 from netwatch import config as config_module
-from netwatch import detectors
-from netwatch.capture import frames as F
-from netwatch import mitre
-from netwatch.capture.generator import TrafficGenerator
+from netwatch import detectors, mitre
 from netwatch.analysis.rules import ThreatDetector
-
-from conftest import BASE_TS, SEED, run_scenario
+from netwatch.capture import frames as F
+from netwatch.capture.generator import TrafficGenerator
 
 ALL_SCENARIOS = sorted(TrafficGenerator.SCENARIOS)
 

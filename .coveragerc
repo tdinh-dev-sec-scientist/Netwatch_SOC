@@ -1,0 +1,13 @@
+[run]
+branch = True
+source = netwatch
+omit =
+    netwatch/templates/*
+
+[report]
+precision = 1
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if __name__ == .__main__.:

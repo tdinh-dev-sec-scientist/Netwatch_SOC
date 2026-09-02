@@ -177,5 +177,5 @@ def load(path=None):
     path = path or os.environ.get('NETWATCH_CONFIG')
     if not path:
         return copy.deepcopy(DEFAULTS)
-    with open(path, 'r', encoding='utf-8') as fh:
+    with open(path, encoding='utf-8') as fh:
         return _deep_merge(DEFAULTS, json.load(fh))

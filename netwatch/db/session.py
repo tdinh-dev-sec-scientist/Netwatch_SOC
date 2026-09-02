@@ -12,14 +12,23 @@ connection" and "opens a TCP connection and re-authenticates per query".
 import os
 import threading
 
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool, QueuePool
 
 DEFAULT_URL = 'postgresql+psycopg://netwatch:netwatch@localhost:5432/netwatch'
 
-# See the note in _on_connect. 'off' by default because this is a telemetry
-# ingest workload; every benchmark records the value it ran under.
-SYNCHRONOUS_COMMIT = os.environ.get('NETWATCH_SYNCHRONOUS_COMMIT', 'off')
+#: PostgreSQL's `synchronous_commit`. Left at the server's own default ('on')
+#: unless explicitly overridden.
+#:
+#: Turning it off is a real and legitimate tuning knob for a telemetry
+#: firehose — the server acknowledges a commit before the WAL record reaches
+#: disk, trading a bounded window (a few hundred milliseconds) of the most
+#: recent packets for ingest throughput. It is *not* the default here for two
+#: reasons: measured end-to-end, this pipeline is bound by Python CPU rather
+#: than by WAL flushes, so the gain is small; and a benchmark number obtained
+#: by weakening durability, without saying so, is not a number worth quoting.
+#: Every benchmark records the value it actually ran under.
+SYNCHRONOUS_COMMIT = os.environ.get('NETWATCH_SYNCHRONOUS_COMMIT', '')
 
 _lock = threading.Lock()
 _engines = {}
@@ -53,12 +62,21 @@ def get_engine(url=None, pool_size=None, max_overflow=None, echo=False,
             return engine
 
         pool_size = int(pool_size if pool_size is not None
-                        else os.environ.get('NETWATCH_DB_POOL_SIZE', 10))
+                        else os.environ.get('NETWATCH_DB_POOL_SIZE', '10'))
         max_overflow = int(max_overflow if max_overflow is not None
-                           else os.environ.get('NETWATCH_DB_MAX_OVERFLOW', 10))
-        connect_args = {'prepare_threshold': 5}
+                           else os.environ.get('NETWATCH_DB_MAX_OVERFLOW', '10'))
+        # Session settings go through libpq's `options` parameter rather than
+        # a pool event: they are then part of the connection handshake, they
+        # apply to every connection the pool ever opens, and they are visible
+        # in the URL/engine configuration instead of hidden in a listener that
+        # can silently fail to attach.
+        settings = ['-c', 'timezone=UTC']
         if schema:
-            connect_args['options'] = '-csearch_path=%s' % schema
+            settings += ['-c', 'search_path=%s' % schema]
+        if SYNCHRONOUS_COMMIT:
+            settings += ['-c', 'synchronous_commit=%s' % SYNCHRONOUS_COMMIT]
+        connect_args = {'prepare_threshold': 5,
+                        'options': ' '.join(settings)}
         # Round-trips dominate the write path, so ask psycopg to keep
         # server-side prepared plans warm after a statement repeats.
         kwargs = {
@@ -104,19 +122,3 @@ def wait_for_database(url=None, timeout_s=60.0, interval_s=0.5):
             time.sleep(interval_s)
     raise RuntimeError('database not reachable within %.0fs: %s'
                        % (timeout_s, last))
-
-
-@event.listens_for(QueuePool, 'connect')
-def _on_connect(dbapi_conn, _record):
-    """Per-connection session settings applied once, not per query."""
-    with dbapi_conn.cursor() as cur:
-        cur.execute("SET TIME ZONE 'UTC'")
-        # Packet telemetry is an append-only firehose: letting the server
-        # acknowledge a commit before the WAL record reaches disk trades a
-        # bounded window (a few hundred ms) of the most recent packets for a
-        # large ingest gain. That trade is right for telemetry and wrong for,
-        # say, payments, so it is a named setting rather than a hidden one.
-        # Set NETWATCH_SYNCHRONOUS_COMMIT=on to get PostgreSQL's default back;
-        # the benchmarks report whichever value was in force.
-        cur.execute('SET synchronous_commit TO %s'
-                    % ('on' if SYNCHRONOUS_COMMIT == 'on' else 'off'))

@@ -48,7 +48,6 @@ and without the composite indexes defined at the bottom of this module.
 import datetime as dt
 
 from sqlalchemy import (
-    text as sa_text,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -64,6 +63,9 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy import (
+    text as sa_text,
+)
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -78,7 +80,7 @@ TS = DateTime(timezone=True)
 
 
 def utcnow():
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 class Base(DeclarativeBase):
@@ -419,6 +421,14 @@ COMPOSITE_INDEXES = {
     # /api/alerts?acknowledged=false — the SOC triage queue.
     'ix_alerts_ack_ts':
         Index('ix_alerts_ack_ts', Alert.acknowledged, Alert.ts.desc()),
+    # The dashboard's "open criticals" counter. A partial index: it holds
+    # only the rows the counter is about, so it stays small no matter how
+    # many alerts accumulate, and the count is an index-only scan over a few
+    # thousand entries instead of a filter over every alert.
+    'ix_alerts_open_critical':
+        Index('ix_alerts_open_critical', Alert.ts.desc(),
+              postgresql_where=(Alert.severity == 'CRITICAL')
+              & (Alert.acknowledged.is_(False))),
     # The threat summary groups by (src_host_id, threat_type_id) over a time
     # window; leading with ts lets the window restrict the scan first.
     'ix_alerts_ts_src_type':

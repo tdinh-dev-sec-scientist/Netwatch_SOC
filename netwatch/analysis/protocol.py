@@ -38,6 +38,7 @@ Payload entropy is computed for every packet carrying an L4 payload and is used
 by the tunneling/exfiltration detectors.
 """
 
+import contextlib
 import math
 import struct
 
@@ -448,7 +449,7 @@ class ProtocolAnalyzer:
         if labels:
             qname = b'.'.join(labels)
             pkt['dns_qname'] = qname.decode('ascii', 'replace')
-            pkt['dns_max_label_len'] = max(len(l) for l in labels)
+            pkt['dns_max_label_len'] = max(len(label) for label in labels)
             pkt['dns_label_count'] = len(labels)
             # Entropy of the encoded portion, excluding the registrable domain,
             # is what separates tunneled payload from ordinary hostnames.
@@ -500,10 +501,8 @@ class ProtocolAnalyzer:
             elif name == b'authorization':
                 pkt['http_auth'] = value
             elif name == b'content-length':
-                try:
+                with contextlib.suppress(ValueError):
                     pkt['http_content_len'] = int(value)
-                except ValueError:
-                    pass
             elif name == b'cookie':
                 pkt['http_cookie_len'] = len(value)
         pkt['http_header_len'] = line_end
@@ -512,8 +511,8 @@ class ProtocolAnalyzer:
     def _dec_tls(self, pkt, p):
         if len(p) < 5 or p[1] != 0x03:
             return False
-        rtype, ver_major, ver_minor, rlen = p[0], p[1], p[2], \
-            struct.unpack('!H', p[3:5])[0]
+        # p[1] is the record-layer major version, already checked above.
+        rtype, ver_minor, rlen = p[0], p[2], struct.unpack('!H', p[3:5])[0]
         if rtype not in (20, 21, 22, 23):
             return False
         pkt['tls_record_type'] = rtype

@@ -19,11 +19,13 @@ make cheap.
 """
 
 import datetime as dt
+import decimal
 import time
 
-from sqlalchemy import Integer, and_, desc, func, or_, select, text, update
+from sqlalchemy import Integer, and_, desc, func, select, text, update
 
 from netwatch.db.models import (
+    TABLES,
     Alert,
     AlertTechnique,
     Flow,
@@ -33,11 +35,10 @@ from netwatch.db.models import (
     PipelineRun,
     Protocol,
     ProtocolStat,
-    TABLES,
     ThreatType,
 )
 
-UTC = dt.timezone.utc
+UTC = dt.UTC
 
 
 def _dt(epoch):
@@ -60,6 +61,12 @@ def _row(mapping):
         if isinstance(value, dt.datetime):
             out[key] = value.timestamp()
             out[key + '_iso'] = value.isoformat()
+        elif isinstance(value, decimal.Decimal):
+            # SUM() over bigint returns numeric, which Flask serialises as a
+            # string. Callers doing arithmetic on a count should not have to
+            # know that.
+            out[key] = int(value) if value == value.to_integral_value() \
+                else float(value)
         else:
             out[key] = value
     return out
@@ -165,44 +172,66 @@ class Repository:
 
     # ── aggregate statistics ─────────────────────────────────────────────────
 
+    #: The dashboard header needs "how many packets have we seen", and an
+    #: exact COUNT(*) over the packets table is a full scan that gets slower
+    #: every minute the pipeline runs — it measured at hundreds of
+    #: milliseconds on a million rows and was the single slowest thing the API
+    #: did. The answer is already maintained exactly, in `protocol_stats`:
+    #: every batch writes its per-minute rollup in the same transaction as the
+    #: packets themselves, so summing that table is the same number read from
+    #: a few dozen rows instead of a few million. That is what the rollup is
+    #: for, and it is why the counter is exact rather than estimated.
+    _OVERVIEW_SQL = text("""
+        SELECT
+          (SELECT COALESCE(SUM(packets), 0) FROM protocol_stats)
+                                                            AS total_packets,
+          (SELECT COALESCE(SUM(packets), 0) FROM protocol_stats
+             WHERE bucket > :hour)                          AS packets_last_hour,
+          (SELECT COALESCE(AVG(pm), 0) FROM (
+              SELECT SUM(packets) AS pm FROM protocol_stats
+              WHERE bucket > :ten_min GROUP BY bucket) s)   AS packets_per_min,
+          (SELECT COUNT(*) FROM alerts)                     AS total_alerts,
+          (SELECT COUNT(*) FROM alerts WHERE ts > :day)     AS alerts_24h,
+          (SELECT COUNT(*) FROM alerts
+             WHERE severity = 'CRITICAL' AND NOT acknowledged)
+                                                            AS critical_open,
+          (SELECT COUNT(*) FROM alerts WHERE NOT acknowledged)
+                                                            AS unacknowledged,
+          (SELECT COUNT(*) FROM threat_types tt WHERE EXISTS (
+              SELECT 1 FROM alerts a WHERE a.threat_type_id = tt.id))
+                                                            AS distinct_threat_types,
+          (SELECT COUNT(*) FROM mitre_techniques t WHERE EXISTS (
+              SELECT 1 FROM alert_techniques at
+               WHERE at.technique_id = t.technique_id))
+                                                            AS techniques_observed,
+          (SELECT COUNT(*) FROM hosts)                      AS hosts_tracked,
+          (SELECT COUNT(*) FROM flows WHERE last_seen > :five_min)
+                                                            AS active_flows,
+          (SELECT COALESCE(AVG(confidence), 0) FROM alerts WHERE ts > :day)
+                                                            AS mean_confidence
+    """)
+
     def get_overview(self):
+        """The dashboard header, in one round trip.
+
+        Previously twelve separate scalar queries, each with its own round
+        trip and its own scan. Folding them into correlated subqueries in a
+        single statement lets PostgreSQL plan them together and cuts the
+        network cost by a factor of twelve. `COUNT(DISTINCT ...)` over the
+        alert and technique-link tables became `EXISTS` probes against the
+        small catalog tables, which is the same answer read from the other
+        side of the join — seventeen index probes instead of a scan of every
+        alert.
+        """
         now = time.time()
-        hour, day = _dt(now - 3600), _dt(now - 86400)
-        with self.engine.connect() as conn:
-            scalar = lambda s, p=None: conn.execute(s, p or {}).scalar()  # noqa: E731
-            return {
-                'total_packets': scalar(select(func.count()).select_from(Packet)),
-                'packets_last_hour': scalar(
-                    select(func.count()).select_from(Packet)
-                    .where(Packet.ts > hour)),
-                'packets_per_min': round(scalar(text("""
-                    SELECT AVG(pm) FROM (
-                      SELECT SUM(packets) AS pm FROM protocol_stats
-                      WHERE bucket > now() - interval '10 minutes'
-                      GROUP BY bucket) s""")) or 0.0, 1),
-                'total_alerts': scalar(select(func.count()).select_from(Alert)),
-                'alerts_24h': scalar(select(func.count()).select_from(Alert)
-                                     .where(Alert.ts > day)),
-                'critical_open': scalar(
-                    select(func.count()).select_from(Alert)
-                    .where(Alert.severity == 'CRITICAL',
-                           Alert.acknowledged.is_(False))),
-                'unacknowledged': scalar(
-                    select(func.count()).select_from(Alert)
-                    .where(Alert.acknowledged.is_(False))),
-                'distinct_threat_types': scalar(
-                    select(func.count(func.distinct(Alert.threat_type_id)))),
-                'techniques_observed': scalar(
-                    select(func.count(func.distinct(
-                        AlertTechnique.technique_id)))),
-                'hosts_tracked': scalar(select(func.count()).select_from(Host)),
-                'active_flows': scalar(
-                    select(func.count()).select_from(Flow)
-                    .where(Flow.last_seen > _dt(now - 300))),
-                'mean_confidence': round(scalar(
-                    select(func.avg(Alert.confidence))
-                    .where(Alert.ts > day)) or 0.0, 3),
-            }
+        row = self._one(self._OVERVIEW_SQL, {
+            'hour': _dt(now - 3600), 'day': _dt(now - 86400),
+            'ten_min': _dt(now - 600), 'five_min': _dt(now - 300)})
+        # SUM() over a bigint column comes back as Decimal, which is not
+        # JSON-serialisable; the rest are already ints.
+        row['packets_per_min'] = round(float(row['packets_per_min']), 1)
+        row['mean_confidence'] = round(float(row['mean_confidence']), 3)
+        return row
 
     def get_throughput(self, minutes=60):
         stmt = (select(ProtocolStat.bucket.label('bucket'),

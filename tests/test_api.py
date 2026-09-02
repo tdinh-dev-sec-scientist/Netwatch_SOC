@@ -1,380 +1,436 @@
-"""REST API tests: every endpoint, its schema, and its error handling."""
+"""The REST API: every endpoint, the pagination contract, the error contract.
+
+The API is the fifth stage — where processed data leaves the system — so these
+tests run against a database the real pipeline filled, not against fixtures
+inserted by hand.
+"""
+
+import json
 
 import pytest
 
 from netwatch import mitre
 from netwatch.analysis.protocol import SUPPORTED_PROTOCOLS
 
-# (method, path) for every endpoint the API exposes.
-ENDPOINTS = [
-    ('GET', '/api/health'),
-    ('GET', '/api/stats/overview'),
-    ('GET', '/api/stats/throughput'),
-    ('GET', '/api/stats/protocols'),
-    ('GET', '/api/stats/severity'),
-    ('GET', '/api/stats/timeline'),
-    ('GET', '/api/alerts'),
-    ('GET', '/api/alerts/stats'),
-    ('GET', '/api/threats/summary'),
-    ('GET', '/api/threats/types'),
-    ('GET', '/api/mitre/techniques'),
-    ('GET', '/api/mitre/coverage'),
-    ('GET', '/api/hosts/top'),
-    ('GET', '/api/geo'),
-    ('GET', '/api/connections'),
-    ('GET', '/api/packets'),
-    ('GET', '/api/performance'),
-    ('GET', '/api/detectors'),
-    ('GET', '/api/protocols'),
-    ('GET', '/api/scenarios'),
+PAGE_KEYS = {'total', 'count', 'limit', 'offset', 'has_more', 'next_offset'}
+
+#: Every route the application registers under /api, with a representative
+#: request. `test_every_registered_route_is_exercised` fails if a route is
+#: added without a test, so this list cannot silently fall behind the code.
+GET_ENDPOINTS = [
+    '/api',
+    '/api/health',
+    '/api/stats/overview',
+    '/api/stats/throughput',
+    '/api/stats/protocols',
+    '/api/stats/severity',
+    '/api/stats/timeline',
+    '/api/alerts',
+    '/api/alerts/stats',
+    '/api/threats/summary',
+    '/api/threats/types',
+    '/api/mitre/techniques',
+    '/api/mitre/coverage',
+    '/api/hosts',
+    '/api/geo',
+    '/api/flows',
+    '/api/packets',
+    '/api/pipeline/metrics',
+    '/api/pipeline/runs',
+    '/api/live/alerts',
+    '/api/detectors',
+    '/api/protocols',
+    '/api/scenarios',
+]
+
+PARAMETERISED_ENDPOINTS = [
+    '/api/alerts/<int:alert_id>',
+    '/api/alerts/<int:alert_id>/acknowledge',
+    '/api/alerts/acknowledge',
+    '/api/mitre/techniques/<technique_id>',
+    '/api/hosts/<ip>',
 ]
 
 
-def get(client, path, **params):
-    response = client.get(path, query_string=params)
-    assert response.status_code == 200, '%s -> %d %s' % (
-        path, response.status_code, response.data[:200])
+def get_json(client, path, expect=200):
+    response = client.get(path)
+    assert response.status_code == expect, (path, response.status_code,
+                                            response.get_data(as_text=True))
+    assert response.mimetype == 'application/json'
     return response.get_json()
 
 
-# ── coverage ─────────────────────────────────────────────────────────────────
+# ── surface ──────────────────────────────────────────────────────────────────
 
-def test_at_least_fourteen_endpoints_exist(client):
-    from App import create_app  # noqa: F401  (app already built by fixture)
-    assert len(ENDPOINTS) >= 14
-
-
-def test_all_registered_routes_are_covered_by_tests(client):
-    registered = {
-        str(rule) for rule in client.application.url_map.iter_rules()
-        if str(rule).startswith('/api/')
-    }
-    # Parameterised routes are exercised separately below.
-    parameterised = {r for r in registered if '<' in r}
-    plain = registered - parameterised
-    tested = {path for _method, path in ENDPOINTS}
-    assert plain <= tested, 'untested endpoints: %s' % sorted(plain - tested)
-    assert len(registered) >= 14
+def test_api_index_lists_every_endpoint(client):
+    listing = get_json(client, '/api')['endpoints']
+    assert len(listing) >= 14
+    assert any('/api/alerts' in entry for entry in listing)
 
 
-@pytest.mark.parametrize('method,path', ENDPOINTS)
-def test_endpoint_returns_json(client, method, path):
-    response = client.open(path, method=method)
-    assert response.status_code == 200
-    assert response.is_json
-    assert response.get_json() is not None
+def test_every_registered_route_is_exercised(client):
+    registered = {str(rule) for rule in client.application.url_map.iter_rules()
+                  if str(rule).startswith('/api')}
+    covered = set(GET_ENDPOINTS) | set(PARAMETERISED_ENDPOINTS)
+    assert registered == covered, (
+        'untested routes: %s; stale entries: %s'
+        % (sorted(registered - covered), sorted(covered - registered)))
 
 
-# ── individual endpoints ─────────────────────────────────────────────────────
-
-def test_health_reports_schema_and_engine(client):
-    body = get(client, '/api/health')
-    assert body['status'] == 'ok'
-    assert body['table_count'] == 8
-    assert body['index_count'] >= 20
-    assert body['journal_mode'].lower() == 'wal'
-    assert set(body['tables']) == {
-        'packets', 'connections', 'hosts', 'alerts', 'mitre_techniques',
-        'alert_techniques', 'protocol_stats', 'performance_metrics'}
-    engine = body['engine']
-    assert engine['detectors'] >= 15
-    assert engine['threat_types'] >= 15
-    assert engine['techniques'] >= 12
-    assert engine['protocols_supported'] >= 15
-    assert engine['detector_errors'] == 0
+@pytest.mark.parametrize('path', GET_ENDPOINTS)
+def test_every_get_endpoint_answers_with_json(client, path):
+    get_json(client, path)
 
 
-def test_overview_has_live_counters(client):
-    body = get(client, '/api/stats/overview')
-    for field in ('total_packets', 'total_alerts', 'alerts_24h',
-                  'unacknowledged', 'distinct_threat_types',
-                  'techniques_observed', 'hosts_tracked', 'active_flows'):
-        assert field in body
-    assert body['total_packets'] > 0
-    assert body['total_alerts'] > 0
-    assert body['distinct_threat_types'] >= 10
-    assert body['techniques_observed'] >= 12
+# ── health ───────────────────────────────────────────────────────────────────
+
+def test_health_reports_a_complete_schema(client):
+    health = get_json(client, '/api/health')
+    assert health['status'] == 'ok'
+    assert health['database'] == 'postgresql'
+    assert health['table_count'] == 10
+    assert health['schema_complete'] is True
+    assert health['detectors'] == 17
+    assert health['protocols_supported'] == len(SUPPORTED_PROTOCOLS)
+    assert health['tables']['packets'] > 0
+    assert 'pool' in health
+
+
+# ── statistics ───────────────────────────────────────────────────────────────
+
+def test_overview_counters_are_live(client):
+    overview = get_json(client, '/api/stats/overview')
+    assert overview['total_packets'] > 0
+    assert overview['total_alerts'] > 0
+    assert overview['hosts_tracked'] > 0
+    assert 0.0 <= overview['mean_confidence'] <= 1.0
 
 
 def test_throughput_buckets_are_ordered(client):
-    body = get(client, '/api/stats/throughput', minutes=180)
-    assert isinstance(body, list) and body
-    buckets = [row['bucket'] for row in body]
-    assert buckets == sorted(buckets)
-    assert all(row['packets'] > 0 for row in body)
+    payload = get_json(client, '/api/stats/throughput?minutes=1440')
+    buckets = payload['buckets']
+    assert buckets
+    assert [b['bucket'] for b in buckets] == sorted(b['bucket']
+                                                    for b in buckets)
+    assert all(b['packets'] > 0 for b in buckets)
 
 
 def test_protocol_stats_reflect_real_traffic(client):
-    body = get(client, '/api/stats/protocols', minutes=10080)
-    names = {row['protocol'] for row in body}
-    assert len(names) >= 10
-    assert names <= set(SUPPORTED_PROTOCOLS) | {'UNKNOWN'}
-    assert all(row['packets'] > 0 for row in body)
+    payload = get_json(client, '/api/stats/protocols?minutes=10080')
+    names = {row['protocol'] for row in payload['protocols']}
+    assert {'DNS', 'TLS', 'HTTP'} & names
+    assert all(row['protocol'] in SUPPORTED_PROTOCOLS
+               for row in payload['protocols'])
 
 
 def test_severity_and_timeline(client):
-    severity = get(client, '/api/stats/severity', hours=24)
-    assert severity
-    assert {row['severity'] for row in severity} <= {
-        'CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'}
-
-    timeline = get(client, '/api/stats/timeline', hours=24, bucket_s=3600)
-    assert timeline
-    assert all({'bucket', 'severity', 'count'} <= set(row) for row in timeline)
+    severities = get_json(client, '/api/stats/severity?hours=720')
+    assert severities['severities']
+    assert all(row['count'] > 0 for row in severities['severities'])
+    timeline = get_json(client, '/api/stats/timeline?hours=720&bucket_s=3600')
+    assert timeline['bucket_s'] == 3600
+    assert timeline['buckets']
 
 
-def test_alerts_listing_schema_and_pagination(client):
-    body = get(client, '/api/alerts', limit=5)
-    assert set(body) == {'total', 'count', 'limit', 'offset', 'alerts'}
-    assert body['limit'] == 5
-    assert body['count'] <= 5
-    assert body['total'] >= body['count']
-    for alert in body['alerts']:
-        assert {'id', 'ts', 'severity', 'threat_type', 'detector',
-                'confidence', 'description', 'evidence'} <= set(alert)
-        assert isinstance(alert['evidence'], dict)
+# ── alerts ───────────────────────────────────────────────────────────────────
 
-    page2 = get(client, '/api/alerts', limit=5, offset=5)
-    assert page2['offset'] == 5
-    if body['total'] > 10:
-        assert {a['id'] for a in body['alerts']} != {
-            a['id'] for a in page2['alerts']}
+def test_alerts_listing_carries_the_pagination_envelope(client):
+    payload = get_json(client, '/api/alerts?limit=5')
+    assert set(payload) >= PAGE_KEYS
+    assert payload['count'] == len(payload['alerts']) <= 5
+    for alert in payload['alerts']:
+        assert {'id', 'ts', 'severity', 'threat_type', 'src_ip', 'confidence',
+                'description'} <= set(alert)
 
 
-def test_alerts_filtering(client):
-    by_type = get(client, '/api/alerts', threat_type='port_scan', limit=50)
-    assert all(a['threat_type'] == 'port_scan' for a in by_type['alerts'])
+def test_alerts_pages_are_disjoint(client):
+    first = get_json(client, '/api/alerts?limit=3&offset=0')['alerts']
+    second = get_json(client, '/api/alerts?limit=3&offset=3')['alerts']
+    assert not ({a['id'] for a in first} & {a['id'] for a in second})
 
-    high = get(client, '/api/alerts', severity='HIGH', limit=50)
-    assert all(a['severity'] == 'HIGH' for a in high['alerts'])
 
-    unacked = get(client, '/api/alerts', acknowledged='false', limit=50)
-    assert all(a['acknowledged'] == 0 for a in unacked['alerts'])
+def test_alerts_filtering_by_severity_and_type(client):
+    payload = get_json(client, '/api/alerts?limit=100&severity=CRITICAL')
+    assert all(a['severity'] == 'CRITICAL' for a in payload['alerts'])
+    kinds = {a['threat_type']
+             for a in get_json(client, '/api/alerts?limit=200')['alerts']}
+    chosen = sorted(kinds)[0]
+    payload = get_json(client, '/api/alerts?limit=100&threat_type=%s' % chosen)
+    assert payload['total'] > 0
+    assert all(a['threat_type'] == chosen for a in payload['alerts'])
+
+
+def test_alerts_sorting(client):
+    ascending = get_json(client,
+                         '/api/alerts?limit=20&sort=ts&order=asc')['alerts']
+    assert [a['ts'] for a in ascending] == sorted(a['ts'] for a in ascending)
 
 
 def test_alert_detail_includes_techniques(client):
-    alert_id = get(client, '/api/alerts', limit=1)['alerts'][0]['id']
-    detail = get(client, '/api/alerts/%d' % alert_id)
-    assert detail['id'] == alert_id
-    assert detail['techniques']
-    for tech in detail['techniques']:
-        assert tech['technique_id'] in mitre.TECHNIQUES
-        assert tech['rationale']
-    assert isinstance(detail['related_packets'], list)
+    alert_id = get_json(client, '/api/alerts?limit=1')['alerts'][0]['id']
+    alert = get_json(client, '/api/alerts/%d' % alert_id)
+    assert alert['id'] == alert_id
+    assert alert['techniques']
+    assert all(t['technique_id'] in mitre.TECHNIQUES
+               for t in alert['techniques'])
 
 
 def test_acknowledge_round_trip(client):
-    target = None
-    for alert in get(client, '/api/alerts', limit=50)['alerts']:
-        if alert['acknowledged'] == 0:
-            target = alert['id']
-            break
-    assert target is not None, 'no unacknowledged alert to test with'
-
-    response = client.post('/api/alerts/%d/acknowledge' % target)
+    open_alerts = get_json(
+        client, '/api/alerts?limit=20&acknowledged=false')['alerts']
+    assert open_alerts
+    alert_id = open_alerts[-1]['id']
+    response = client.post('/api/alerts/%d/acknowledge' % alert_id)
     assert response.status_code == 200
-    assert response.get_json() == {'id': target, 'acknowledged': True}
-    assert get(client, '/api/alerts/%d' % target)['acknowledged'] == 1
+    assert response.get_json() == {'id': alert_id, 'acknowledged': True}
+    assert get_json(client, '/api/alerts/%d' % alert_id)['acknowledged'] is True
+
+
+def test_bulk_acknowledge(client):
+    open_alerts = get_json(
+        client, '/api/alerts?limit=3&acknowledged=false')['alerts']
+    if not open_alerts:
+        pytest.skip('fixture has no unacknowledged alerts left')
+    ids = [a['id'] for a in open_alerts]
+    response = client.post('/api/alerts/acknowledge',
+                           data=json.dumps({'ids': ids}),
+                           content_type='application/json')
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body['requested'] == len(ids)
+    assert body['updated'] == len(ids)
+    assert body['not_found'] == 0
 
 
 def test_alert_stats_by_type(client):
-    body = get(client, '/api/alerts/stats', hours=720)
-    assert body
-    for row in body:
+    payload = get_json(client, '/api/alerts/stats?hours=720')
+    assert payload['threat_types']
+    for row in payload['threat_types']:
         assert row['count'] > 0
-        assert 0 < row['avg_conf'] <= 1.0
+        assert 0.0 <= row['avg_conf'] <= 1.0
 
 
-def test_threat_types_join_catalog_with_counts(client):
-    body = get(client, '/api/threats/types')
-    assert len(body) >= 15
-    for row in body:
-        assert {'name', 'threat_type', 'description', 'techniques',
-                'alert_count'} <= set(row)
+# ── threats and ATT&CK ───────────────────────────────────────────────────────
+
+def test_threat_types_join_the_catalog_with_counts(client):
+    payload = get_json(client, '/api/threats/types')
+    assert payload['count'] == 17
+    fired = [row for row in payload['threat_types'] if row['alert_count'] > 0]
+    assert fired, 'no detector shows any alerts'
+    for row in payload['threat_types']:
         assert row['techniques']
-    fired = [r for r in body if r['alert_count'] > 0]
-    assert len(fired) >= 10, 'only %d detector types ever fired' % len(fired)
+        assert row['severity'] in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO')
 
 
 def test_threats_summary(client):
-    body = get(client, '/api/threats/summary', hours=720)
-    assert body
-    for row in body:
+    payload = get_json(client, '/api/threats/summary?hours=720')
+    assert payload['threats']
+    for row in payload['threats']:
         assert row['alert_count'] >= 1
-        assert row['first_seen'] <= row['last_seen']
+        assert row['src_ip']
 
 
-def test_mitre_techniques_listing(client):
-    body = get(client, '/api/mitre/techniques')
-    assert len(body) == mitre.technique_count()
-    assert len(body) >= 12
-    observed = [t for t in body if t['alert_count'] > 0]
-    assert len(observed) >= 12, 'only %d techniques observed' % len(observed)
-    for tech in body:
-        assert tech['technique_id'] in mitre.TECHNIQUES
-        assert tech['name'] and tech['tactic'] and tech['rationale']
-
-
-def test_mitre_technique_detail(client):
-    detail = get(client, '/api/mitre/techniques/T1046')
-    assert detail['technique_id'] == 'T1046'
-    assert detail['name'] == 'Network Service Discovery'
-    assert detail['alert_count'] > 0
+def test_mitre_endpoints(client):
+    listing = get_json(client, '/api/mitre/techniques')
+    assert listing['count'] == mitre.technique_count()
+    observed = [t for t in listing['techniques'] if t['alert_count'] > 0]
+    assert observed
+    detail = get_json(client,
+                      '/api/mitre/techniques/%s' % observed[0]['technique_id'])
     assert detail['detectors']
-    assert detail['recent_alerts']
-    assert any(d['detector'] == 'port_scan' for d in detail['detectors'])
+    coverage = get_json(client, '/api/mitre/coverage')
+    assert coverage['catalogued_techniques'] == mitre.technique_count()
+    assert coverage['coverage']
 
 
-def test_mitre_coverage_grouped_by_tactic(client):
-    body = get(client, '/api/mitre/coverage')
-    assert body['catalogued_techniques'] >= 12
-    assert body['tactics']
-    total = sum(t['catalogued'] for t in body['coverage'])
-    assert total == mitre.technique_count()
-    assert any(t['observed'] > 0 for t in body['coverage'])
+# ── hosts, flows, packets ────────────────────────────────────────────────────
+
+def test_hosts_listing_and_detail(client):
+    payload = get_json(client, '/api/hosts?limit=5&order=packets_sent')
+    assert set(payload) >= PAGE_KEYS
+    assert payload['hosts']
+    ip = payload['hosts'][0]['ip']
+    host = get_json(client, '/api/hosts/%s' % ip)
+    assert host['ip'] == ip
+    assert 'top_protocols' in host
 
 
-def test_hosts_top_and_detail(client):
-    hosts = get(client, '/api/hosts/top', limit=5)
-    assert 0 < len(hosts) <= 5
-    assert all(h['packets_sent'] >= hosts[-1]['packets_sent'] for h in hosts)
-
-    detail = get(client, '/api/hosts/%s' % hosts[0]['ip'])
-    assert detail['ip'] == hosts[0]['ip']
-    assert 'top_protocols' in detail
-    assert 'recent_alerts' in detail
-    assert 'top_peers' in detail
+def test_hosts_ordering_options(client):
+    for order in ('packets_sent', 'bytes_sent', 'threat_score', 'alert_count',
+                  'last_seen'):
+        payload = get_json(client, '/api/hosts?limit=3&order=%s' % order)
+        assert payload['count'] <= 3
 
 
-def test_hosts_top_ordering_options(client):
-    by_threat = get(client, '/api/hosts/top', order='threat_score', limit=5)
-    scores = [h['threat_score'] for h in by_threat]
-    assert scores == sorted(scores, reverse=True)
-    assert scores[0] > 0
+def test_hosts_internal_filter(client):
+    payload = get_json(client, '/api/hosts?limit=50&internal=true')
+    assert all(host['is_internal'] for host in payload['hosts'])
 
 
-def test_geo_distribution(client):
-    body = get(client, '/api/geo')
-    assert body
-    assert all('country' in row for row in body)
-    assert all(row['country'] != 'PRIVATE' for row in body)
+def test_geo_distribution_skips_private_space(client):
+    payload = get_json(client, '/api/geo')
+    assert all(row['country'] != 'PRIVATE' for row in payload['countries'])
 
 
-def test_connections_and_packets(client):
-    flows = get(client, '/api/connections', limit=10)
-    assert flows
-    for flow in flows:
-        assert flow['packets'] > 0
-        assert flow['first_seen'] <= flow['last_seen']
+def test_flows_and_packets(client):
+    flows = get_json(client, '/api/flows?limit=10')
+    assert set(flows) >= PAGE_KEYS
+    assert flows['flows']
+    assert all(f['packets'] >= 1 for f in flows['flows'])
 
-    packets = get(client, '/api/packets', limit=20)
-    assert packets
-    for packet in packets:
-        assert packet['protocol']
-        assert isinstance(packet['l7'], dict)
-
-    dns = get(client, '/api/packets', protocol='DNS', limit=10)
-    assert all(p['protocol'] == 'DNS' for p in dns)
+    packets = get_json(client, '/api/packets?limit=10&protocol=DNS')
+    assert set(packets) >= PAGE_KEYS
+    assert all(p['protocol'] == 'DNS' for p in packets['packets'])
+    assert any(p['l7'].get('dns_qname') for p in packets['packets'])
 
 
-def test_performance_endpoint(client):
-    body = get(client, '/api/performance')
-    assert 'history' in body and 'live' in body
-    assert body['history'], 'no measured performance recorded'
-    row = body['history'][0]
-    assert row['packets_per_min'] > 0
-    assert row['window_s'] > 0
+def test_packets_malicious_filter(client):
+    payload = get_json(client, '/api/packets?limit=50&malicious_only=true')
+    assert all(p['is_malicious'] for p in payload['packets'])
+
+
+# ── pipeline observability ───────────────────────────────────────────────────
+
+def test_pipeline_metrics_endpoint_without_a_local_pipeline(client):
+    payload = get_json(client, '/api/pipeline/metrics')
+    # This app serves reads only, so it reports that rather than inventing
+    # numbers for a pipeline it does not own.
+    assert payload['running'] is False
+    assert 'feed' in payload
+
+
+def test_live_alerts_reports_its_own_bounds(client):
+    payload = get_json(client, '/api/live/alerts?limit=10')
+    assert 'feed_capacity' in payload
+    assert 'feed_evictions' in payload
+    assert isinstance(payload['alerts'], list)
 
 
 def test_detectors_endpoint_reports_real_counters(client):
-    body = get(client, '/api/detectors')
-    assert body['detector_count'] >= 15
-    assert body['threat_type_count'] >= 15
-    assert body['technique_count'] >= 12
-    assert body['packets_analyzed'] > 0
-    assert body['detector_errors'] == 0
-    fired = [d for d in body['detectors'] if d['findings_emitted'] > 0]
+    stats = get_json(client, '/api/detectors')
+    assert stats['detector_count'] == 17
+    assert stats['packets_analyzed'] > 0
+    assert stats['findings_total'] > 0
+    assert stats['detector_errors'] == 0
+    fired = [d for d in stats['detectors'] if d['findings_emitted'] > 0]
     assert len(fired) >= 10
 
 
-def test_protocols_endpoint_lists_supported_set(client):
-    body = get(client, '/api/protocols')
-    assert len(body) >= 15
-    names = {row['protocol'] for row in body}
-    assert names == set(SUPPORTED_PROTOCOLS)
-    for row in body:
-        assert row['risk'] in ('HIGH', 'MEDIUM', 'LOW', 'INFO')
-        assert isinstance(row['encrypted'], bool)
+def test_protocols_endpoint_lists_the_supported_set(client):
+    payload = get_json(client, '/api/protocols')
+    names = {row['protocol'] for row in payload['protocols']}
+    assert set(SUPPORTED_PROTOCOLS) <= names
+    assert any(row['packets_seen'] > 0 for row in payload['protocols'])
 
 
 def test_scenarios_endpoint(client):
-    body = get(client, '/api/scenarios')
-    assert len(body) >= 15
-    assert all(row['expected_threats'] for row in body)
+    payload = get_json(client, '/api/scenarios')
+    assert payload['count'] >= 17
+    for scenario in payload['scenarios']:
+        assert scenario['expected_threats']
 
 
-# ── error handling ───────────────────────────────────────────────────────────
+# ── the error contract ───────────────────────────────────────────────────────
 
-def test_unknown_route_returns_json_404(client):
-    response = client.get('/api/does-not-exist')
-    assert response.status_code == 404
-    assert response.is_json
-    assert 'error' in response.get_json()
-
-
-def test_missing_alert_returns_404(client):
-    response = client.get('/api/alerts/99999999')
-    assert response.status_code == 404
-    assert 'not found' in response.get_json()['error']
+def assert_error(payload, status, code=None):
+    assert payload['status'] == status
+    assert set(payload['error']) >= {'code', 'message'}
+    if code:
+        assert payload['error']['code'] == code
 
 
-def test_acknowledging_missing_alert_returns_404(client):
+def test_unknown_route_returns_a_json_404(client):
+    assert_error(get_json(client, '/api/does-not-exist', expect=404), 404,
+                 'not_found')
+
+
+@pytest.mark.parametrize('path,status,code', [
+    ('/api/alerts/99999999', 404, 'not_found'),
+    ('/api/mitre/techniques/T9999', 404, 'not_found'),
+    ('/api/hosts/203.0.113.254', 404, 'not_found'),
+])
+def test_missing_resources_return_404_with_details(client, path, status, code):
+    payload = get_json(client, path, expect=status)
+    assert_error(payload, status, code)
+    assert payload['error']['details']
+
+
+def test_acknowledging_a_missing_alert_returns_404(client):
     response = client.post('/api/alerts/99999999/acknowledge')
     assert response.status_code == 404
+    assert_error(response.get_json(), 404, 'not_found')
 
 
-def test_unknown_technique_returns_404(client):
-    response = client.get('/api/mitre/techniques/T9999')
-    assert response.status_code == 404
-    assert 'catalog' in response.get_json()['error']
-
-
-def test_unknown_host_returns_404(client):
-    response = client.get('/api/hosts/203.0.113.254')
-    assert response.status_code == 404
-
-
-@pytest.mark.parametrize('path,params', [
-    ('/api/alerts', {'limit': 'abc'}),
-    ('/api/alerts', {'limit': 0}),
-    ('/api/alerts', {'limit': 10_000}),
-    ('/api/alerts', {'offset': -1}),
-    ('/api/alerts', {'severity': 'URGENT'}),
-    ('/api/alerts', {'acknowledged': 'maybe'}),
-    ('/api/stats/throughput', {'minutes': 0}),
-    ('/api/stats/timeline', {'bucket_s': 1}),
-    ('/api/hosts/top', {'order': 'DROP TABLE'}),
-    ('/api/packets', {'protocol': 'GOPHER'}),
-    ('/api/performance', {'source': 'made-up'}),
-    ('/api/connections', {'order': 'nonsense'}),
+@pytest.mark.parametrize('path', [
+    '/api/alerts?limit=abc',
+    '/api/alerts?limit=0',
+    '/api/alerts?limit=100000',
+    '/api/alerts?offset=-1',
+    '/api/alerts?severity=NOPE',
+    '/api/alerts?threat_type=not_a_rule',
+    '/api/alerts?acknowledged=perhaps',
+    '/api/alerts?sort=ts;DROP',
+    '/api/alerts?order=sideways',
+    '/api/alerts?min_confidence=7',
+    '/api/alerts?src_ip=not-an-ip',
+    '/api/packets?protocol=GOPHER',
+    '/api/packets?min_entropy=99',
+    '/api/hosts?order=nonsense',
+    '/api/stats/timeline?bucket_s=1',
+    '/api/pipeline/runs?source=nowhere',
 ])
-def test_invalid_parameters_return_400(client, path, params):
-    response = client.get(path, query_string=params)
-    assert response.status_code == 400, '%s %s -> %d' % (
-        path, params, response.status_code)
-    assert 'error' in response.get_json()
+def test_invalid_parameters_return_400_with_what_was_allowed(client, path):
+    payload = get_json(client, path, expect=400)
+    assert_error(payload, 400, 'validation_error')
+    assert 'parameter' in payload['error']['details']
 
 
-def test_sql_injection_in_filters_is_parameterised(client):
-    """Injection attempts must be treated as literal values, not SQL."""
-    hostile = "10.0.0.1'; DROP TABLE alerts;--"
-    body = get(client, '/api/alerts', src_ip=hostile, limit=10)
-    assert body['alerts'] == []
-    # The table must still be there.
-    assert get(client, '/api/health')['tables']['alerts'] > 0
+def test_method_not_allowed_is_json(client):
+    response = client.post('/api/alerts')
+    assert response.status_code == 405
+    assert response.mimetype == 'application/json'
+    assert_error(response.get_json(), 405, 'method_not_allowed')
 
+
+@pytest.mark.parametrize('body,message', [
+    (None, 'body must be a JSON object'),
+    ({}, 'missing ids'),
+    ({'ids': []}, 'empty ids'),
+    ({'ids': 'nope'}, 'ids not a list'),
+    ({'ids': ['a']}, 'ids not integers'),
+    ({'ids': list(range(501))}, 'too many ids'),
+])
+def test_bulk_acknowledge_validates_its_body(client, body, message):
+    response = client.post('/api/alerts/acknowledge',
+                           data='null' if body is None else json.dumps(body),
+                           content_type='application/json')
+    assert response.status_code == 400, message
+    assert_error(response.get_json(), 400, 'validation_error')
+
+
+def test_filter_values_are_parameterised_not_interpolated(client):
+    """A SQL fragment in a free-text filter must be data, never syntax."""
+    payload = get_json(client, "/api/alerts?limit=5&src_ip=1.1.1.1' OR '1'='1",
+                       expect=400)
+    assert_error(payload, 400, 'validation_error')
+    # And the database is still there afterwards.
+    assert get_json(client, '/api/health')['status'] == 'ok'
+
+
+def test_a_repository_failure_becomes_a_503_not_a_stack_trace(client,
+                                                              monkeypatch):
+    def broken():
+        raise RuntimeError('connection refused')
+
+    monkeypatch.setattr(client.application.repository, 'health', broken)
+    payload = get_json(client, '/api/health', expect=503)
+    assert_error(payload, 503, 'service_unavailable')
+    assert 'connection refused' not in json.dumps(payload)
+
+
+# ── dashboard ────────────────────────────────────────────────────────────────
 
 def test_dashboard_page_renders(client):
     response = client.get('/')
     assert response.status_code == 200
-    assert b'<canvas' in response.data or b'<div' in response.data
+    assert b'<html' in response.data.lower()

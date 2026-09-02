@@ -1,19 +1,17 @@
-# syntax=docker/dockerfile:1.7
+# NetWatch — production image.
 #
-# NetWatch SOC — production image.
-#
-# Build stages:
-#   builder  installs dependencies into a self-contained virtualenv
-#   test     runs the full suite against that venv (CI target, not shipped)
+# Stages:
+#   builder  resolves dependencies into a self-contained virtualenv
+#   test     runs the suite against a PostgreSQL the caller supplies (CI target)
 #   runtime  final image: venv + application source, non-root, no build tools
 #
-#   docker build -t netwatch-soc:latest .
-#   docker build --target test .            # run the 249-test suite in the build
+#   docker build -t netwatch:latest .
+#   docker build --target test .
 #
-# Pin the base by digest for reproducible, tamper-evident builds. Resolve the
+# Pin the base by digest for a reproducible, tamper-evident build. Resolve the
 # current digest yourself rather than trusting one copied from a template:
 #   docker buildx imagetools inspect python:3.11-slim-bookworm
-# then change the FROM lines to python:3.11-slim-bookworm@sha256:<digest>.
+# then set PYTHON_IMAGE to python:3.11-slim-bookworm@sha256:<digest>.
 
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm
 
@@ -27,12 +25,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /build
 
-# Dependency layer is cached independently of application source, so a code
-# change does not trigger a reinstall.
+# The dependency layer is cached independently of application source, so a
+# code change does not trigger a reinstall. psycopg[binary] ships its own
+# libpq wheel, which is why no build toolchain or libpq-dev is needed here.
 #
 # For a supply-chain-hardened build, generate a hash-pinned lock file
-# (`pip-compile --generate-hashes`) and add --require-hashes here; pip then
-# refuses any artifact whose digest does not match.
+# (`pip-compile --generate-hashes`) and add --require-hashes; pip then refuses
+# any artifact whose digest does not match.
 COPY requirements.txt ./
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
@@ -40,13 +39,18 @@ RUN python -m venv /opt/venv \
 ENV PATH="/opt/venv/bin:${PATH}"
 
 # ──────────────────────────────────────────────────────────────── test ───────
-# Optional CI target. Runs the suite inside the image being built, so a
-# regression fails the build rather than reaching a registry.
+# CI target. Runs the suite inside the image being built, so a regression
+# fails the build rather than reaching a registry. Needs a reachable
+# PostgreSQL: pass NETWATCH_TEST_DATABASE_URL at build time, or run this
+# target from compose where the database is a service.
 FROM builder AS test
 
 WORKDIR /app
+COPY requirements-dev.txt ./
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements-dev.txt
 COPY . .
-RUN /opt/venv/bin/python -m pytest -q
+RUN /opt/venv/bin/ruff check .
+CMD ["/opt/venv/bin/python", "-m", "pytest", "-q", "--cov"]
 
 # ─────────────────────────────────────────────────────────────── runtime ─────
 FROM ${PYTHON_IMAGE} AS runtime
@@ -57,49 +61,50 @@ ARG APP_GID=10001
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONHASHSEED=random \
-    PATH="/opt/venv/bin:${PATH}" \
-    NETWATCH_DB=/data/netwatch.db
+    PATH="/opt/venv/bin:${PATH}"
 
 # Patch the base OS, then drop apt state. No compilers or package managers are
-# needed at runtime — the application is pure Python and the venv is prebuilt.
+# needed at runtime: the application is pure Python plus prebuilt wheels.
+# Kept as its own layer so it can be rebuilt for a CVE without invalidating
+# anything below it, and so the account setup below needs no network at all.
 RUN set -eux; \
     apt-get update; \
     apt-get upgrade -y --no-install-recommends; \
-    rm -rf /var/lib/apt/lists/*; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
+# Run as a fixed, unprivileged uid/gid. Fixed rather than arbitrary so a
+# mounted volume's ownership is predictable across hosts.
+RUN set -eux; \
     groupadd --gid "${APP_GID}" --system netwatch; \
     useradd  --uid "${APP_UID}" --gid "${APP_GID}" --system \
              --home-dir /app --no-create-home --shell /usr/sbin/nologin netwatch; \
-    install -d -o "${APP_UID}" -g "${APP_GID}" -m 0750 /app /data
+    install -d -o "${APP_UID}" -g "${APP_GID}" -m 0750 /app
 
 COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
 
-# Copy source explicitly rather than `COPY . .` so nothing unlisted — a local
-# database, a .env, a stray credential file — can be pulled into the image even
-# if .dockerignore is edited later.
-COPY --chown=${APP_UID}:${APP_GID} App.py DB_Manager.py PacketSimulator.py \
-     ProtocolAnalyzer.py ThreatDetector.py benchmark.py config.py frames.py \
-     geoip.py mitre.py gunicorn.conf.py ./
-COPY --chown=${APP_UID}:${APP_GID} detectors/ ./detectors/
-COPY --chown=${APP_UID}:${APP_GID} templates/ ./templates/
+# Copy source explicitly rather than `COPY . .` so nothing unlisted — a stray
+# .env, a local database, a credential file — can be pulled into the image
+# even if .dockerignore is edited later.
+COPY --chown=${APP_UID}:${APP_GID} netwatch/ ./netwatch/
+COPY --chown=${APP_UID}:${APP_GID} benchmarks/ ./benchmarks/
+COPY --chown=${APP_UID}:${APP_GID} alembic/ ./alembic/
+COPY --chown=${APP_UID}:${APP_GID} alembic.ini gunicorn.conf.py ./
 
 USER ${APP_UID}:${APP_GID}
-
-# The SQLite database, its WAL and its shared-memory file all live here. Must
-# be a writable mount; everything else can be a read-only filesystem.
-VOLUME ["/data"]
 
 EXPOSE 5001
 
 # Verifies the application answers *and* that its schema is intact — a process
-# that is listening but has lost its database is not healthy.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+# that is listening but cannot reach its database is not healthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
     CMD ["python", "-c", "import json,sys,urllib.request;\
 d=json.load(urllib.request.urlopen('http://127.0.0.1:5001/api/health',timeout=4));\
-sys.exit(0 if d.get('status')=='ok' and d.get('table_count')==8 else 1)"]
+sys.exit(0 if d.get('status')=='ok' and d.get('schema_complete') else 1)"]
 
 # Exec form: gunicorn becomes PID 1 and receives SIGTERM directly, so
-# `docker stop` triggers a graceful drain instead of a 10-second kill.
+# `docker stop` triggers a graceful drain instead of a kill after the timeout.
 ENTRYPOINT ["gunicorn", "--config", "/app/gunicorn.conf.py"]
-CMD ["App:create_app()"]
+CMD ["netwatch.api:create_app()"]

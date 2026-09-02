@@ -36,9 +36,9 @@ class LateralMovementDetector(Detector):
         if not is_internal(src) or not is_internal(dst):
             return []
         # Count session initiations, not every packet in an established session.
-        if pkt.get('protocol') == 'TCP' and pkt.get('flags') != 'SYN':
-            if pkt.get('protocol') not in ('SMB', 'RDP'):
-                return []
+        if (pkt.get('protocol') == 'TCP' and pkt.get('flags') != 'SYN'
+                and pkt.get('protocol') not in ('SMB', 'RDP')):
+            return []
         self.packets_seen += 1
         ts = pkt['ts']
 

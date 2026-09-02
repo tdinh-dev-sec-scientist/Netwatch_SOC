@@ -12,8 +12,7 @@ packets in and hands findings out. DB_Manager turns findings into rows.
 import time
 
 from netwatch import config as config_module
-from netwatch import detectors
-from netwatch import mitre
+from netwatch import detectors, mitre
 
 
 class ThreatDetector:
@@ -92,11 +91,20 @@ class ThreatDetector:
         can only remove work, never change a verdict.
         """
         cached = self._dispatch.get(protocol)
-        if cached is None:
-            cached = self._dispatch[protocol] = tuple(
+        if cached is None or cached[0] != len(self.detectors):
+            # The registered count is part of the cache key so a detector
+            # added at runtime (tests do this) cannot be silently skipped by
+            # a stale entry.
+            #
+            # getattr rather than attribute access: a detector is a duck type,
+            # not necessarily a Detector subclass, and one that does not
+            # declare a hint is simply always called.
+            selected = tuple(
                 d for d in self.detectors
-                if d.protocols is None or protocol in d.protocols)
-        return cached
+                if getattr(d, 'protocols', None) is None
+                or protocol in d.protocols)
+            cached = self._dispatch[protocol] = (len(self.detectors), selected)
+        return cached[1]
 
     def expire(self, now=None):
         now = now or time.time()

@@ -848,10 +848,22 @@ async function api(path, params) {
   const res = await fetch(path + qs);
   if (!res.ok) {
     let detail = res.statusText;
-    try { detail = (await res.json()).error || detail; } catch (e) { /* non-JSON body */ }
+    // The API's error contract is {error: {code, message, details}, status}.
+    try {
+      const body = await res.json();
+      detail = (body.error && body.error.message) || detail;
+    } catch (e) { /* non-JSON body */ }
     throw new Error(path + ' → ' + res.status + ': ' + detail);
   }
   return res.json();
+}
+
+/* Collection endpoints answer with an envelope — {total, count, limit,
+   offset, has_more, next_offset, <name>: [...]} — so that a caller can page
+   without guessing when to stop. Views that only want the rows use this. */
+async function apiList(path, params, key) {
+  const body = await api(path, params);
+  return body[key] || [];
 }
 
 function showError(err) {
@@ -895,9 +907,9 @@ function upsertChart(key, canvasId, config) {
 async function loadOverview() {
   const [stats, throughput, severity, threats, alerts] = await Promise.all([
     api('/api/stats/overview'),
-    api('/api/stats/throughput', { minutes: 60 }),
-    api('/api/stats/severity', { hours: 24 }),
-    api('/api/threats/summary', { hours: 24, limit: 12 }),
+    apiList('/api/stats/throughput', { minutes: 60 }, 'buckets'),
+    apiList('/api/stats/severity', { hours: 24 }, 'severities'),
+    apiList('/api/threats/summary', { hours: 24, limit: 12 }, 'threats'),
     api('/api/alerts', { limit: 8 }),
   ]);
 
@@ -1035,8 +1047,8 @@ async function ackAlert(id, btn) {
 /* ══════════════ MODULE 3 — Threat Distribution ══════════════ */
 async function loadThreats() {
   const [types, stats] = await Promise.all([
-    api('/api/threats/types'),
-    api('/api/alerts/stats', { hours: 720 }),
+    apiList('/api/threats/types', null, 'threat_types'),
+    apiList('/api/alerts/stats', { hours: 720 }, 'threat_types'),
   ]);
 
   const fired = stats.filter(s => s.count > 0);
@@ -1074,7 +1086,7 @@ async function loadThreats() {
 async function loadMitre() {
   const [coverage, techniques] = await Promise.all([
     api('/api/mitre/coverage'),
-    api('/api/mitre/techniques'),
+    apiList('/api/mitre/techniques', null, 'techniques'),
   ]);
 
   const observed = techniques.filter(t => t.alert_count > 0).length;
@@ -1128,8 +1140,8 @@ async function loadMitre() {
 /* ══════════════ MODULE 5 — Protocol Analysis ══════════════ */
 async function loadProtocols() {
   const [dist, catalog] = await Promise.all([
-    api('/api/stats/protocols', { minutes: 1440 }),
-    api('/api/protocols'),
+    apiList('/api/stats/protocols', { minutes: 1440 }, 'protocols'),
+    apiList('/api/protocols', null, 'protocols'),
   ]);
   const byName = Object.fromEntries(dist.map(d => [d.protocol, d]));
 
@@ -1184,10 +1196,10 @@ async function loadProtocols() {
 /* ══════════════ MODULE 6 — Source / Destination IP Analysis ══════════════ */
 async function loadHosts() {
   const [talkers, risky, geo, flows] = await Promise.all([
-    api('/api/hosts/top', { limit: 12, order: 'packets_sent' }),
-    api('/api/hosts/top', { limit: 12, order: 'threat_score' }),
-    api('/api/geo'),
-    api('/api/connections', { limit: 25, order: 'bytes' }),
+    apiList('/api/hosts', { limit: 12, order: 'packets_sent' }, 'hosts'),
+    apiList('/api/hosts', { limit: 12, order: 'threat_score' }, 'hosts'),
+    apiList('/api/geo', null, 'countries'),
+    apiList('/api/flows', { limit: 25, order: 'bytes' }, 'flows'),
   ]);
 
   const maxPkts = Math.max(1, ...talkers.map(h => h.packets_sent));
@@ -1238,8 +1250,8 @@ async function loadHosts() {
 /* ══════════════ MODULE 7 — Activity Trends ══════════════ */
 async function loadTimeline() {
   const [timeline, throughput] = await Promise.all([
-    api('/api/stats/timeline', { hours: 24, bucket_s: 3600 }),
-    api('/api/stats/throughput', { minutes: 1440 }),
+    apiList('/api/stats/timeline', { hours: 24, bucket_s: 3600 }, 'buckets'),
+    apiList('/api/stats/throughput', { minutes: 1440 }, 'buckets'),
   ]);
 
   const buckets = [...new Set(timeline.map(r => r.bucket))].sort((a, b) => a - b);
@@ -1288,33 +1300,43 @@ async function loadTimeline() {
   });
 }
 
-/* ══════════════ MODULE 8 — Detection Performance / Health ══════════════ */
+/* ══════════════ MODULE 8 — Pipeline Performance / Health ══════════════ */
 async function loadPerformance() {
-  const [perf, health] = await Promise.all([
-    api('/api/performance', { limit: 120 }),
+  const [runsBody, health, live] = await Promise.all([
+    api('/api/pipeline/runs', { limit: 120 }),
     api('/api/health'),
+    api('/api/pipeline/metrics'),
   ]);
-  const history = perf.history.slice().reverse();
-  const latest = perf.history[0] || {};
-  const live = perf.live || {};
+  const runs = runsBody.runs || [];
+  const history = runs.slice().reverse();
+  const latest = runs[0] || {};
+  const acct = (live && live.accounting) || {};
+  const latency = (live && live.latency_end_to_end_ms) || {};
+  const resources = (live && live.resources) || {};
+
+  const received = acct.frames_captured != null
+    ? acct.frames_captured : latest.packets_received;
+  const dropped = acct.packets_dropped != null
+    ? acct.packets_dropped : latest.packets_dropped;
+  const pps = (live && live.throughput)
+    ? live.throughput.persisted_per_s : latest.packets_per_s;
 
   document.getElementById('perf-strip').innerHTML = `
-    ${gauge('THROUGHPUT', fmtInt(latest.packets_per_min), 'packets/min',
-            Math.min(100, (latest.packets_per_min || 0) / 5000 * 100))}
-    ${gauge('QUERY p50', (latest.query_p50_ms || 0).toFixed(2), 'ms (target <50)',
-            Math.min(100, (latest.query_p50_ms || 0) / 50 * 100))}
-    ${gauge('QUERY p95', (latest.query_p95_ms || 0).toFixed(2), 'ms (target <50)',
-            Math.min(100, (latest.query_p95_ms || 0) / 50 * 100))}
-    ${gauge('PARSE', (live.parse_us_avg != null ? live.parse_us_avg : latest.parse_us_avg || 0).toFixed(1), 'µs/packet', 40)}
-    ${gauge('DETECT', (live.detect_us_avg != null ? live.detect_us_avg : latest.detect_us_avg || 0).toFixed(1), 'µs/packet', 40)}
-    ${gauge('PARSE ERRORS', fmtInt(live.parse_errors != null ? live.parse_errors : latest.parse_errors), 'frames rejected', 0)}`;
+    ${gauge('THROUGHPUT', fmtInt(pps), 'packets/sec',
+            Math.min(100, (pps || 0) / 8000 * 100))}
+    ${gauge('RECEIVED', fmtInt(received), 'frames captured', 0)}
+    ${gauge('DROPPED', fmtInt(dropped), 'frames lost',
+            dropped ? 100 : 0)}
+    ${gauge('LATENCY p50', (latency.p50_ms || latest.latency_p50_ms || 0).toFixed(2), 'ms end to end', 0)}
+    ${gauge('LATENCY p95', (latency.p95_ms || latest.latency_p95_ms || 0).toFixed(2), 'ms end to end', 0)}
+    ${gauge('PEAK RSS', (resources.peak_rss_mb || latest.peak_rss_mb || 0).toFixed(0), 'MB resident', 0)}`;
 
   upsertChart('perfTp', 'chart-perf-tp', {
     type: 'line',
     data: {
       labels: history.map(r => fmtTime(r.ts)),
       datasets: [{
-        label: 'packets/min', data: history.map(r => r.packets_per_min),
+        label: 'packets/sec', data: history.map(r => r.packets_per_s),
         borderColor: '#00ff88', backgroundColor: 'rgba(0,255,136,0.1)',
         fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
       }],
@@ -1331,10 +1353,12 @@ async function loadPerformance() {
     data: {
       labels: history.map(r => fmtTime(r.ts)),
       datasets: [
-        { label: 'p50 ms', data: history.map(r => r.query_p50_ms),
+        { label: 'p50 ms', data: history.map(r => r.latency_p50_ms),
           borderColor: '#00d4ff', pointRadius: 0, borderWidth: 2, tension: 0.3 },
-        { label: 'p95 ms', data: history.map(r => r.query_p95_ms),
+        { label: 'p95 ms', data: history.map(r => r.latency_p95_ms),
           borderColor: '#ffd60a', pointRadius: 0, borderWidth: 1.5, tension: 0.3 },
+        { label: 'p99 ms', data: history.map(r => r.latency_p99_ms),
+          borderColor: '#ff453a', pointRadius: 0, borderWidth: 1.5, tension: 0.3 },
       ],
     },
     options: {
@@ -1344,19 +1368,39 @@ async function loadPerformance() {
     },
   });
 
+  const queues = (live && live.queues) || [];
+  const stages = (live && live.stages) || [];
+  const queueRows = queues.length
+    ? `<h4 style="margin-top:16px">Queues (capacity in chunks)</h4>
+       <dl class="kv">${queues.map(q =>
+        `<dt>${esc(q.name)}</dt><dd>${q.depth}/${q.capacity}
+          &nbsp;peak ${q.high_water}
+          &nbsp;dropped <span style="color:${q.dropped ? 'var(--red)' : 'var(--green)'}">${fmtInt(q.dropped)}</span></dd>`
+       ).join('')}</dl>`
+    : '';
+  const stageRows = stages.length
+    ? `<h4 style="margin-top:16px">Stages (p95 service time per packet)</h4>
+       <dl class="kv">${stages.map(st =>
+        `<dt>${esc(st.stage)}</dt><dd>${fmtInt(st.items_in)} in &nbsp;
+          ${(st.service_ms ? st.service_ms.p95_ms : 0).toFixed(3)} ms &nbsp;
+          <span style="color:${st.errors ? 'var(--red)' : 'var(--green)'}">${st.errors} errors</span></dd>`
+       ).join('')}</dl>`
+    : '';
+
   document.getElementById('db-health').innerHTML = `
     <dl class="kv">
-      <dt>Journal mode</dt><dd>${esc(health.journal_mode)}</dd>
+      <dt>Database</dt><dd>${esc(health.database)} ${esc(health.server_version || '')}</dd>
       <dt>Tables</dt><dd>${health.table_count}</dd>
       <dt>Indexes</dt><dd>${health.index_count}</dd>
       <dt>Database size</dt><dd>${fmtBytes(health.db_size_bytes)}</dd>
-      <dt>Detectors loaded</dt><dd>${health.engine.detectors}</dd>
-      <dt>Threat types</dt><dd>${health.engine.threat_types}</dd>
-      <dt>ATT&CK techniques</dt><dd>${health.engine.techniques}</dd>
-      <dt>Protocols supported</dt><dd>${health.engine.protocols_supported}</dd>
-      <dt>Packets analyzed</dt><dd>${fmtInt(health.engine.packets_analyzed)}</dd>
-      <dt>Detector errors</dt><dd style="color:${health.engine.detector_errors ? 'var(--red)' : 'var(--green)'}">${health.engine.detector_errors}</dd>
+      <dt>Pool checked out</dt><dd>${health.pool ? health.pool.checked_out : '—'} / ${health.pool ? health.pool.size : '—'}</dd>
+      <dt>synchronous_commit</dt><dd>${esc(health.synchronous_commit || '')}</dd>
+      <dt>Detectors loaded</dt><dd>${health.detectors}</dd>
+      <dt>Protocols supported</dt><dd>${health.protocols_supported}</dd>
+      <dt>Pipeline running</dt><dd style="color:${health.pipeline_running ? 'var(--green)' : 'var(--amber)'}">${health.pipeline_running ? 'yes' : 'no (read-only tier)'}</dd>
     </dl>
+    ${queueRows}
+    ${stageRows}
     <h4 style="margin-top:16px">Row counts</h4>
     <dl class="kv">
       ${Object.entries(health.tables).map(([t, n]) =>
@@ -1375,7 +1419,7 @@ function gauge(label, value, unit, pct) {
 
 /* ══════════════ MODULE 9 — Live Packet Log ══════════════ */
 async function loadPackets() {
-  const packets = await api('/api/packets', { limit: 120, ...pktFilters });
+  const packets = await apiList('/api/packets', { limit: 120, ...pktFilters }, 'packets');
   const tbody = document.getElementById('pkt-tbody');
   document.getElementById('pkt-badge').textContent = packets.length + ' ROWS';
   if (!packets.length) {

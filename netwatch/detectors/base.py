@@ -11,7 +11,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
-UTC = _dt.timezone.utc
+UTC = _dt.UTC
 
 SEVERITY_ORDER = {'INFO': 0, 'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4}
 
@@ -80,15 +80,13 @@ def _is_internal_uncached(ip):
         a, b, _c, _d = (int(p) for p in ip.split('.'))
     except (ValueError, TypeError):
         return False
-    if a == 10 or a == 127:
+    if a in (10, 127):
         return True
     if a == 172 and 16 <= b <= 31:
         return True
     if a == 192 and b == 168:
         return True
-    if a == 169 and b == 254:
-        return True
-    return False
+    return a == 169 and b == 254
 
 
 class TimedCounter:

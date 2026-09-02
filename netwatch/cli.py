@@ -4,6 +4,14 @@ Command-line entry points.
     python -m netwatch.cli engine     run the pipeline, no HTTP server
     python -m netwatch.cli api        run the REST API (development server)
     python -m netwatch.cli initdb     create the schema and seed reference data
+    python -m netwatch.cli seed       seed reference data only
+
+`seed` is separate from `initdb` because the two have different owners.
+Alembic owns the *shape* of the database and is versioned with migrations.
+Reference data — the protocol catalog, the detector catalog, the ATT&CK
+catalog — is derived from the code that is deployed, so it is refreshed on
+every deploy rather than frozen into a migration. A deployment therefore runs
+`alembic upgrade head` and then `netwatch.cli seed`.
 
 The `engine` command is the writer half of the split topology: one process
 owns ingest while any number of stateless API processes serve reads from the
@@ -66,6 +74,18 @@ def cmd_initdb(args):
     print('schema ready: %d tables, %d indexes on %s'
           % (health['table_count'], health['index_count'],
              health['server_version']))
+    return 0
+
+
+def cmd_seed(args):
+    """Refresh the reference tables from the deployed code. Idempotent."""
+    engine = session_mod.wait_for_database(args.database_url,
+                                           timeout_s=args.wait_s)
+    schema_mod.seed_reference_data(engine)
+    protocol_ids, threat_ids = schema_mod.lookup_maps(engine)
+    print('seeded: %d protocols, %d threat types, %d ATT&CK techniques'
+          % (len(protocol_ids), len(threat_ids),
+             Repository(engine).health()['tables']['mitre_techniques']))
     return 0
 
 
@@ -176,6 +196,9 @@ def build_parser():
     initdb.add_argument('--drop', action='store_true',
                         help='drop everything first (destructive)')
     initdb.set_defaults(func=cmd_initdb)
+
+    seed = sub.add_parser('seed', help='seed reference data only')
+    seed.set_defaults(func=cmd_seed)
 
     eng = sub.add_parser('engine', help='run the pipeline without HTTP')
     eng.add_argument('--rate-pps', type=float,

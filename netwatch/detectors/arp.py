@@ -43,8 +43,8 @@ class ARPSpoofDetector(Detector):
 
         if self.cfg.get('alert_on_binding_conflict'):
             known = self._bindings.get(sender_ip)
-            if known and known[0] != sender_mac:
-                if self._cooled_down(('conflict', sender_ip), ts):
+            if (known and known[0] != sender_mac
+                    and self._cooled_down(('conflict', sender_ip), ts)):
                     findings.append(self._finding(
                         pkt, 'CRITICAL', 0.93,
                         'ARP cache poisoning: %s was bound to %s but is now '

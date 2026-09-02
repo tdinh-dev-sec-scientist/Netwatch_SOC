@@ -39,18 +39,28 @@ STAGE_NAMES = ('capture', 'parse', 'rules', 'persist', 'serve')
 class PipelineConfig:
     """Every knob in one place, so a benchmark can sweep them.
 
-    Queue capacities are in items and are deliberately small enough that a
-    stalled stage is felt within a second at the rates this pipeline runs.
-    The persist queue is the largest because it absorbs batch-boundary
-    jitter: a writer committing 500 rows is not reading its queue for the
-    duration of that commit.
+    Queue capacities are counted in **chunks**, not packets: a capacity of 64
+    with a chunk size of 256 holds up to 16,384 packets in flight. They are
+    sized so a stalled stage is felt within a second at the rates this
+    pipeline runs, and so the memory a full pipeline can hold is a number you
+    can work out rather than a hope. The persist queue is the deepest because
+    it absorbs batch-boundary jitter: a writer committing a thousand rows is
+    not reading its queue for the duration of that commit.
+
+    `chunk_size` trades synchronisation cost against latency. Larger chunks
+    make the per-packet queue overhead disappear; they also mean a packet
+    waits for its chunk-mates. `chunk_max_age_s` bounds that wait, so at low
+    offered rates a partial chunk still moves.
     """
 
     def __init__(self, parse_workers=1, rules_workers=1, persist_workers=2,
-                 capture_queue=4000, rules_queue=4000, persist_queue=8000,
-                 serve_queue=1000, batch_size=500, flush_interval_s=0.5,
+                 capture_queue=16, rules_queue=16, persist_queue=24,
+                 serve_queue=256, batch_size=2000, flush_interval_s=0.5,
                  overflow_policy=OverflowPolicy.BLOCK, put_timeout_s=1.0,
-                 feed_capacity=500, sample_resources=True):
+                 feed_capacity=500, sample_resources=True, chunk_size=256,
+                 chunk_max_age_s=0.05):
+        self.chunk_size = chunk_size
+        self.chunk_max_age_s = chunk_max_age_s
         self.parse_workers = parse_workers
         self.rules_workers = rules_workers
         self.persist_workers = persist_workers
@@ -66,7 +76,7 @@ class PipelineConfig:
         self.sample_resources = sample_resources
 
     def as_dict(self):
-        return {k: v for k, v in vars(self).items()}
+        return dict(vars(self))
 
 
 class Pipeline:
@@ -93,7 +103,9 @@ class Pipeline:
         self.latency = Histogram()
         self.feed = feed or LiveFeed(capacity=cfg.feed_capacity)
 
-        self.capture = CaptureStage(source, self.q_parse)
+        self.capture = CaptureStage(source, self.q_parse,
+                                    chunk_size=cfg.chunk_size,
+                                    chunk_max_age_s=cfg.chunk_max_age_s)
         self.parse = ParseStage(self.q_parse, self.q_rules,
                                 workers=cfg.parse_workers,
                                 analyzer_factory=analyzer_factory)
@@ -205,9 +217,7 @@ class Pipeline:
         return {
             'frames_captured': captured,
             'frames_enqueued': self.capture.frames_enqueued,
-            'packets_parsed': self.parse.metrics[0].items_out
-            if self.parse.workers == 1
-            else sum(m.items_out for m in self.parse.metrics),
+            'packets_parsed': sum(m.items_out for m in self.parse.metrics),
             'packets_persisted': persisted,
             'packets_dropped': dropped,
             'packets_parse_failed': parse_failed,
@@ -236,6 +246,7 @@ class Pipeline:
                 'alerts_per_s': round(acct['alerts_persisted'] / elapsed, 3),
             },
             'latency_end_to_end_ms': self.latency.summary(),
+            'chunk_size': self.config.chunk_size,
             'queues': [q.snapshot() for q in self.queues],
             'stages': [s.snapshot() for s in self.stages],
             'resources': self.resources.snapshot() if self.resources

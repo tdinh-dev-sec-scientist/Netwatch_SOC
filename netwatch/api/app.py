@@ -64,7 +64,7 @@ def create_app(engine=None, repository=None, rules_engine=None, pipeline=None,
     app.repository = repository or Repository(app.db_engine)
     app.rules_engine = rules_engine or RulesEngine(cfg=cfg)
     app.feed = feed or LiveFeed(capacity=int(
-        os.environ.get('NETWATCH_FEED_CAPACITY', 500)))
+        os.environ.get('NETWATCH_FEED_CAPACITY', '500')))
     app.pipeline = pipeline
 
     if run_pipeline is None:
@@ -102,8 +102,8 @@ def _start_embedded_pipeline(app):
         source, app.rules_engine,
         lambda: BatchWriter(app.db_engine, protocol_ids, threat_ids),
         config=PipelineConfig(
-            persist_workers=int(os.environ.get('NETWATCH_PERSIST_WORKERS', 2)),
-            batch_size=int(os.environ.get('NETWATCH_BATCH_SIZE', 500))),
+            persist_workers=int(os.environ.get('NETWATCH_PERSIST_WORKERS', '2')),
+            batch_size=int(os.environ.get('NETWATCH_BATCH_SIZE', '1000'))),
         feed=app.feed)
     pipeline.start()
     log.info('embedded pipeline started at %s pps', rate or 200)

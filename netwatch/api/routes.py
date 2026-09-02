@@ -16,8 +16,12 @@ Conventions every endpoint follows:
 from flask import Blueprint, current_app, jsonify, render_template
 
 from netwatch import detectors, mitre
-from netwatch.analysis.protocol import SUPPORTED_PROTOCOLS, ProtocolAnalyzer
-from netwatch.api.errors import NotFoundError, ServiceUnavailable, ValidationError
+from netwatch.analysis.protocol import SUPPORTED_PROTOCOLS
+from netwatch.api.errors import (
+    NotFoundError,
+    ServiceUnavailable,
+    ValidationError,
+)
 from netwatch.api.params import (
     bool_arg,
     choice_arg,
@@ -29,13 +33,13 @@ from netwatch.api.params import (
     sort_args,
     str_arg,
 )
+from netwatch.db.models import SEVERITIES
 from netwatch.db.repository import (
     ALERT_SORTS,
     FLOW_SORTS,
     HOST_SORTS,
     PACKET_SORTS,
 )
-from netwatch.db.models import SEVERITIES
 
 bp = Blueprint('api', __name__)
 ui = Blueprint('ui', __name__)

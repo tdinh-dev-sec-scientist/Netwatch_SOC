@@ -46,13 +46,13 @@ def lookup(ip):
         a, b, _c, _d = (int(p) for p in ip.split('.'))
     except (ValueError, TypeError):
         return UNKNOWN
-    if a == 10 or a == 127 or (a == 172 and 16 <= b <= 31) \
+    if a in (10, 127) or (a == 172 and 16 <= b <= 31) \
             or (a == 192 and b == 168) or (a == 169 and b == 254):
         return PRIVATE
     for (a_lo, a_hi), b_range, country, lat, lon in _PREFIXES:
-        if a_lo <= a <= a_hi:
-            if b_range is None or b_range[0] <= b <= b_range[1]:
-                return country, lat, lon
+        if a_lo <= a <= a_hi and (b_range is None
+                                  or b_range[0] <= b <= b_range[1]):
+            return country, lat, lon
     return UNKNOWN
 
 

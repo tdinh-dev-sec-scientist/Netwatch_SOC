@@ -1,0 +1,43 @@
+line-length = 88
+target-version = "py311"
+exclude = [".venv", "alembic/versions", "netwatch/templates"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RET", "ARG", "PL"]
+ignore = [
+    # The codebase formats with %-style throughout, deliberately and
+    # consistently. Converting 240 call sites to f-strings would be churn,
+    # not an improvement.
+    "UP031",
+    # Deferred imports are used on purpose: to keep optional dependencies
+    # (psutil, numpy) optional, and to break import cycles between the API
+    # blueprint and the app factory.
+    "PLC0415",
+    # A stage handler's signature is fixed by the base class; an unused
+    # parameter in one override is the contract, not dead code.
+    "ARG002",
+    # Positional-argument counts on the pipeline and repository constructors
+    # are the knobs, and naming them all as keywords at every call site would
+    # be worse.
+    "PLR0917",
+    # The pipeline and repository legitimately take many keyword arguments;
+    # collapsing them into a config object would hide the knobs, not simplify
+    # them.
+    "PLR0913",
+    # Comparison counts and threshold constants read better inline in
+    # detection code than as named module constants.
+    "PLR2004",
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["ARG001", "ARG002", "PLR2004", "SIM117"]
+"benchmarks/*" = ["ARG005", "PLR0915", "PLR0912"]
+"netwatch/detectors/*" = ["PLR0911", "PLR0912", "PLR0915"]
+"netwatch/analysis/protocol.py" = ["PLR0911", "PLR0912", "PLR0915"]
+"netwatch/capture/generator.py" = ["PLR0911", "PLR0912", "PLR0915"]
+
+[lint.isort]
+known-first-party = ["netwatch", "benchmarks"]
+
+[format]
+quote-style = "single"

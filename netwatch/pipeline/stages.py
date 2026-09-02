@@ -14,14 +14,21 @@ subtly wrong — measuring service time separately from queue wait, propagating
 end-of-stream exactly once per downstream consumer, and never letting one bad
 item kill a worker.
 
+**Stages exchange chunks of packets, never single packets.** The queue
+handshake costs more than the work at these rates — see the note in
+``queues.py`` — so the capture stage groups frames into chunks and every stage
+downstream takes a list in and returns a list out. Chunks are closed on size
+or on a short age deadline, so a quiet pipeline still moves packets promptly
+instead of holding a half-full chunk indefinitely.
+
 Threads, not processes, and the reason matters. The persistence stage spends
-almost all of its time inside psycopg waiting on a socket, and psycopg
-releases the GIL for that wait, so persistence genuinely overlaps with parsing
-and rule evaluation. The parse and rules stages are pure-Python CPU work and
-do **not** get faster with more threads — their worker counts are configurable
-because the right value is 1 and it is better to be able to measure that than
-to assert it. Horizontal scale for the CPU stages is more pipeline processes,
-not more threads; see ``netwatch/pipeline/supervisor.py``.
+much of its time inside psycopg waiting on a socket, and psycopg releases the
+GIL for that wait, so persistence overlaps with parsing and rule evaluation.
+The parse and rules stages are pure-Python CPU work and do **not** get faster
+with more threads — their worker counts are configurable because the right
+value is 1 and it is better to be able to measure that than to assert it.
+Horizontal scale for the CPU stages is more pipeline processes, not more
+threads.
 """
 
 import datetime as dt
@@ -34,7 +41,7 @@ from netwatch.pipeline.queues import Closed
 
 log = logging.getLogger('netwatch.pipeline')
 
-UTC = dt.timezone.utc
+UTC = dt.UTC
 
 
 class Stage:
@@ -57,16 +64,15 @@ class Stage:
 
     def setup(self, worker_id):
         """Per-worker initialisation (a DB connection, an analyzer, ...)."""
-        return None
+        return
 
-    def handle(self, item, ctx, metrics):
-        """Process one item. Return what to forward, or None to forward
-        nothing."""
+    def handle(self, chunk, ctx, metrics):
+        """Process one chunk (a list). Return a chunk to forward, or None."""
         raise NotImplementedError
 
     def finish(self, ctx, metrics):
         """Called once per worker after the input queue is drained."""
-        return None
+        return
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -111,8 +117,14 @@ class Stage:
                 trailing = None
             if trailing and self.out_queue is not None:
                 for item in trailing:
-                    self.out_queue.put(item)
-                    metrics.items_out += 1
+                    if isinstance(item, list):
+                        weight = len(item)
+                    elif isinstance(item, dict):
+                        weight = item.get('packets', 1)
+                    else:
+                        weight = 1
+                    self.out_queue.put(item, weight)
+                    metrics.items_out += weight
 
     def _loop(self, ctx, metrics):
         while True:
@@ -128,23 +140,28 @@ class Stage:
                 continue
             metrics.wait_ns += time.perf_counter_ns() - waited
 
-            metrics.items_in += 1
+            count = len(item)
+            metrics.items_in += count
             t0 = time.perf_counter_ns()
             try:
                 result = self.handle(item, ctx, metrics)
-            except Exception:      # noqa: BLE001 - one bad item is not fatal
+            except Exception:      # noqa: BLE001 - one bad chunk is not fatal
                 metrics.errors += 1
-                log.exception('%s: dropping item after handler error',
-                              self.name)
+                log.exception('%s: dropping chunk of %d after handler error',
+                              self.name, count)
                 continue
             finally:
                 elapsed = time.perf_counter_ns() - t0
                 metrics.busy_ns += elapsed
-                metrics.service.record(elapsed / 1e6)
+                # Service time is recorded per packet, not per chunk, so the
+                # histogram means the same thing whatever the chunk size is.
+                if count:
+                    metrics.service.record(elapsed / 1e6 / count)
 
-            if result is not None and self.out_queue is not None:
-                self.out_queue.put(result)
-                metrics.items_out += 1
+            if result:
+                if self.out_queue is not None:
+                    self.out_queue.put(result, len(result))
+                metrics.items_out += len(result)
 
     def close_output(self, consumers):
         if self.out_queue is not None:
@@ -168,36 +185,57 @@ class CaptureStage(Stage):
 
     name = 'capture'
 
-    def __init__(self, source, out_queue, **_kwargs):
+    def __init__(self, source, out_queue, chunk_size=256,
+                 chunk_max_age_s=0.05, **_kwargs):
         super().__init__(in_queue=None, out_queue=out_queue, workers=1)
         self.source = source
+        self.chunk_size = max(1, chunk_size)
+        self.chunk_max_age_s = chunk_max_age_s
         self.frames_captured = 0
         self.frames_enqueued = 0
         self.frames_dropped = 0
+        self.chunks_emitted = 0
         self.exhausted = threading.Event()
+
+    def _emit(self, chunk, metrics):
+        t0 = time.perf_counter_ns()
+        accepted = self.out_queue.put(chunk, len(chunk))
+        if accepted:
+            self.frames_enqueued += len(chunk)
+            self.chunks_emitted += 1
+            metrics.items_out += len(chunk)
+        else:
+            # A refused chunk is a refused chunk of packets: every frame in it
+            # is counted as dropped, never quietly forgotten.
+            self.frames_dropped += len(chunk)
+        metrics.busy_ns += time.perf_counter_ns() - t0
 
     def _run(self, worker_id):
         metrics = self.metrics[worker_id]
+        chunk = []
+        opened = time.monotonic()
+        size = self.chunk_size
+        max_age = self.chunk_max_age_s
         try:
             for capture_ts, frame in self.source.frames():
                 if self._stop.is_set():
                     break
                 self.frames_captured += 1
-                t0 = time.perf_counter_ns()
                 # The ingress stamp travels with the frame all the way to the
                 # commit, which is what makes the end-to-end latency figure an
                 # actual measurement rather than a stage-local one.
-                accepted = self.out_queue.put((capture_ts, t0, frame))
-                if accepted:
-                    self.frames_enqueued += 1
-                    metrics.items_out += 1
-                else:
-                    self.frames_dropped += 1
-                metrics.busy_ns += time.perf_counter_ns() - t0
+                chunk.append((capture_ts, time.perf_counter_ns(), frame))
+                if (len(chunk) >= size
+                        or time.monotonic() - opened >= max_age):
+                    self._emit(chunk, metrics)
+                    chunk = []
+                    opened = time.monotonic()
         except Exception:      # noqa: BLE001 - a dead source ends the run
             metrics.errors += 1
             log.exception('capture source failed')
         finally:
+            if chunk:
+                self._emit(chunk, metrics)
             self.exhausted.set()
 
     def stop(self):
@@ -210,7 +248,9 @@ class CaptureStage(Stage):
         snap = super().snapshot()
         snap.update(frames_captured=self.frames_captured,
                     frames_enqueued=self.frames_enqueued,
-                    frames_dropped=self.frames_dropped)
+                    frames_dropped=self.frames_dropped,
+                    chunks_emitted=self.chunks_emitted,
+                    chunk_size=self.chunk_size)
         return snap
 
 
@@ -241,19 +281,27 @@ class ParseStage(Stage):
         self.analyzers.append(analyzer)
         return analyzer
 
-    def handle(self, item, analyzer, metrics):
-        capture_ts, ingress_ns, frame = item
-        pkt = analyzer.safe_parse(frame, capture_ts)
-        if pkt is None:
-            self.parse_failures += 1
-            return None
-        # Stamp the datetime forms the persistence layer needs exactly once,
-        # here, rather than repeating the conversion per row per table.
-        when = dt.datetime.fromtimestamp(pkt['ts'], UTC)
-        pkt['dt'] = when
-        pkt['minute'] = when.replace(second=0, microsecond=0)
-        pkt['_ingress_ns'] = ingress_ns
-        return pkt
+    def handle(self, chunk, analyzer, metrics):
+        parse = analyzer.safe_parse
+        from_timestamp = dt.datetime.fromtimestamp
+        out = []
+        failures = 0
+        for capture_ts, ingress_ns, frame in chunk:
+            pkt = parse(frame, capture_ts)
+            if pkt is None:
+                failures += 1
+                continue
+            # Stamp the datetime forms the persistence layer needs exactly
+            # once, here, rather than repeating the conversion per row per
+            # table.
+            when = from_timestamp(pkt['ts'], UTC)
+            pkt['dt'] = when
+            pkt['minute'] = when.replace(second=0, microsecond=0)
+            pkt['_ingress_ns'] = ingress_ns
+            out.append(pkt)
+        if failures:
+            self.parse_failures += failures
+        return out
 
     def protocol_counts(self):
         merged = {}
@@ -291,15 +339,26 @@ class RulesStage(Stage):
         self.findings_total = 0
         self._lock = threading.Lock() if workers > 1 else None
 
-    def handle(self, pkt, _ctx, _metrics):
+    def handle(self, chunk, _ctx, _metrics):
+        analyze = self.engine.analyze
+        out = []
+        found = 0
         if self._lock is None:
-            findings = self.engine.analyze(pkt)
+            for pkt in chunk:
+                findings = analyze(pkt)
+                if findings:
+                    found += len(findings)
+                out.append((pkt, findings))
         else:
             with self._lock:
-                findings = self.engine.analyze(pkt)
-        if findings:
-            self.findings_total += len(findings)
-        return pkt, findings
+                for pkt in chunk:
+                    findings = analyze(pkt)
+                    if findings:
+                        found += len(findings)
+                    out.append((pkt, findings))
+        if found:
+            self.findings_total += found
+        return out
 
     def snapshot(self):
         snap = super().snapshot()
@@ -374,12 +433,13 @@ class PersistStage(Stage):
         return {'packets': n_packets, 'alerts': n_alerts,
                 'findings': findings, 'committed_at': time.time()}
 
-    def handle(self, item, ctx, metrics):
-        pkt, findings = item
-        ctx['packets'].append(pkt)
-        if findings:
-            ctx['findings'].extend(findings)
-        if (len(ctx['packets']) >= self.batch_size
+    def handle(self, chunk, ctx, metrics):
+        packets = ctx['packets']
+        for pkt, findings in chunk:
+            packets.append(pkt)
+            if findings:
+                ctx['findings'].extend(findings)
+        if (len(packets) >= self.batch_size
                 or time.monotonic() - ctx['opened'] >= self.flush_interval_s):
             return self._flush(ctx, metrics)
         return None
@@ -389,6 +449,9 @@ class PersistStage(Stage):
         if ctx is None:
             return None
         summary = self._flush(ctx, metrics)
+        close = getattr(ctx['writer'], 'close', None)
+        if callable(close):
+            close()
         return [summary] if summary else None
 
     def _loop(self, ctx, metrics):
@@ -407,6 +470,7 @@ class PersistStage(Stage):
                 return
             metrics.wait_ns += time.perf_counter_ns() - waited
             t0 = time.perf_counter_ns()
+            count = 0
             if item is None:
                 if (ctx['packets'] and
                         time.monotonic() - ctx['opened'] >=
@@ -415,7 +479,8 @@ class PersistStage(Stage):
                 else:
                     result = None
             else:
-                metrics.items_in += 1
+                count = len(item)
+                metrics.items_in += count
                 try:
                     result = self.handle(item, ctx, metrics)
                 except Exception:      # noqa: BLE001
@@ -424,11 +489,12 @@ class PersistStage(Stage):
                     result = None
             elapsed = time.perf_counter_ns() - t0
             metrics.busy_ns += elapsed
-            if item is not None:
-                metrics.service.record(elapsed / 1e6)
-            if result is not None and self.out_queue is not None:
-                self.out_queue.put(result)
-                metrics.items_out += 1
+            if count:
+                metrics.service.record(elapsed / 1e6 / count)
+            if result is not None:
+                metrics.items_out += result.get('packets', 0)
+                if self.out_queue is not None:
+                    self.out_queue.put(result)
 
     def snapshot(self):
         snap = super().snapshot()
@@ -461,9 +527,33 @@ class ServeStage(Stage):
         super().__init__(in_queue, None, workers)
         self.feed = feed
 
+    def _loop(self, ctx, metrics):
+        """Summaries are single dicts rather than chunks, so this stage keeps
+        its own loop instead of the chunk-shaped one in the base class."""
+        while True:
+            if self._stop.is_set() and self.in_queue.depth() == 0:
+                return
+            waited = time.perf_counter_ns()
+            try:
+                summary = self.in_queue.get()
+            except Closed:
+                return
+            metrics.wait_ns += time.perf_counter_ns() - waited
+            if summary is None:
+                continue
+            metrics.items_in += 1
+            t0 = time.perf_counter_ns()
+            try:
+                self.feed.publish(summary)
+            except Exception:      # noqa: BLE001 - a live view is not critical
+                metrics.errors += 1
+                log.exception('serve: failed to publish batch summary')
+            elapsed = time.perf_counter_ns() - t0
+            metrics.busy_ns += elapsed
+            metrics.service.record(elapsed / 1e6)
+
     def handle(self, summary, _ctx, _metrics):
         self.feed.publish(summary)
-        return None
 
     def snapshot(self):
         snap = super().snapshot()

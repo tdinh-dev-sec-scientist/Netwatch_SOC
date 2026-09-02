@@ -259,7 +259,7 @@ class TrafficGenerator:
                   c2='91.108.4.77', callbacks=12, interval=60.0, jitter=0.02):
         """Metronomic HTTP check-ins — the low-jitter signature."""
         out, ts = [], start_ts
-        for i in range(callbacks):
+        for _ in range(callbacks):
             out.append((ts, F.tcp_frame(
                 F.http_request('POST', '/api/v1/beacon', 'cdn.updates.top',
                                'Mozilla/5.0', body=b'\x00' * 48),

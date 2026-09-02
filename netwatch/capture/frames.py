@@ -150,8 +150,8 @@ def _encode_name(name):
     for label in name.split('.'):
         if not label:
             continue
-        label = label.encode('ascii', 'replace')[:63]
-        out += bytes([len(label)]) + label
+        encoded = label.encode('ascii', 'replace')[:63]
+        out += bytes([len(encoded)]) + encoded
     return out + b'\x00'
 
 

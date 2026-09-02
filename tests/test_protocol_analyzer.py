@@ -2,10 +2,13 @@
 
 import pytest
 
+from netwatch.analysis.protocol import (
+    SUPPORTED_PROTOCOLS,
+    ParseError,
+    decode_tcp_flags,
+    shannon_entropy,
+)
 from netwatch.capture import frames as F
-from netwatch.analysis.protocol import (SUPPORTED_PROTOCOLS, ParseError,
-                              ProtocolAnalyzer, decode_tcp_flags,
-                              shannon_entropy)
 
 SRC, DST = '10.0.1.20', '93.184.216.34'
 

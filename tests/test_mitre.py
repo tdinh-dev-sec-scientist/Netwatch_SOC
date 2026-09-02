@@ -2,11 +2,11 @@
 
 import re
 
-from netwatch import mitre
-from netwatch.capture.generator import TrafficGenerator
-from netwatch.analysis.rules import ThreatDetector
-
 from conftest import run_scenario
+
+from netwatch import mitre
+from netwatch.analysis.rules import ThreatDetector
+from netwatch.capture.generator import TrafficGenerator
 
 TECHNIQUE_ID = re.compile(r'^T\d{4}(\.\d{3})?$')
 
@@ -103,8 +103,8 @@ def test_expected_pairings_are_correct(engine):
                                                  det.techniques)
 
 
-def test_catalog_persists_into_the_database(db):
-    rows = db.get_mitre_techniques()
+def test_catalog_persists_into_the_database(repo):
+    rows = repo.get_mitre_techniques()
     assert len(rows) == mitre.technique_count()
     ids = {r['technique_id'] for r in rows}
     assert ids == set(mitre.TECHNIQUES)
@@ -113,29 +113,34 @@ def test_catalog_persists_into_the_database(db):
         assert row['tactic']
 
 
-def test_alerts_link_to_techniques_in_the_database(populated_db):
-    links = populated_db.reader().execute(
-        'SELECT COUNT(*) FROM alert_techniques').fetchone()[0]
-    assert links > 0
+def _scalar(engine_, sql):
+    from sqlalchemy import text
+    with engine_.connect() as conn:
+        return conn.execute(text(sql)).scalar()
+
+
+def test_alerts_link_to_techniques_in_the_database(populated_engine):
+    assert _scalar(populated_engine,
+                   'SELECT COUNT(*) FROM alert_techniques') > 0
 
     # Every link must resolve to both a real alert and a catalogued technique.
-    orphaned = populated_db.reader().execute(
-        """SELECT COUNT(*) FROM alert_techniques at
-           LEFT JOIN alerts a ON a.id = at.alert_id
-           LEFT JOIN mitre_techniques t ON t.technique_id = at.technique_id
-           WHERE a.id IS NULL OR t.technique_id IS NULL""").fetchone()[0]
+    orphaned = _scalar(populated_engine, """
+        SELECT COUNT(*) FROM alert_techniques at
+        LEFT JOIN alerts a ON a.id = at.alert_id
+        LEFT JOIN mitre_techniques t ON t.technique_id = at.technique_id
+        WHERE a.id IS NULL OR t.technique_id IS NULL""")
     assert orphaned == 0
 
     # And no alert may exist without at least one technique attached.
-    unmapped = populated_db.reader().execute(
-        """SELECT COUNT(*) FROM alerts a
-           WHERE NOT EXISTS (SELECT 1 FROM alert_techniques at
-                             WHERE at.alert_id = a.id)""").fetchone()[0]
+    unmapped = _scalar(populated_engine, """
+        SELECT COUNT(*) FROM alerts a
+        WHERE NOT EXISTS (SELECT 1 FROM alert_techniques at
+                          WHERE at.alert_id = a.id)""")
     assert unmapped == 0
 
 
-def test_observed_technique_count_in_database(populated_db):
-    observed = populated_db.reader().execute(
-        'SELECT COUNT(DISTINCT technique_id) FROM alert_techniques'
-    ).fetchone()[0]
+def test_observed_technique_count_in_database(populated_engine):
+    observed = _scalar(
+        populated_engine,
+        'SELECT COUNT(DISTINCT technique_id) FROM alert_techniques')
     assert observed >= 12, 'only %d techniques observed in DB' % observed

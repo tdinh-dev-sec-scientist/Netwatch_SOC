@@ -1,9 +1,17 @@
-# NetWatch SOC runtime dependencies.
-# The capture, parsing, detection and persistence layers use only the Python
-# standard library (struct, sqlite3, re, math). Flask serves the API and
-# dashboard; gunicorn runs it in production.
+# NetWatch runtime dependencies.
+#
+# The capture, parsing and rules layers are standard library plus numpy: the
+# only thing numpy is used for is the payload-entropy histogram, which
+# profiling showed to be 55% of all parse time as a pure-Python byte loop.
+# There is a pure-Python fallback if numpy is unavailable — see
+# netwatch/analysis/protocol.py.
 Flask>=3.0,<4.0
 gunicorn>=22.0,<24.0
+SQLAlchemy>=2.0,<3.0
+psycopg[binary]>=3.1,<4.0
+alembic>=1.13,<2.0
+numpy>=1.26,<3.0
 
-# Development / testing
-pytest>=8.0
+# Optional but recommended: the pipeline's CPU and RSS sampling degrades
+# gracefully without it, reporting "unavailable" instead of failing.
+psutil>=5.9

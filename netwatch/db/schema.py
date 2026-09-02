@@ -17,7 +17,13 @@ from netwatch.analysis.protocol import (
     PROTOCOL_RISK,
     SUPPORTED_PROTOCOLS,
 )
-from netwatch.db.models import COMPOSITE_INDEXES, Base, MitreTechnique, Protocol, ThreatType
+from netwatch.db.models import (
+    COMPOSITE_INDEXES,
+    Base,
+    MitreTechnique,
+    Protocol,
+    ThreatType,
+)
 
 log = logging.getLogger('netwatch.db.schema')
 
@@ -44,13 +50,24 @@ def _layer(name):
 def create_all(engine):
     """Create every table and index. Idempotent."""
     Base.metadata.create_all(engine)
+    # Same reason as drop_all: connections opened before the enum existed
+    # hold no adapter for it.
+    engine.dispose()
 
 
 def drop_all(engine):
-    """Drop everything this application owns, including the severity enum."""
+    """Drop everything this application owns, including the severity enum.
+
+    Disposes the pool afterwards. psycopg caches the OID of a user-defined
+    type (here `severity_level`) per connection; a pooled connection that
+    outlived a DROP TYPE would keep sending the stale OID and fail with
+    "cache lookup failed for type N" on the next insert. Dropping the schema
+    is rare enough that throwing the pool away with it costs nothing.
+    """
     Base.metadata.drop_all(engine)
     with engine.begin() as conn:
         conn.execute(text('DROP TYPE IF EXISTS severity_level'))
+    engine.dispose()
 
 
 def seed_reference_data(engine, threat_type_rows=None):

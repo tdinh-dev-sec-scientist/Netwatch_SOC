@@ -1,26 +1,29 @@
 """
-Gunicorn configuration for NetWatch SOC.
+Gunicorn configuration for NetWatch.
 
 The important thing this file does is protect a real architectural constraint.
 
-`App.create_app()` starts the packet-capture/detection engine on a background
-thread *inside the process that calls it*. Gunicorn calls it once per worker.
-So with N workers you get N independent engines, each generating its own
-traffic and writing to the same SQLite file: duplicated packet rows, duplicated
-alerts, and N processes contending for the writer lock.
+`create_app(run_pipeline=True)` starts the five-stage pipeline *inside the
+process that calls it*. Gunicorn calls it once per worker, so with N workers
+you get N independent pipelines, each generating its own traffic and writing
+to the same database: duplicated packets and alerts, and N times the write
+load for no extra coverage. That is a silent data problem rather than a crash,
+so `on_starting` refuses the combination instead of letting it run.
 
-That is silent corruption, not a crash, so `on_starting` refuses to boot the
-combination rather than letting it run. Two supported topologies:
+Two supported topologies:
 
-  1. All-in-one (default) — one worker, many threads. The engine and the API
-     share a process; SQLite has exactly one writer. Threads are the right
-     concurrency primitive here because every request is a short, GIL-releasing
-     SQLite read (p95 well under a millisecond).
+  1. Embedded (development) — one worker, many threads, pipeline on. Simple to
+     run; the pipeline and the API share a process.
 
-  2. Split — a dedicated engine container (NETWATCH_SIMULATE=1, no HTTP) plus
-     read-only API workers (NETWATCH_SIMULATE=0, workers > 1) over a shared
-     volume. SQLite WAL supports one writer with many concurrent readers, so
-     this scales the API without touching the write path.
+  2. Split (default in compose, and the shape PostgreSQL makes possible) — a
+     dedicated engine container running `python -m netwatch.cli engine`, plus
+     any number of stateless API workers with the pipeline off. The API tier
+     scales horizontally without touching the write path, which is the reason
+     persistence moved off SQLite in the first place.
+
+Threads rather than processes for the API tier: every request is a short query
+that spends its time inside psycopg waiting on a socket, and psycopg releases
+the GIL for that wait.
 
 Overridable via environment: GUNICORN_WORKERS, GUNICORN_THREADS,
 GUNICORN_TIMEOUT, GUNICORN_LOGLEVEL, NETWATCH_BIND.
@@ -37,18 +40,17 @@ def _int_env(name, default):
     try:
         return int(raw)
     except ValueError:
-        raise SystemExit('%s must be an integer, got %r' % (name, raw))
+        raise SystemExit('%s must be an integer, got %r' % (name, raw)) from None
 
 
-def _simulation_enabled():
-    return os.environ.get('NETWATCH_SIMULATE', '1') != '0'
+def _pipeline_enabled():
+    return os.environ.get('NETWATCH_RUN_PIPELINE', '0').strip().lower() \
+        not in ('0', 'false', 'no', 'off', '')
 
 
 bind = os.environ.get('NETWATCH_BIND', '0.0.0.0:5001')
 
-# Default to a single worker: correct for the all-in-one topology. Read-only
-# API containers override this (see the `web` service in docker-compose.yml).
-workers = _int_env('GUNICORN_WORKERS', 1)
+workers = _int_env('GUNICORN_WORKERS', 2)
 threads = _int_env('GUNICORN_THREADS', 8)
 worker_class = 'gthread'
 
@@ -58,8 +60,9 @@ worker_class = 'gthread'
 worker_tmp_dir = '/dev/shm'
 
 # MUST stay False. With preload_app the app is built in the master before fork,
-# and threads do not survive fork() — the engine thread would be started in the
-# master and be absent from every worker that actually serves traffic.
+# and neither threads nor database connections survive fork(): an embedded
+# pipeline would be started in the master and absent from every worker, and
+# pooled connections would be shared across processes.
 preload_app = False
 
 timeout = _int_env('GUNICORN_TIMEOUT', 60)
@@ -80,28 +83,29 @@ max_requests_jitter = _int_env('GUNICORN_MAX_REQUESTS_JITTER', 1000)
 accesslog = '-'
 errorlog = '-'
 loglevel = os.environ.get('GUNICORN_LOGLEVEL', 'info')
-access_log_format = ('%(h)s "%(r)s" %(s)s %(b)s %(M)sms "%(a)s"')
+access_log_format = '%(h)s "%(r)s" %(s)s %(b)s %(M)sms "%(a)s"'
 
 # Honour X-Forwarded-* only from trusted proxies. Defaults to none: without a
 # reverse proxy in front, trusting these headers lets any client spoof its
-# source address in the logs.
+# source address in the logs. gunicorn wants a comma-separated list of
+# individual addresses (or "*"); it rejects CIDR notation at startup.
 forwarded_allow_ips = os.environ.get('GUNICORN_FORWARDED_ALLOW_IPS', '')
 proxy_allow_ips = forwarded_allow_ips
 
 
 def on_starting(server):
-    """Refuse topologies that would run more than one engine against one DB."""
-    if _simulation_enabled() and workers > 1:
+    """Refuse topologies that would run more than one pipeline per database."""
+    if _pipeline_enabled() and workers > 1:
         server.log.error(
-            'Refusing to start: NETWATCH_SIMULATE is on with %d workers.\n'
-            '  Each worker would start its own capture/detection engine and '
-            'write to the same SQLite database,\n'
-            '  producing duplicated packets and alerts plus writer-lock '
-            'contention.\n'
-            '  Either set GUNICORN_WORKERS=1 (all-in-one), or run a dedicated '
-            'engine container and set\n'
-            '  NETWATCH_SIMULATE=0 on these API workers (split topology).',
-            workers)
+            'Refusing to start: NETWATCH_RUN_PIPELINE is on with %d workers.\n'
+            '  Each worker would start its own capture pipeline against the '
+            'same database,\n'
+            '  producing duplicated packets and alerts and multiplying the '
+            'write load.\n'
+            '  Either set GUNICORN_WORKERS=1 (embedded), or run a dedicated '
+            'engine container and leave\n'
+            '  NETWATCH_RUN_PIPELINE unset on these API workers (split '
+            'topology).', workers)
         raise SystemExit(1)
 
     if workers > 1 and workers > multiprocessing.cpu_count() * 2 + 1:
@@ -109,26 +113,25 @@ def on_starting(server):
             'GUNICORN_WORKERS=%d exceeds the usual 2*CPU+1 ceiling (%d CPUs)',
             workers, multiprocessing.cpu_count())
 
-    server.log.info(
-        'NetWatch SOC starting: workers=%d threads=%d simulation=%s db=%s',
-        workers, threads, 'on' if _simulation_enabled() else 'off',
-        os.environ.get('NETWATCH_DB', '<default>'))
+    server.log.info('NetWatch starting: workers=%d threads=%d pipeline=%s',
+                    workers, threads,
+                    'on' if _pipeline_enabled() else 'off')
 
 
 def worker_exit(server, worker):
-    """Stop the engine and flush its pending batch on graceful shutdown.
+    """Drain an embedded pipeline on graceful shutdown.
 
-    The engine buffers packets and writes them in one transaction per batch.
-    Without this hook a SIGTERM discards whatever is still buffered, because
-    the engine runs on a daemon thread that dies with the process.
+    The persistence stage buffers packets and commits them per batch. Without
+    this hook a SIGTERM would discard whatever is still buffered, because the
+    stage workers are daemon threads that die with the process.
     """
     try:
-        app = worker.wsgi
-        simulator = getattr(app, 'simulator', None)
-        if simulator is None:
+        pipeline = getattr(worker.wsgi, 'pipeline', None)
+        if pipeline is None:
             return
-        simulator.stop()
-        simulator.flush()
-        server.log.info('engine stopped; buffered batch flushed')
-    except Exception as exc:                      # never block shutdown
-        server.log.warning('engine shutdown hook failed: %s', exc)
+        report = pipeline.shutdown(timeout=graceful_timeout)
+        server.log.info('pipeline drained: %d packets persisted, %d dropped',
+                        report['accounting']['packets_persisted'],
+                        report['accounting']['packets_dropped'])
+    except Exception as exc:      # noqa: BLE001 - never block shutdown
+        server.log.warning('pipeline shutdown hook failed: %s', exc)
