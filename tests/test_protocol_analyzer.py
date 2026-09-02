@@ -2,8 +2,8 @@
 
 import pytest
 
-import frames as F
-from ProtocolAnalyzer import (SUPPORTED_PROTOCOLS, ParseError,
+from netwatch.capture import frames as F
+from netwatch.analysis.protocol import (SUPPORTED_PROTOCOLS, ParseError,
                               ProtocolAnalyzer, decode_tcp_flags,
                               shannon_entropy)
 

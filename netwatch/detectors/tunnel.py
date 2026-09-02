@@ -16,6 +16,8 @@ class ICMPTunnelDetector(Detector):
     description = ('Oversized, high-entropy ICMP echo payloads repeated '
                    'between the same pair of hosts')
     techniques = ('T1572', 'T1048')
+    default_severity = 'HIGH'
+    protocols = ('ICMP',)
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -73,6 +75,7 @@ class ProtocolTunnelDetector(Detector):
     description = ('L7 protocol identified by byte signature on a port '
                    'normally reserved for a different protocol')
     techniques = ('T1572',)
+    default_severity = 'MEDIUM'
 
     def __init__(self, cfg):
         super().__init__(cfg)

@@ -6,9 +6,12 @@ access and is swept by `expire()` so a long-running engine does not grow
 without limit.
 """
 
+import datetime as _dt
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+
+UTC = _dt.timezone.utc
 
 SEVERITY_ORDER = {'INFO': 0, 'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4}
 
@@ -30,6 +33,17 @@ class Finding:
     ts: float = None
     evidence: dict = field(default_factory=dict)
 
+    @property
+    def dt(self):
+        """Event time as a timezone-aware datetime, for the persistence layer.
+
+        Detectors reason in epoch floats because sliding-window arithmetic is
+        cheaper that way; the database stores TIMESTAMPTZ because that is the
+        correct type for a point in time. This property is the one conversion
+        point between the two.
+        """
+        return _dt.datetime.fromtimestamp(self.ts, UTC)
+
     def __post_init__(self):
         if self.severity not in SEVERITY_ORDER:
             raise ValueError('invalid severity %r' % self.severity)
@@ -39,8 +53,27 @@ class Finding:
             raise ValueError('every finding must map to >=1 ATT&CK technique')
 
 
+#: Memoised results for is_internal(). A capture sees the same few thousand
+#: addresses over and over, and the check was 10% of rule-evaluation time when
+#: recomputed per packet. Bounded so a scan across a large address space
+#: cannot grow it without limit.
+_INTERNAL_CACHE = {}
+_INTERNAL_CACHE_LIMIT = 65536
+
+
 def is_internal(ip):
     """RFC1918 / loopback / link-local check without the ipaddress overhead."""
+    cached = _INTERNAL_CACHE.get(ip)
+    if cached is not None:
+        return cached
+    result = _is_internal_uncached(ip)
+    if len(_INTERNAL_CACHE) >= _INTERNAL_CACHE_LIMIT:
+        _INTERNAL_CACHE.clear()
+    _INTERNAL_CACHE[ip] = result
+    return result
+
+
+def _is_internal_uncached(ip):
     if not ip or ':' in ip:
         return False
     try:
@@ -182,6 +215,16 @@ class Detector:
     threat_type = 'base'
     description = ''
     techniques = ()
+    # The highest severity this detector can emit. Seeded into
+    # `threat_types.default_severity` so the severity band of a rule is a
+    # property of the schema, not a constant buried in a branch.
+    default_severity = 'MEDIUM'
+    #: Protocols this detector can possibly fire on, or None for "any".
+    #: This is a dispatch hint, not the guard: `inspect()` still checks for
+    #: itself, so a wrong value here can only cost work, never change a
+    #: verdict. The engine uses it to skip calls that would return [] on
+    #: their first line, which is most calls for most detectors.
+    protocols = None
 
     def __init__(self, cfg):
         self.cfg = cfg

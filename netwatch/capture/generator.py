@@ -1,29 +1,20 @@
 """
-PacketSimulator — synthetic traffic source and the engine loop that drives it.
+TrafficGenerator — deterministic synthetic traffic at the wire-format level.
 
-Two responsibilities, deliberately separated:
+Builds real Ethernet frames: a benign background mix plus named attack
+scenarios with known ground truth. Seeded, so a given seed always produces
+byte-identical output, which is what makes the tests and the benchmarks
+reproducible.
 
-  TrafficGenerator  builds real Ethernet frames: a benign background mix plus
-                    named attack scenarios with known ground truth. Seeded, so
-                    a given seed always produces byte-identical output — which
-                    is what makes the tests and the benchmark reproducible.
-
-  PacketSimulator   the pipeline: frames -> ProtocolAnalyzer -> ThreatDetector
-                    -> batched persistence, with measured (not invented)
-                    throughput and latency written to performance_metrics.
-
-Nothing downstream knows the frames are synthetic. Replacing TrafficGenerator
-with a scapy AsyncSniffer or a pcap reader requires no other change:
-
-    sniffer = AsyncSniffer(prn=lambda p: sim.process(bytes(p), time.time()))
+Nothing downstream knows the frames are synthetic — the pipeline's capture
+stage takes ``bytes`` and a timestamp. Swapping this for a scapy
+``AsyncSniffer`` or a pcap reader requires no change anywhere else; see
+``netwatch.capture.source`` for the seam.
 """
 
 import random
-import threading
-import time
 
-import frames as F
-from ProtocolAnalyzer import ProtocolAnalyzer
+from netwatch.capture import frames as F
 
 # Background traffic mix. Weights approximate an enterprise egress profile.
 BACKGROUND_MIX = [
@@ -465,177 +456,3 @@ class TrafficGenerator:
     @classmethod
     def expected_threats(cls, name):
         return cls.SCENARIOS[name][1]
-
-
-class PacketSimulator:
-    """Runs frames through parse -> detect -> persist with real measurement."""
-
-    def __init__(self, db, threat_detector, protocol_analyzer=None,
-                 seed=None, cfg=None):
-        self.db = db
-        self.td = threat_detector
-        self.pa = protocol_analyzer or ProtocolAnalyzer()
-        self.gen = TrafficGenerator(seed)
-        self.cfg = (cfg or threat_detector.cfg)['engine']
-        self._running = False
-        self._lock = threading.Lock()
-        self._batch = []
-        self._findings = []
-        self._last_flush = time.time()
-        self.packets_processed = 0
-        self.alerts_generated = 0
-        self.parse_ns = 0
-        self.detect_ns = 0
-        self.db_write_ms = 0.0
-
-    # ── pipeline ─────────────────────────────────────────────────────────────
-
-    def process(self, frame, ts):
-        """Parse one frame, run detection, buffer for persistence.
-
-        This is the seam a real capture backend plugs into.
-        """
-        t0 = time.perf_counter_ns()
-        pkt = self.pa.safe_parse(frame, ts)
-        t1 = time.perf_counter_ns()
-        self.parse_ns += t1 - t0
-        if pkt is None:
-            return []
-        findings = self.td.analyze(pkt)
-        self.detect_ns += time.perf_counter_ns() - t1
-
-        self.packets_processed += 1
-        self.alerts_generated += len(findings)
-        if self.cfg['store_packets']:
-            self._batch.append(pkt)
-        self._findings.extend(findings)
-        return findings
-
-    def flush(self):
-        """Persist the buffered batch. Returns milliseconds spent writing."""
-        if not self._batch and not self._findings:
-            return 0.0
-        batch, findings = self._batch, self._findings
-        self._batch, self._findings = [], []
-        _p, _a, ms = self.db.persist_batch(batch, findings)
-        self.db_write_ms += ms
-        self._last_flush = time.time()
-        return ms
-
-    def maybe_flush(self):
-        if (len(self._batch) >= self.cfg['packet_batch']
-                or len(self._findings) >= 50
-                or time.time() - self._last_flush >= self.cfg[
-                    'flush_interval_s']):
-            return self.flush()
-        return 0.0
-
-    def run_frames(self, frames, record_metrics=True):
-        """Process an explicit list of (ts, frame) pairs.
-
-        Used by tests and by any batch/pcap replay. Records the run's actual
-        measured throughput, exactly as the live loop does — the wall time
-        here is real work, not a simulated window.
-        """
-        found = []
-        started = time.perf_counter()
-        before_packets = self.packets_processed
-        before_alerts = self.alerts_generated
-        for ts, frame in frames:
-            found.extend(self.process(frame, ts))
-            self.maybe_flush()
-        self.flush()
-        elapsed = time.perf_counter() - started
-        if record_metrics and elapsed > 0:
-            self._record_window(elapsed,
-                                self.packets_processed - before_packets,
-                                self.alerts_generated - before_alerts)
-        return found
-
-    # ── live loop ────────────────────────────────────────────────────────────
-
-    def run(self, rate_pps=95.0, duration_s=None):
-        """Continuous simulation. Injects attack scenarios periodically."""
-        self._running = True
-        started = time.time()
-        interval = 1.0 / rate_pps
-        window_start = time.time()
-        window_pkts = window_alerts = 0
-        pending = []
-        scenario_names = list(TrafficGenerator.SCENARIOS)
-        next_scenario = time.time() + 20
-
-        while self._running:
-            now = time.time()
-            if duration_s and now - started >= duration_s:
-                break
-            try:
-                if now >= next_scenario and not pending:
-                    name = self.gen.rng.choice(scenario_names)
-                    # Scenario frames carry their own relative timeline;
-                    # re-base it onto the wall clock.
-                    raw = self.gen.scenario(name, start_ts=0.0)
-                    base = raw[0][0] if raw else 0.0
-                    pending = [(now + (t - base), fr) for t, fr in raw]
-                    next_scenario = now + self.gen.rng.uniform(45, 120)
-
-                if pending and pending[0][0] <= now:
-                    ts, frame = pending.pop(0)
-                    self.process(frame, now)
-                else:
-                    frame = self.gen.background_frame(now)
-                    self.process(frame, now)
-                window_pkts += 1
-
-                self.maybe_flush()
-
-                elapsed = now - window_start
-                if elapsed >= 60:
-                    self._record_window(elapsed, window_pkts, window_alerts)
-                    window_start, window_pkts, window_alerts = now, 0, 0
-
-                time.sleep(interval)
-            except Exception:
-                # Never let one bad frame kill the loop, but do not hide the
-                # failure either — parse_errors and detector_errors surface it.
-                time.sleep(0.05)
-        self.flush()
-
-    def stop(self):
-        self._running = False
-
-    def _record_window(self, elapsed, packets, alerts):
-        """Write measured throughput. Every value here is observed."""
-        latencies = []
-        for _ in range(5):
-            t0 = time.perf_counter()
-            self.db.get_overview()
-            latencies.append((time.perf_counter() - t0) * 1000)
-        latencies.sort()
-        self.db.record_performance({
-            'source': 'engine',
-            'window_s': round(elapsed, 3),
-            'packets_processed': packets,
-            'packets_per_min': round(packets / elapsed * 60, 1),
-            'alerts_generated': alerts,
-            'parse_errors': self.pa.parse_errors,
-            'parse_us_avg': round(
-                self.parse_ns / max(self.packets_processed, 1) / 1000.0, 3),
-            'detect_us_avg': round(
-                self.detect_ns / max(self.packets_processed, 1) / 1000.0, 3),
-            'db_write_ms': round(self.db_write_ms, 2),
-            'query_p50_ms': round(latencies[len(latencies) // 2], 3),
-            'query_p95_ms': round(latencies[-1], 3),
-        })
-
-    def stats(self):
-        return {
-            'packets_processed': self.packets_processed,
-            'alerts_generated': self.alerts_generated,
-            'parse_errors': self.pa.parse_errors,
-            'parse_us_avg': round(
-                self.parse_ns / max(self.packets_processed, 1) / 1000.0, 3),
-            'detect_us_avg': round(
-                self.detect_ns / max(self.packets_processed, 1) / 1000.0, 3),
-            'protocols_seen': dict(self.pa.stats),
-        }

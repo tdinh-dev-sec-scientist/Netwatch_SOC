@@ -16,6 +16,9 @@ class SYNFloodDetector(Detector):
     description = ('High SYN rate to one destination with an abnormally low '
                    'proportion of completed handshakes')
     techniques = ('T1498',)
+    default_severity = 'CRITICAL'
+    protocols = ('TCP', 'HTTP', 'TLS', 'SSH', 'SMB', 'RDP', 'FTP',
+                 'SMTP', 'POP3', 'IMAP', 'TELNET')
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -76,6 +79,7 @@ class UDPFloodDetector(Detector):
     threat_type = 'udp_flood'
     description = 'UDP packet rate to a single destination exceeding threshold'
     techniques = ('T1498',)
+    default_severity = 'CRITICAL'
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -130,6 +134,8 @@ class AmplificationDetector(Detector):
     description = ('UDP services returning responses far larger than their '
                    'requests — NTP monlist, DNS ANY, SNMP get-bulk')
     techniques = ('T1498.002',)
+    default_severity = 'HIGH'
+    protocols = ('NTP', 'DNS', 'SNMP')
 
     def __init__(self, cfg):
         super().__init__(cfg)

@@ -47,6 +47,8 @@ class HTTPAnomalyDetector(Detector):
                    'JNDI patterns in the request line/headers, plus offensive '
                    'security tool user agents and oversized requests')
     techniques = ('T1190',)
+    default_severity = 'CRITICAL'
+    protocols = ('HTTP',)
 
     def inspect(self, pkt):
         if pkt.get('protocol') != 'HTTP':

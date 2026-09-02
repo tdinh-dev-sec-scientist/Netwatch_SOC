@@ -76,7 +76,7 @@ def test_packets_persist_with_decoded_l7(populated_db):
 
 def test_connections_aggregate_rather_than_duplicate(db, simulator):
     """Repeating a flow must increment counters, not insert new rows."""
-    import frames as F
+    from netwatch.capture import frames as F
     frames = [(BASE_TS + i * 0.1,
                F.tcp_frame(b'x' * 100, '10.0.1.5', '10.0.2.7', 40000, 80,
                            'PSH|ACK'))
@@ -300,7 +300,7 @@ def test_batch_write_is_transactional(db):
 
 def test_separate_manager_sees_committed_rows(db, simulator, tmp_path):
     """Readers on other connections must observe committed writes."""
-    import frames as F
+    from netwatch.capture import frames as F
     simulator.run_frames([
         (BASE_TS, F.tcp_frame(b'hello', '10.0.1.9', '10.0.2.9', 40000, 80))])
     other = DatabaseManager(db.db_path)

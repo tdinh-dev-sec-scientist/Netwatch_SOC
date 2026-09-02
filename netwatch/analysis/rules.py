@@ -11,9 +11,9 @@ packets in and hands findings out. DB_Manager turns findings into rows.
 
 import time
 
-import config as config_module
-import detectors
-import mitre
+from netwatch import config as config_module
+from netwatch import detectors
+from netwatch import mitre
 
 
 class ThreatDetector:
@@ -24,6 +24,9 @@ class ThreatDetector:
         self.cfg = cfg or config_module.load()
         self.detectors = detectors.build_all(self.cfg)
         self._by_name = {d.name: d for d in self.detectors}
+        # protocol name -> the detectors that can possibly fire on it. Built
+        # lazily per protocol seen; see _dispatch_for().
+        self._dispatch = {}
         self._last_gc = time.time()
         self._gc_interval = self.cfg['engine']['gc_interval_s']
         self.packets_analyzed = 0
@@ -59,7 +62,7 @@ class ThreatDetector:
         self.packets_analyzed += 1
 
         findings = []
-        for det in self.detectors:
+        for det in self._dispatch_for(pkt.get('protocol')):
             try:
                 result = det.inspect(pkt)
             except Exception:
@@ -76,6 +79,24 @@ class ThreatDetector:
         if now - self._last_gc > self._gc_interval:
             self.expire(now)
         return findings
+
+    def _dispatch_for(self, protocol):
+        """Detectors worth calling for `protocol`, cached per protocol.
+
+        Most detectors open with a protocol guard and return an empty list on
+        their first line — an ARP spoofing rule has nothing to say about a TLS
+        record. Calling all seventeen for every packet spends most of the
+        rule stage's time entering and leaving functions. This filters on the
+        `protocols` hint each detector declares; a detector that declares None
+        is always called, and every detector keeps its own guard, so the hint
+        can only remove work, never change a verdict.
+        """
+        cached = self._dispatch.get(protocol)
+        if cached is None:
+            cached = self._dispatch[protocol] = tuple(
+                d for d in self.detectors
+                if d.protocols is None or protocol in d.protocols)
+        return cached
 
     def expire(self, now=None):
         now = now or time.time()
@@ -127,3 +148,9 @@ class ThreatDetector:
         t = mitre.get(technique_id)
         return (t.id, t.name, t.tactic) if t else (technique_id, 'Unknown',
                                                    'Unknown')
+
+
+# `RulesEngine` is the pipeline-facing name for this component: stage 3
+# evaluates rules over parsed packets. `ThreatDetector` is kept as an alias
+# because the detector modules and tests refer to it by that name.
+RulesEngine = ThreatDetector

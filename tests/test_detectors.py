@@ -4,12 +4,12 @@ import collections
 
 import pytest
 
-import config as config_module
-import detectors
-import frames as F
-import mitre
-from PacketSimulator import TrafficGenerator
-from ThreatDetector import ThreatDetector
+from netwatch import config as config_module
+from netwatch import detectors
+from netwatch.capture import frames as F
+from netwatch import mitre
+from netwatch.capture.generator import TrafficGenerator
+from netwatch.analysis.rules import ThreatDetector
 
 from conftest import BASE_TS, SEED, run_scenario
 

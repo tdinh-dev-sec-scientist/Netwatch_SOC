@@ -54,6 +54,7 @@ def catalog():
             'name': cls.name,
             'threat_type': cls.threat_type,
             'description': cls.description,
+            'severity': cls.default_severity,
             'techniques': list(cls.techniques),
             'config_section': section,
         }

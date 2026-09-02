@@ -2,8 +2,8 @@
 
 import pytest
 
-import mitre
-from ProtocolAnalyzer import SUPPORTED_PROTOCOLS
+from netwatch import mitre
+from netwatch.analysis.protocol import SUPPORTED_PROTOCOLS
 
 # (method, path) for every endpoint the API exposes.
 ENDPOINTS = [

@@ -2,9 +2,9 @@
 
 import re
 
-import mitre
-from PacketSimulator import TrafficGenerator
-from ThreatDetector import ThreatDetector
+from netwatch import mitre
+from netwatch.capture.generator import TrafficGenerator
+from netwatch.analysis.rules import ThreatDetector
 
 from conftest import run_scenario
 

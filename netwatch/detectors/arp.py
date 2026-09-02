@@ -20,6 +20,8 @@ class ARPSpoofDetector(Detector):
     description = ('IP-to-MAC binding changes and bursts of gratuitous ARP '
                    'replies on the local segment')
     techniques = ('T1557.002',)
+    default_severity = 'CRITICAL'
+    protocols = ('ARP',)
 
     def __init__(self, cfg):
         super().__init__(cfg)

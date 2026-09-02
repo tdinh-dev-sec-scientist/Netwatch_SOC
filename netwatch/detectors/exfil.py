@@ -16,6 +16,7 @@ class DataExfiltrationDetector(Detector):
     description = ('Outbound bytes from an internal source to a single '
                    'external destination exceeding a threshold in a window')
     techniques = ('T1041',)
+    default_severity = 'CRITICAL'
 
     def __init__(self, cfg):
         super().__init__(cfg)

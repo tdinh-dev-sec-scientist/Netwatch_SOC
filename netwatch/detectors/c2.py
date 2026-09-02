@@ -18,6 +18,8 @@ class C2BeaconDetector(Detector):
     description = ('Low-jitter periodic callbacks on a single channel, scored '
                    'by coefficient of variation of inter-arrival times')
     techniques = ('T1071.001',)
+    default_severity = 'CRITICAL'
+    protocols = ('HTTP', 'TLS', 'QUIC', 'TCP')
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -89,6 +91,8 @@ class TLSAnomalyDetector(Detector):
     description = ('Deprecated TLS versions, absent SNI, or abnormally small '
                    'cipher suite lists in the ClientHello')
     techniques = ('T1573',)
+    default_severity = 'HIGH'
+    protocols = ('TLS',)
 
     def inspect(self, pkt):
         if pkt.get('protocol') != 'TLS':

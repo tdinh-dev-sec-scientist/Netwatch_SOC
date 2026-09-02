@@ -40,6 +40,7 @@ class PortScanDetector(Detector):
     description = ('Distinct destination ports contacted on a single host '
                    'within a sliding window')
     techniques = ('T1046',)
+    default_severity = 'HIGH'
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -99,6 +100,7 @@ class NetworkReconDetector(Detector):
     description = ('Host sweep across many destinations on a narrow port set, '
                    'or an ICMP echo sweep')
     techniques = ('T1595',)
+    default_severity = 'MEDIUM'
 
     def __init__(self, cfg):
         super().__init__(cfg)

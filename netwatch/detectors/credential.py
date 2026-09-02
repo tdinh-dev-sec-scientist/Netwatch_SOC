@@ -128,6 +128,8 @@ class BruteForceDetector(Detector):
                    'POP3 -ERR, IMAP NO, HTTP 401) or SSH session bursts '
                    'exceeding a threshold within a window')
     techniques = ('T1110', 'T1078')
+    default_severity = 'CRITICAL'
+    protocols = ('FTP', 'SMTP', 'POP3', 'IMAP', 'HTTP', 'SSH')
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -214,6 +216,8 @@ class CredentialAttackDetector(Detector):
                    'username across many hosts (spraying), or reusable '
                    'credentials sent in cleartext')
     techniques = ('T1110', 'T1078')
+    default_severity = 'HIGH'
+    protocols = ('FTP', 'POP3', 'IMAP', 'RDP', 'HTTP')
 
     def __init__(self, cfg):
         super().__init__(cfg)

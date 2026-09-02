@@ -21,6 +21,7 @@ class LateralMovementDetector(Detector):
     description = ('Internal-to-internal connections on remote admin services '
                    '(SMB/RDP/WinRM/VNC) fanning out to multiple hosts')
     techniques = ('T1021',)
+    default_severity = 'CRITICAL'
 
     def __init__(self, cfg):
         super().__init__(cfg)

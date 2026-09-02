@@ -3,7 +3,7 @@
 import json
 
 import benchmark
-from PacketSimulator import TrafficGenerator
+from netwatch.capture.generator import TrafficGenerator
 
 
 def test_percentile_helper():

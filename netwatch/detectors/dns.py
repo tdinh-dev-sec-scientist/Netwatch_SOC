@@ -1,6 +1,6 @@
 """DNS abuse detectors: tunneling/exfiltration and reconnaissance-style misuse."""
 
-from ProtocolAnalyzer import shannon_entropy
+from netwatch.analysis.protocol import shannon_entropy
 
 from .base import Detector, TimedCounter, TimedSet
 
@@ -29,6 +29,8 @@ class DNSTunnelDetector(Detector):
     description = ('Oversized high-entropy DNS labels, payload-bearing record '
                    'types, and elevated query volume to a single zone')
     techniques = ('T1071.004', 'T1048')
+    default_severity = 'CRITICAL'
+    protocols = ('DNS',)
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -109,6 +111,8 @@ class SuspiciousDNSDetector(Detector):
     description = ('High NXDOMAIN response ratio and repeated lookups of '
                    'high-entropy algorithmically-generated names')
     techniques = ('T1071.004',)
+    default_severity = 'HIGH'
+    protocols = ('DNS',)
 
     def __init__(self, cfg):
         super().__init__(cfg)

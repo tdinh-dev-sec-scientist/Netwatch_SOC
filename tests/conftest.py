@@ -8,10 +8,10 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import config as config_module            # noqa: E402
+from netwatch import config as config_module            # noqa: E402
 from DB_Manager import DatabaseManager     # noqa: E402
 from PacketSimulator import PacketSimulator, TrafficGenerator  # noqa: E402
-from ProtocolAnalyzer import ProtocolAnalyzer  # noqa: E402
+from netwatch.analysis.protocol import ProtocolAnalyzer  # noqa: E402
 from ThreatDetector import ThreatDetector  # noqa: E402
 
 SEED = 20240301
