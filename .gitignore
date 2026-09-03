@@ -10,3 +10,12 @@ netwatch.db-shm
 benchmark_results.json
 results.json
 .pytest_cache/
+
+# Generated PCAP corpora. Reproduced byte-for-byte by `python -m tools.make_pcaps`
+# and verified against the committed pcaps/manifest.json digests, so the files
+# themselves are not tracked (~57 MB).
+pcaps/attack/
+pcaps/benign/
+validation_results.json
+replay_results.json
+noise_results.json
