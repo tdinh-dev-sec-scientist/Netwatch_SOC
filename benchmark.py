@@ -93,7 +93,15 @@ def build_workload(packet_count, seed, start_ts):
     return frames
 
 
-def build_capture(path, packet_count, seed, start_ts):
+# Fixed epoch for the benchmark capture. Wall-clock timestamps would make the
+# file differ between invocations for no reason; run_throughput rebases the
+# capture onto the present anyway, so the absolute values are irrelevant to
+# what is measured — and a fixed one makes the digest comparable across runs
+# on different days and different machines.
+CAPTURE_EPOCH = 1_700_000_000.0
+
+
+def build_capture(path, packet_count, seed, start_ts=CAPTURE_EPOCH):
     """Write the benchmark capture once. Every run then replays these bytes."""
     written = pcap_io.write_pcap(
         path, build_workload(packet_count, seed, start_ts))
@@ -278,7 +286,7 @@ def main(argv=None):
     capture_path = args.pcap or os.path.join(
         tmp_dir, 'netwatch_bench_%d.pcap' % os.getpid())
     if owns_capture:
-        build_capture(capture_path, args.packets, args.seed, base_ts)
+        build_capture(capture_path, args.packets, args.seed)
     capture = pcap_io.pcap_summary(capture_path)
 
     db = DatabaseManager(db_path)

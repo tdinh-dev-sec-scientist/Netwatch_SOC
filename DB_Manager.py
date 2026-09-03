@@ -616,12 +616,27 @@ class DatabaseManager:
         return default if value is None else value
 
     def get_overview(self):
+        """Live counters for the dashboard's KPI strip.
+
+        `total_packets` is summed from the protocol_stats rollup rather than
+        counted from `packets`. That is what the rollup is for: an unbounded
+        COUNT(*) over the packet table is a full scan on both backends, and at
+        half a million rows it was the single slowest query in the API —
+        51 ms on PostgreSQL against a 50 ms budget. The rollup carries one row
+        per (minute, protocol) and is asserted to agree with the packet table
+        by test_protocol_stats_rollup_matches_packets.
+        """
         now = time.time()
         hour, day = now - 3600, now - 86400
         return {
-            'total_packets': self._scalar('SELECT COUNT(*) FROM packets'),
+            'total_packets': self._scalar(
+                'SELECT SUM(packets) FROM protocol_stats'),
+            # Same reasoning as total_packets: an hour of traffic is most of
+            # the packet table, so counting it through the index is barely
+            # cheaper than scanning. The rollup answers it from ~60 rows.
             'packets_last_hour': self._scalar(
-                'SELECT COUNT(*) FROM packets WHERE ts > ?', (hour,)),
+                'SELECT SUM(packets) FROM protocol_stats WHERE bucket > ?',
+                (int(hour),)),
             'packets_per_min': round(self._scalar(
                 """SELECT AVG(pm) FROM (
                      SELECT SUM(packets) AS pm FROM protocol_stats

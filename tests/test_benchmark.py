@@ -47,13 +47,19 @@ def test_workload_is_time_ordered_and_includes_attacks():
 def test_capture_is_written_once_and_replayed_identically(tmp_path):
     """Every run must consume the same bytes, or the runs are incomparable."""
     path = str(tmp_path / 'bench.pcap')
-    written, summary = benchmark.build_capture(path, 300, seed=7,
-                                               start_ts=1000.0)
+    written, summary = benchmark.build_capture(path, 300, seed=7)
     assert written == summary['packets']
 
     again = str(tmp_path / 'bench2.pcap')
-    benchmark.build_capture(again, 300, seed=7, start_ts=1000.0)
-    assert pcap_io.pcap_summary(again)['sha256'] == summary['sha256']
+    benchmark.build_capture(again, 300, seed=7)
+    assert pcap_io.pcap_summary(again)['sha256'] == summary['sha256'], \
+        'the capture is not reproducible across invocations'
+
+    # ...and a different seed must produce different bytes, or the digest
+    # proves nothing.
+    other = str(tmp_path / 'bench3.pcap')
+    benchmark.build_capture(other, 300, seed=8)
+    assert pcap_io.pcap_summary(other)['sha256'] != summary['sha256']
 
 
 def test_describe_reports_the_median_first():

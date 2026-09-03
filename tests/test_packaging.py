@@ -14,6 +14,18 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# These tests read the container definitions, which .dockerignore deliberately
+# keeps *out* of the image — so inside a `docker build --target test` run they
+# are not on disk. Skipping there is correct: the checks are about repository
+# content, and a build that has already copied the source has nothing left for
+# them to catch. They run in every other context, which is where they matter.
+CONTAINER_FILES = ('Dockerfile', 'docker-compose.yml', '.dockerignore')
+HAVE_CONTAINER_FILES = all(
+    os.path.exists(os.path.join(ROOT, name)) for name in CONTAINER_FILES)
+needs_container_files = pytest.mark.skipif(
+    not HAVE_CONTAINER_FILES,
+    reason='container definitions are excluded from the image by .dockerignore')
+
 # Modules that exist only for development and are deliberately not shipped.
 NOT_SHIPPED = {'conftest'}
 
@@ -45,6 +57,7 @@ def _dockerfile_runtime_payload():
     return copied
 
 
+@needs_container_files
 def test_every_shipped_module_is_copied_into_the_image():
     copied = _dockerfile_runtime_payload()
     missing = sorted(
@@ -54,12 +67,14 @@ def test_every_shipped_module_is_copied_into_the_image():
         'Dockerfile runtime stage does not copy: %s' % ', '.join(missing)
 
 
+@needs_container_files
 def test_package_directories_are_copied():
     copied = _dockerfile_runtime_payload()
     for package in ('detectors', 'tools', 'templates'):
         assert package in copied, '%s is missing from the image' % package
 
 
+@needs_container_files
 def test_dockerfile_copies_nothing_that_does_not_exist():
     for entry in _dockerfile_runtime_payload():
         assert os.path.exists(os.path.join(ROOT, entry)), \
@@ -74,6 +89,7 @@ def test_requirements_cover_every_third_party_import():
         assert package in requirements, '%s is not declared' % module
 
 
+@needs_container_files
 def test_healthchecks_agree_with_the_schema():
     """A healthcheck asserting the wrong table count fails every container."""
     from DB_Manager import TABLES
@@ -86,6 +102,7 @@ def test_healthchecks_agree_with_the_schema():
         'compose healthcheck does not expect %d tables' % len(TABLES)
 
 
+@needs_container_files
 def test_dockerignore_does_not_exclude_shipped_source():
     ignored = {line.strip() for line in _read('.dockerignore').splitlines()
                if line.strip() and not line.startswith('#')}
@@ -93,6 +110,7 @@ def test_dockerignore_does_not_exclude_shipped_source():
         assert entry not in ignored, '%s is copied but also ignored' % entry
 
 
+@needs_container_files
 def test_compose_defines_the_documented_profiles():
     compose = _read('docker-compose.yml')
     for profile in ('sqlite', 'test', 'bench', 'validate'):
@@ -100,6 +118,7 @@ def test_compose_defines_the_documented_profiles():
             'compose has no %s profile' % profile
 
 
+@needs_container_files
 def test_compose_publishes_no_database_port():
     """PostgreSQL must not be reachable off the compose network."""
     compose = _read('docker-compose.yml')
@@ -110,6 +129,7 @@ def test_compose_publishes_no_database_port():
     assert not published, 'postgres publishes %s' % published
 
 
+@needs_container_files
 def test_api_ports_are_bound_to_loopback():
     """The API has no authentication, so it must not bind 0.0.0.0."""
     for line in _read('docker-compose.yml').splitlines():

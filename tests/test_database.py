@@ -340,3 +340,20 @@ def test_separate_manager_sees_committed_rows(db, simulator, tmp_path):
         assert other.health()['tables']['packets'] >= 1
     finally:
         other.close()
+
+
+def test_overview_total_packets_agrees_with_the_packet_table(populated_db):
+    """The rollup shortcut must give the same answer as counting rows.
+
+    get_overview() sums protocol_stats instead of scanning packets, because
+    that scan was the slowest query in the API. The optimisation is only valid
+    while the two agree.
+    """
+    counted = populated_db._scalar('SELECT COUNT(*) FROM packets')
+    assert populated_db.get_overview()['total_packets'] == counted
+
+
+def test_overview_avoids_scanning_the_packet_table(populated_db):
+    """Guards the fix: the KPI strip must not full-scan packets."""
+    sql = 'SELECT SUM(packets) FROM protocol_stats'
+    assert not populated_db.scans_table(sql, table='packets')
