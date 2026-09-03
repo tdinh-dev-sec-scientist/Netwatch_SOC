@@ -1,8 +1,18 @@
-"""Shared fixtures. All tests use deterministic seeds and temporary databases."""
+"""Shared fixtures. All tests use deterministic seeds and disposable databases.
 
+By default every fixture gets its own SQLite file under pytest's tmp_path. Set
+NETWATCH_TEST_DB_URL to a postgresql:// URL and the identical suite runs
+against PostgreSQL instead, with each fixture isolated in its own schema:
+
+    NETWATCH_TEST_DB_URL=postgresql://netwatch:netwatch@127.0.0.1/netwatch \
+        pytest -q
+"""
+
+import itertools
 import os
 import sys
 import time
+import uuid
 
 import pytest
 
@@ -41,11 +51,41 @@ def gen():
     return TrafficGenerator(seed=SEED)
 
 
+TEST_DB_URL = os.environ.get('NETWATCH_TEST_DB_URL')
+BACKEND = 'postgresql' if TEST_DB_URL else 'sqlite'
+_schema_counter = itertools.count()
+
+
+def make_db(tmp_path, name='netwatch_test'):
+    """A disposable DatabaseManager on whichever backend is under test."""
+    if TEST_DB_URL:
+        schema = 'nw_%s_%d' % (uuid.uuid4().hex[:8], next(_schema_counter))
+        return DatabaseManager(url=TEST_DB_URL, schema=schema)
+    return DatabaseManager(str(tmp_path / (name + '.db')))
+
+
+def clone_manager(manager):
+    """A second DatabaseManager pointed at the same store as `manager`.
+
+    Used to prove that committed rows are visible on another connection. On
+    PostgreSQL that means the same URL *and* the same isolated schema.
+    """
+    if TEST_DB_URL:
+        return DatabaseManager(url=TEST_DB_URL,
+                               schema=manager.dialect.schema)
+    return DatabaseManager(manager.db_path)
+
+
+def dispose(manager):
+    manager.drop_schema()
+    manager.close()
+
+
 @pytest.fixture
 def db(tmp_path):
-    manager = DatabaseManager(str(tmp_path / 'netwatch_test.db'))
+    manager = make_db(tmp_path)
     yield manager
-    manager.close()
+    dispose(manager)
 
 
 @pytest.fixture
@@ -61,8 +101,7 @@ def populated_db(tmp_path_factory):
     to repeat per test. Nothing here depends on mutation isolation; the one
     test that acknowledges an alert picks its own target.
     """
-    path = tmp_path_factory.mktemp('netwatch') / 'populated.db'
-    manager = DatabaseManager(str(path))
+    manager = make_db(tmp_path_factory.mktemp('netwatch'), 'populated')
     engine = ThreatDetector(cfg=config_module.load())
     sim = PacketSimulator(manager, engine, ProtocolAnalyzer(), seed=SEED)
 
@@ -78,7 +117,7 @@ def populated_db(tmp_path_factory):
 
     manager.engine_for_tests = engine
     yield manager
-    manager.close()
+    dispose(manager)
 
 
 @pytest.fixture

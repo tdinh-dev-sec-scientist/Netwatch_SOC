@@ -70,12 +70,13 @@ def test_endpoint_returns_json(client, method, path):
 def test_health_reports_schema_and_engine(client):
     body = get(client, '/api/health')
     assert body['status'] == 'ok'
-    assert body['table_count'] == 8
+    assert body['table_count'] == 9
     assert body['index_count'] >= 20
-    assert body['journal_mode'].lower() == 'wal'
+    assert body['backend'] in ('sqlite', 'postgresql')
     assert set(body['tables']) == {
         'packets', 'connections', 'hosts', 'alerts', 'mitre_techniques',
-        'alert_techniques', 'protocol_stats', 'performance_metrics'}
+        'alert_techniques', 'protocol_stats', 'performance_metrics',
+        'validation_runs'}
     engine = body['engine']
     assert engine['detectors'] >= 15
     assert engine['threat_types'] >= 15

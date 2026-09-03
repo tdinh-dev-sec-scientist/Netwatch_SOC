@@ -5,22 +5,27 @@ import time
 
 import pytest
 
-from DB_Manager import TABLES, DatabaseManager
+from DB_Manager import TABLES
 
-from conftest import BASE_TS
+from conftest import BACKEND, BASE_TS, clone_manager
 
 EXPECTED_TABLES = {
     'packets', 'connections', 'hosts', 'alerts', 'mitre_techniques',
     'alert_techniques', 'protocol_stats', 'performance_metrics',
+    'validation_runs',
 }
+
+# Eight tables are written by the packet pipeline itself; validation_runs is
+# written by the replay/tuning harness and is asserted separately.
+PIPELINE_TABLES = EXPECTED_TABLES - {'validation_runs'}
 
 
 # ── schema ───────────────────────────────────────────────────────────────────
 
-def test_schema_has_exactly_eight_tables(db):
+def test_schema_has_exactly_nine_tables(db):
     names = set(db.table_names())
     assert names == EXPECTED_TABLES
-    assert len(names) == 8
+    assert len(names) == 9
     assert set(TABLES) == EXPECTED_TABLES
 
 
@@ -36,33 +41,55 @@ def test_index_count_is_substantial(db):
     assert len(db.index_names()) >= 20
 
 
+@pytest.mark.skipif(BACKEND != 'sqlite', reason='WAL is a SQLite journal mode')
 def test_wal_mode_enabled(db):
     assert db.health()['journal_mode'].lower() == 'wal'
 
 
+def test_backend_is_reported(db):
+    assert db.health()['backend'] == BACKEND
+
+
 def test_foreign_keys_are_enforced(db):
     with pytest.raises(Exception):
-        db._write_conn.execute(
-            'INSERT INTO alert_techniques (alert_id, technique_id, '
-            'confidence, ts) VALUES (999999, "T1046", 0.5, 1.0)')
-        db._write_conn.commit()
+        db._exec(db._write_conn,
+                 'INSERT INTO alert_techniques (alert_id, technique_id, '
+                 "confidence, ts) VALUES (999999, 'T1046', 0.5, 1.0)")
 
 
 def test_severity_check_constraint(db):
     with pytest.raises(Exception):
-        db._write_conn.execute(
-            """INSERT INTO alerts (ts,severity,threat_type,detector,
-               confidence,description) VALUES (1.0,'BOGUS','x','y',0.5,'z')""")
-        db._write_conn.commit()
+        db._exec(db._write_conn,
+                 """INSERT INTO alerts (ts,severity,threat_type,detector,
+                    confidence,description)
+                    VALUES (1.0,'BOGUS','x','y',0.5,'z')""")
 
 
 # ── persistence ──────────────────────────────────────────────────────────────
 
-def test_all_eight_tables_are_actually_populated(populated_db):
-    """The core claim: no table exists merely to reach a count of eight."""
+def test_all_pipeline_tables_are_actually_populated(populated_db):
+    """The core claim: no table exists merely to inflate the schema count."""
     counts = populated_db.health()['tables']
-    for table in EXPECTED_TABLES:
+    for table in PIPELINE_TABLES:
         assert counts[table] > 0, '%s was never written to' % table
+
+
+def test_validation_runs_round_trip(db):
+    """The ninth table is written by the replay/tuning harness, not the
+    packet pipeline — so it is exercised here rather than in populated_db."""
+    run_id = db.record_validation_run({
+        'kind': 'replay', 'profile': 'tuned', 'corpus': 'unit-test',
+        'pcap_count': 2, 'packets': 100, 'scenarios': 2,
+        'true_positives': 2, 'false_positives': 0, 'false_negatives': 0,
+        'precision_pct': 100.0, 'recall_pct': 100.0, 'tpr_pct': 100.0,
+        'alerts_total': 3, 'detail': {'scenarios': ['a', 'b']},
+    })
+    assert run_id
+    rows = db.get_validation_runs(kind='replay')
+    assert rows and rows[0]['id'] == run_id
+    assert rows[0]['tpr_pct'] == 100.0
+    assert rows[0]['detail']['scenarios'] == ['a', 'b']
+    assert db.health()['tables']['validation_runs'] == 1
 
 
 def test_packets_persist_with_decoded_l7(populated_db):
@@ -111,8 +138,8 @@ def test_hosts_threat_score_rises_with_alerts(populated_db):
 def test_protocol_stats_rollup_matches_packets(populated_db):
     rollup = {r['protocol']: r['packets']
               for r in populated_db.get_protocol_distribution(minutes=100000)}
-    actual = dict(populated_db.reader().execute(
-        'SELECT protocol, COUNT(*) FROM packets GROUP BY protocol').fetchall())
+    actual = {r['protocol']: r['n'] for r in populated_db._rows(
+        'SELECT protocol, COUNT(*) AS n FROM packets GROUP BY protocol')}
     assert rollup, 'protocol_stats never populated'
     for protocol, count in actual.items():
         assert rollup.get(protocol) == count, \
@@ -213,24 +240,29 @@ def test_performance_metrics_are_written(populated_db):
     ('SELECT * FROM connections ORDER BY last_seen DESC LIMIT 50', ()),
 ])
 def test_hot_queries_use_an_index(populated_db, sql, params):
-    plan = ' '.join(row['detail'] for row in populated_db.explain(sql, params))
-    assert 'USING' in plan and 'INDEX' in plan, \
+    plan = populated_db.plan_text(sql, params)
+    assert populated_db.uses_index(sql, params), \
         'query falls back to a full scan: %s -> %s' % (sql, plan)
 
 
 def test_recent_alerts_avoid_a_sort(populated_db):
-    """The ts index must satisfy ORDER BY directly, with no temp b-tree."""
-    plan = ' '.join(r['detail'] for r in populated_db.explain(
-        'SELECT * FROM alerts ORDER BY ts DESC LIMIT 50'))
-    assert 'idx_alerts_ts' in plan
+    """The ts index must satisfy ORDER BY directly, with no explicit sort."""
+    sql = 'SELECT * FROM alerts ORDER BY ts DESC LIMIT 50'
+    plan = populated_db.plan_text(sql)
+    assert populated_db.uses_index(sql, index_name='idx_alerts_ts'), plan
+    # SQLite materialises a temp b-tree, PostgreSQL adds a Sort node; either
+    # means the index did not supply the ordering.
     assert 'TEMP B-TREE' not in plan.upper()
+    assert 'Sort' not in plan
 
 
 def test_technique_lookup_avoids_a_full_scan(populated_db):
-    plan = ' '.join(r['detail'] for r in populated_db.explain(
-        'SELECT * FROM alert_techniques WHERE technique_id=?', ('T1046',)))
-    assert 'idx_at_technique' in plan
-    assert 'SCAN alert_techniques' not in plan
+    sql = 'SELECT * FROM alert_techniques WHERE technique_id=?'
+    plan = populated_db.plan_text(sql, ('T1046',))
+    assert populated_db.uses_index(sql, ('T1046',),
+                                   index_name='idx_at_technique'), plan
+    assert not populated_db.scans_table(sql, ('T1046',),
+                                        table='alert_techniques'), plan
 
 
 # ── latency ──────────────────────────────────────────────────────────────────
@@ -303,7 +335,7 @@ def test_separate_manager_sees_committed_rows(db, simulator, tmp_path):
     import frames as F
     simulator.run_frames([
         (BASE_TS, F.tcp_frame(b'hello', '10.0.1.9', '10.0.2.9', 40000, 80))])
-    other = DatabaseManager(db.db_path)
+    other = clone_manager(db)
     try:
         assert other.health()['tables']['packets'] >= 1
     finally:
