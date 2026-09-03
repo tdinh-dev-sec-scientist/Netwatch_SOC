@@ -15,6 +15,7 @@ results.json
 # and verified against the committed pcaps/manifest.json digests, so the files
 # themselves are not tracked (~57 MB).
 pcaps/attack/
+pcaps/evasion/
 pcaps/benign/
 validation_results.json
 replay_results.json

@@ -44,12 +44,17 @@ class PortScanDetector(Detector):
     def __init__(self, cfg):
         super().__init__(cfg)
         self._ports = TimedSet(cfg['window_s'])
+        # Second, slower time scale. A scan spread thin enough never puts
+        # enough ports inside the fast window, so the same evidence is
+        # accumulated over a much longer one against a higher bar.
+        self._slow_ports = TimedSet(cfg.get('long_window_s', 900))
 
     def inspect(self, pkt):
         port = pkt.get('dst_port')
         if port is None or pkt.get('protocol') == 'ARP':
             return []
-        if is_service_response(pkt):
+        if self.cfg.get('ignore_service_responses', True) \
+                and is_service_response(pkt):
             return []
         self.packets_seen += 1
         ts = pkt['ts']
@@ -57,34 +62,52 @@ class PortScanDetector(Detector):
 
         # A RST/ACK reply back to the scanner is not itself scanning.
         flags = pkt.get('flags', '')
-        if 'RST' in flags:
+        if self.cfg.get('ignore_rst', True) and 'RST' in flags:
             return []
 
         count = self._ports.add(key, port, ts)
-        if count < self.cfg['distinct_ports']:
+        long_threshold = self.cfg.get('long_distinct_ports', 0)
+        long_window = self.cfg.get('long_window_s', 900)
+        slow_count = (self._slow_ports.add(key, port, ts)
+                      if long_threshold else 0)
+
+        if count >= self.cfg['distinct_ports']:
+            window, observed, pace = self.cfg['window_s'], count, 'burst'
+            source = self._ports
+        elif long_threshold and slow_count >= long_threshold:
+            window, observed, pace = long_window, slow_count, 'slow'
+            source = self._slow_ports
+        else:
             return []
-        if not self._cooled_down(key, ts):
+        if not self._cooled_down((key, pace), ts):
             return []
 
-        ports = sorted(self._ports.members(key))
+        ports = sorted(source.members(key))
         # A SYN-only scan is far more conclusive than mixed conversational
         # traffic, so let the flag mix drive confidence.
         syn_only = flags == 'SYN'
-        confidence = min(0.98, 0.6 + count / 100.0 + (0.15 if syn_only else 0))
-        severity = 'HIGH' if count >= self.cfg['distinct_ports'] * 2 else 'MEDIUM'
+        confidence = min(0.98, 0.6 + observed / 100.0
+                         + (0.15 if syn_only else 0))
+        if pace == 'slow':
+            # Spread over 15 minutes, the same port count is weaker evidence.
+            confidence = min(confidence, 0.85)
+        severity = 'HIGH' if observed >= self.cfg['distinct_ports'] * 2 \
+            else 'MEDIUM'
         return [self._finding(
             pkt, severity, confidence,
-            '%s probed %d distinct ports on %s in %ds (e.g. %s)' % (
-                pkt['src_ip'], count, pkt['dst_ip'], self.cfg['window_s'],
+            '%s probed %d distinct ports on %s in %ds%s (e.g. %s)' % (
+                pkt['src_ip'], observed, pkt['dst_ip'], window,
+                ' — paced below the burst threshold' if pace == 'slow' else '',
                 ', '.join(str(p) for p in ports[:8])),
             ('T1046',),
-            distinct_ports=count, window_s=self.cfg['window_s'],
+            distinct_ports=observed, window_s=window, pace=pace,
             sample_ports=ports[:24], syn_only=syn_only,
         )]
 
     def expire(self, now):
         super().expire(now)
         self._ports.expire(now)
+        self._slow_ports.expire(now)
 
 
 class NetworkReconDetector(Detector):
@@ -110,16 +133,20 @@ class NetworkReconDetector(Detector):
         src, dst = pkt.get('src_ip'), pkt.get('dst_ip')
         if not src or not dst:
             return []
-        if is_service_response(pkt):
+        if self.cfg.get('ignore_service_responses', True) \
+                and is_service_response(pkt):
             return []
         self.packets_seen += 1
         ts = pkt['ts']
         # Sweeps walk a contiguous range, so count distinct targets per /24.
         # Without this, a browser fetching many unrelated sites on :443 looks
         # identical to a horizontal scan.
-        net = subnet24(dst)
-        if net is None:
-            return []
+        if self.cfg.get('group_by_subnet', True):
+            net = subnet24(dst)
+            if net is None:
+                return []
+        else:
+            net = '*'          # ungrouped: every target counts against one key
 
         if pkt.get('icmp_type') == 8:  # echo request
             n = self._icmp_hosts.add((src, net), dst, ts)

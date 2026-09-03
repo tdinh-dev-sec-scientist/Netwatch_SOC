@@ -88,7 +88,7 @@ class HTTPAnomalyDetector(Detector):
             categories.add('Oversized')
             score = max(score, 0.5)
 
-        if not hits or score < 0.5:
+        if not hits or score < self.cfg.get('min_score', 0.5):
             return []
         key = (pkt['src_ip'], pkt['dst_ip'], tuple(sorted(categories)))
         if not self._cooled_down(key, ts):

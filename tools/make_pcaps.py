@@ -12,6 +12,13 @@ Two corpora are produced, both as real libpcap files written through Scapy:
       type(s) the scenario is defined to produce; anything else the engine
       raises on that file is a false positive.
 
+  pcaps/evasion/<scenario>.pcap
+      The same attacks shaped to sit near or under a tuned threshold: a scan
+      paced across windows, a beacon with human-scale jitter, a tunnel split
+      across short labels, exfiltration spread over several peers. Ground
+      truth is what the traffic *is*, not what the thresholds catch, so a miss
+      here is a real false negative and is reported as one.
+
   pcaps/benign/baseline-<seed>.pcap
       Background traffic only, from independent seeds. Ground truth is *no
       alerts*; every alert raised is a false positive.
@@ -76,15 +83,14 @@ def generate(out_dir=PCAP_DIR):
     """Write every capture and return the manifest structure."""
     entries = []
 
-    attack_dir = os.path.join(out_dir, 'attack')
-    for index, name in enumerate(sorted(TrafficGenerator.SCENARIOS)):
-        path = os.path.join(attack_dir, '%s.pcap' % name)
-        frames = build_attack(name, seed=1000 + index)
-        pcap_io.write_pcap(path, frames)
+    for index, name in enumerate(sorted(TrafficGenerator.ALL_SCENARIOS)):
+        kind = TrafficGenerator.scenario_class(name)
+        path = os.path.join(out_dir, kind, '%s.pcap' % name)
+        pcap_io.write_pcap(path, build_attack(name, seed=1000 + index))
         summary = pcap_io.pcap_summary(path)
         entries.append({
             'file': os.path.relpath(path, out_dir),
-            'class': 'attack',
+            'class': kind,
             'scenario': name,
             'expected_threats': list(TrafficGenerator.expected_threats(name)),
             'seed': 1000 + index,
@@ -120,6 +126,8 @@ def generate(out_dir=PCAP_DIR):
         'totals': {
             'files': len(entries),
             'attack_files': sum(1 for e in entries if e['class'] == 'attack'),
+            'evasion_files': sum(1 for e in entries
+                                 if e['class'] == 'evasion'),
             'benign_files': sum(1 for e in entries if e['class'] == 'benign'),
             'packets': sum(e['packets'] for e in entries),
         },
@@ -185,9 +193,10 @@ def main(argv=None):
         fh.write('\n')
 
     totals = manifest['totals']
-    print('wrote %d captures (%d attack, %d benign), %d packets total'
-          % (totals['files'], totals['attack_files'], totals['benign_files'],
-             totals['packets']))
+    print('wrote %d captures (%d attack, %d evasion, %d benign), '
+          '%d packets total'
+          % (totals['files'], totals['attack_files'], totals['evasion_files'],
+             totals['benign_files'], totals['packets']))
     for entry in manifest['captures']:
         print('  %-40s %7d packets  %8.1fs  %s'
               % (entry['file'], entry['packets'], entry['duration_s'],

@@ -20,7 +20,8 @@
       "class": "attack",
       "duration_s": 16.635,
       "expected_threats": [
-        "brute_force"
+        "brute_force",
+        "credential_attack"
       ],
       "file": "attack/brute_force.pcap",
       "file_bytes": 557347,
@@ -82,160 +83,239 @@
       "sha256": "c199660743658ea89a545b1908fbe8a187b239548fb47ed05104fbcba1a2f49d"
     },
     {
+      "class": "evasion",
+      "duration_s": 89.832,
+      "expected_threats": [
+        "data_exfil"
+      ],
+      "file": "evasion/distributed_exfil.pcap",
+      "file_bytes": 6846403,
+      "packets": 5786,
+      "scenario": "distributed_exfil",
+      "seed": 1006,
+      "sha256": "ae9240c35a4b4126a1ec4a735000ac954b7cdf51971ae079b25c5a213abba1ca"
+    },
+    {
       "class": "attack",
-      "duration_s": 23.732,
+      "duration_s": 23.822,
       "expected_threats": [
         "dns_tunnel"
       ],
       "file": "attack/dns_tunnel.pcap",
-      "file_bytes": 531953,
+      "file_bytes": 567038,
       "packets": 1550,
       "scenario": "dns_tunnel",
-      "seed": 1006,
-      "sha256": "bd92cb585da9909043610dfabad3d057f5da1342fb01e2658853c36de8b1dbe5"
+      "seed": 1007,
+      "sha256": "f3c772640314a4b8542513e6c7418cd56b5cda5b2336a3e22f99d31c3b816d34"
+    },
+    {
+      "class": "evasion",
+      "duration_s": 33.629,
+      "expected_threats": [
+        "dns_tunnel"
+      ],
+      "file": "evasion/fragmented_dns_tunnel.pcap",
+      "file_bytes": 537124,
+      "packets": 1560,
+      "scenario": "fragmented_dns_tunnel",
+      "seed": 1008,
+      "sha256": "abfea3729f070146d683bfd07f18e9472f7fffb79ee2c2bf42687594ce1b2d14"
     },
     {
       "class": "attack",
-      "duration_s": 16.887,
+      "duration_s": 16.815,
       "expected_threats": [
         "http_anomaly"
       ],
       "file": "attack/http_attack.pcap",
-      "file_bytes": 560534,
+      "file_bytes": 516182,
       "packets": 1505,
       "scenario": "http_attack",
-      "seed": 1007,
-      "sha256": "7a85be52ffe3a296f6340293e0d7a01d03fb517300417fe693ca0f4688b9d940"
-    },
-    {
-      "class": "attack",
-      "duration_s": 16.514,
-      "expected_threats": [
-        "network_recon"
-      ],
-      "file": "attack/icmp_sweep.pcap",
-      "file_bytes": 530494,
-      "packets": 1525,
-      "scenario": "icmp_sweep",
-      "seed": 1008,
-      "sha256": "d78ed86b67d95bfb46def7d98cd338b9a23b9642eb4bfdb47917ee2525c7d028"
-    },
-    {
-      "class": "attack",
-      "duration_s": 17.504,
-      "expected_threats": [
-        "icmp_tunnel"
-      ],
-      "file": "attack/icmp_tunnel.pcap",
-      "file_bytes": 526686,
-      "packets": 1520,
-      "scenario": "icmp_tunnel",
       "seed": 1009,
-      "sha256": "c6a7976940220f8881b1ed1e0d491ffe0b32b73f7db4736449ba237cbcd1bb2b"
+      "sha256": "60b0be235c7208130ba45f121da8dd6ed5f5e8e2d9093783c641d62d37c3a129"
     },
     {
       "class": "attack",
       "duration_s": 16.607,
       "expected_threats": [
-        "lateral_movement"
-      ],
-      "file": "attack/lateral_movement.pcap",
-      "file_bytes": 524751,
-      "packets": 1516,
-      "scenario": "lateral_movement",
-      "seed": 1010,
-      "sha256": "301064e2354f3b124cc58dbf96d8ae715fc997b9069dcd128568b39fb61dbf98"
-    },
-    {
-      "class": "attack",
-      "duration_s": 16.565,
-      "expected_threats": [
         "network_recon"
       ],
-      "file": "attack/network_recon.pcap",
-      "file_bytes": 539306,
-      "packets": 1535,
-      "scenario": "network_recon",
-      "seed": 1011,
-      "sha256": "559c38a5a9b6fcd99a058be9daa50b80ccfd0f1729072571d5294dfe04929c4e"
+      "file": "attack/icmp_sweep.pcap",
+      "file_bytes": 525881,
+      "packets": 1525,
+      "scenario": "icmp_sweep",
+      "seed": 1010,
+      "sha256": "e459a419069b71efcc7c96e8f4cf79ed4294282741ff76c99387c283f05dcc8d"
     },
     {
       "class": "attack",
-      "duration_s": 16.644,
+      "duration_s": 17.441,
       "expected_threats": [
-        "amplification"
+        "icmp_tunnel"
       ],
-      "file": "attack/ntp_amplification.pcap",
-      "file_bytes": 522339,
-      "packets": 1512,
-      "scenario": "ntp_amplification",
+      "file": "attack/icmp_tunnel.pcap",
+      "file_bytes": 548256,
+      "packets": 1520,
+      "scenario": "icmp_tunnel",
+      "seed": 1011,
+      "sha256": "c3d36d6a28d663a548d76357c5d1e650a24ffd7bb50a4fbc50b0d2cd8196c91b"
+    },
+    {
+      "class": "evasion",
+      "duration_s": 601.387,
+      "expected_threats": [
+        "c2_beacon"
+      ],
+      "file": "evasion/jittered_beacon.pcap",
+      "file_bytes": 521143,
+      "packets": 1514,
+      "scenario": "jittered_beacon",
       "seed": 1012,
-      "sha256": "aebb25af50061d2119ffa62ead0762372e8e6df8e48c1f1dac45059ef3662220"
+      "sha256": "6c8bf2f8ba85485d02644e378c7d607570a6cc890b863a3ec35c60e4f8e891ef"
     },
     {
       "class": "attack",
       "duration_s": 16.448,
       "expected_threats": [
-        "port_scan"
+        "lateral_movement"
       ],
-      "file": "attack/port_scan.pcap",
-      "file_bytes": 555435,
-      "packets": 1540,
-      "scenario": "port_scan",
+      "file": "attack/lateral_movement.pcap",
+      "file_bytes": 553755,
+      "packets": 1516,
+      "scenario": "lateral_movement",
       "seed": 1013,
-      "sha256": "324e8c1fbd3c03783c0dba23fedca544b08c688763771a04ebc760dbd6747537"
+      "sha256": "3b00ec09b556e7d5f8fc6c008b659c68b1d2b6d67a5ae38a160220f0f24b9597"
     },
     {
       "class": "attack",
       "duration_s": 16.527,
       "expected_threats": [
-        "protocol_tunnel"
+        "network_recon"
       ],
-      "file": "attack/protocol_tunnel.pcap",
-      "file_bytes": 517123,
-      "packets": 1508,
-      "scenario": "protocol_tunnel",
+      "file": "attack/network_recon.pcap",
+      "file_bytes": 518845,
+      "packets": 1535,
+      "scenario": "network_recon",
       "seed": 1014,
-      "sha256": "a112afc6727acfc12a33036fd7c8702d872161850c14d2a443fa66d08ff299c1"
+      "sha256": "3b43ed1105d1e979a477491d6e4506bd1cbc04d2a290894be61e0e727a66a8ae"
     },
     {
       "class": "attack",
       "duration_s": 16.635,
       "expected_threats": [
-        "syn_flood"
+        "amplification"
       ],
-      "file": "attack/syn_flood.pcap",
-      "file_bytes": 574555,
-      "packets": 1900,
-      "scenario": "syn_flood",
+      "file": "attack/ntp_amplification.pcap",
+      "file_bytes": 550803,
+      "packets": 1512,
+      "scenario": "ntp_amplification",
       "seed": 1015,
-      "sha256": "747f59d1ba54aa054367165e3a69ab0f71219a5ca654a6b7a1f2fb7144c9686e"
+      "sha256": "cdcea02f9f9da7ecb29f2223e01b30d90e981a42506569daac6ab78e5c4d4b03"
     },
     {
       "class": "attack",
-      "duration_s": 19.192,
+      "duration_s": 16.768,
       "expected_threats": [
-        "tls_anomaly"
+        "port_scan"
       ],
-      "file": "attack/tls_anomaly.pcap",
-      "file_bytes": 548303,
-      "packets": 1504,
-      "scenario": "tls_anomaly",
+      "file": "attack/port_scan.pcap",
+      "file_bytes": 550575,
+      "packets": 1540,
+      "scenario": "port_scan",
       "seed": 1016,
-      "sha256": "aa5a53e3066958a56dc6b2e2f7a562119b884d219f3bbf207a1ee34cde02d5e1"
+      "sha256": "2d3319a43737d1d7680d4a77f2355691f568036bc66193fe9f920d6c99d5f154"
     },
     {
       "class": "attack",
       "duration_s": 16.605,
       "expected_threats": [
+        "protocol_tunnel"
+      ],
+      "file": "attack/protocol_tunnel.pcap",
+      "file_bytes": 557422,
+      "packets": 1508,
+      "scenario": "protocol_tunnel",
+      "seed": 1017,
+      "sha256": "926c6780a6699fcaf6fcdfa1a13b8976fd9a9831482439581bbb16ed10ed8d76"
+    },
+    {
+      "class": "evasion",
+      "duration_s": 1014.156,
+      "expected_threats": [
+        "brute_force",
+        "credential_attack"
+      ],
+      "file": "evasion/slow_brute_force.pcap",
+      "file_bytes": 549259,
+      "packets": 1545,
+      "scenario": "slow_brute_force",
+      "seed": 1018,
+      "sha256": "2df61f944788dea7ec6b8f9b89dbf0f69f9d463b750aad116b9fc9e686bbeee4"
+    },
+    {
+      "class": "evasion",
+      "duration_s": 352.197,
+      "expected_threats": [
+        "port_scan"
+      ],
+      "file": "evasion/slow_port_scan.pcap",
+      "file_bytes": 546530,
+      "packets": 1530,
+      "scenario": "slow_port_scan",
+      "seed": 1019,
+      "sha256": "2ee13a3439d43d76452838f33f777e354abc83c48bc25de13e724e01a84793c6"
+    },
+    {
+      "class": "attack",
+      "duration_s": 16.601,
+      "expected_threats": [
+        "syn_flood"
+      ],
+      "file": "attack/syn_flood.pcap",
+      "file_bytes": 577484,
+      "packets": 1900,
+      "scenario": "syn_flood",
+      "seed": 1020,
+      "sha256": "25f647941a2bcf43ccf3ca37ad7484d583ec17f8ab6a893818ba1ec5f7b6dbca"
+    },
+    {
+      "class": "evasion",
+      "duration_s": 112.081,
+      "expected_threats": [
+        "syn_flood"
+      ],
+      "file": "evasion/throttled_syn_flood.pcap",
+      "file_bytes": 627480,
+      "packets": 2700,
+      "scenario": "throttled_syn_flood",
+      "seed": 1021,
+      "sha256": "1e59ea64db2d134e4aa885b681e74ecd539fd9b44ff61a1f155e234313ac46db"
+    },
+    {
+      "class": "attack",
+      "duration_s": 19.105,
+      "expected_threats": [
+        "tls_anomaly"
+      ],
+      "file": "attack/tls_anomaly.pcap",
+      "file_bytes": 559646,
+      "packets": 1504,
+      "scenario": "tls_anomaly",
+      "seed": 1022,
+      "sha256": "609e9e8f28baaf5ba0065c0a9dacc1ef8b4d31c2bf8d1104aae376093f442ee9"
+    },
+    {
+      "class": "attack",
+      "duration_s": 16.493,
+      "expected_threats": [
         "udp_flood"
       ],
       "file": "attack/udp_flood.pcap",
-      "file_bytes": 898694,
+      "file_bytes": 879356,
       "packets": 2100,
       "scenario": "udp_flood",
-      "seed": 1017,
-      "sha256": "45dbc614a00c46e05b9187ae245682c6c7228ed55ec232370f130ca3e9814a88"
+      "seed": 1023,
+      "sha256": "3191b34596798b21e99f838394e273e6ae2ca77be1faf324e579202be1b4c4ad"
     },
     {
       "class": "benign",
@@ -308,8 +388,9 @@
   "totals": {
     "attack_files": 18,
     "benign_files": 6,
-    "files": 24,
-    "packets": 152624
+    "evasion_files": 6,
+    "files": 30,
+    "packets": 167259
   },
   "writer": "scapy 2.7.0"
 }

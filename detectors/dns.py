@@ -5,6 +5,23 @@ from ProtocolAnalyzer import shannon_entropy
 from .base import Detector, TimedCounter, TimedSet
 
 
+def encoded_label_run(qname, zone, min_len, min_entropy):
+    """Labels ahead of the zone that look like encoded payload.
+
+    Splitting a payload across several medium-length labels keeps every one
+    of them under an "oversized label" threshold while carrying just as much
+    data — iodine and dnscat both do it. Returns (count, total_length).
+    """
+    labels = [l for l in (qname or '').split('.') if l]
+    zone_labels = len([l for l in (zone or '').split('.') if l])
+    if zone_labels:
+        labels = labels[:-zone_labels]
+    encoded = [l for l in labels
+               if len(l) >= min_len
+               and shannon_entropy(l.encode('ascii', 'ignore')) >= min_entropy]
+    return len(encoded), sum(len(l) for l in encoded)
+
+
 def registrable_zone(qname):
     """Best-effort 'domain.tld' for grouping queries by zone.
 
@@ -54,11 +71,26 @@ class DNSTunnelDetector(Detector):
         # payload into the name, and there is nowhere else to put it. Without
         # this gate, ordinary CDN hostnames — which are long, numerous and
         # random-looking — score highly on entropy and volume alone.
-        if max_label < self.cfg['min_label_len']:
+        oversized = max_label >= self.cfg['min_label_len']
+        run_count, run_total = encoded_label_run(
+            qname, zone, self.cfg.get('min_encoded_label_len', 12),
+            self.cfg.get('min_encoded_label_entropy', 3.2))
+        multi_label = (
+            self.cfg.get('min_encoded_labels', 0)
+            and run_count >= self.cfg['min_encoded_labels']
+            and run_total >= self.cfg.get('min_encoded_total_len', 45))
+        if self.cfg.get('require_oversized_label', True) \
+                and not (oversized or multi_label):
             return []
 
-        signals = ['label of %d chars' % max_label]
-        score = 0.35
+        signals, score = [], 0.0
+        if oversized:
+            signals.append('label of %d chars' % max_label)
+            score += 0.35
+        elif multi_label:
+            signals.append('%d encoded labels totalling %d chars'
+                           % (run_count, run_total))
+            score += 0.35
         if entropy >= self.cfg['min_entropy']:
             signals.append('encoded-label entropy %.2f bits/byte' % entropy)
             score += 0.35
@@ -74,8 +106,9 @@ class DNSTunnelDetector(Detector):
                            % (volume, zone, self.cfg['window_s']))
             score += 0.3
 
-        # Two independent signals minimum — one alone is too weak.
-        if score < 0.6 or len(signals) < 2:
+        # Independent corroborating signals: one alone is too weak.
+        if (score < self.cfg.get('min_score', 0.6)
+                or len(signals) < self.cfg.get('min_signals', 2)):
             return []
         if not self._cooled_down((pkt['src_ip'], zone), ts):
             return []
@@ -89,6 +122,7 @@ class DNSTunnelDetector(Detector):
             zone=zone, qname=qname[:200], max_label_len=max_label,
             entropy=entropy, qtype=pkt.get('dns_qtype_name'),
             query_volume=volume, signals=signals, score=round(score, 2),
+            encoded_labels=run_count, encoded_total_len=run_total,
         )]
 
     def expire(self, now):

@@ -21,6 +21,12 @@ class SYNFloodDetector(Detector):
         super().__init__(cfg)
         self._syns = TimedCounter(cfg['window_s'])
         self._acks = TimedCounter(cfg['window_s'])
+        # A flood throttled below the per-second rate still exhausts a
+        # connection table over a minute, so the same evidence accumulates
+        # over a longer window too.
+        long_window = cfg.get('long_window_s', 60)
+        self._slow_syns = TimedCounter(long_window)
+        self._slow_acks = TimedCounter(long_window)
 
     def inspect(self, pkt):
         if pkt.get('protocol') not in ('TCP', 'HTTP', 'TLS', 'SSH', 'SMB',
@@ -34,32 +40,45 @@ class SYNFloodDetector(Detector):
         ts = pkt['ts']
         key = (pkt['dst_ip'], pkt.get('dst_port'))
 
+        long_rate = self.cfg.get('long_syn_rate', 0)
+        long_window = self.cfg.get('long_window_s', 60)
         if flags == 'SYN':
             syns = self._syns.add(key, ts)
+            slow_syns = self._slow_syns.add(key, ts) if long_rate else 0
         else:
             if 'ACK' in flags and 'SYN' not in flags:
                 self._acks.add(key, ts)
+                if long_rate:
+                    self._slow_acks.add(key, ts)
             return []
 
-        if syns < self.cfg['syn_rate']:
+        if syns >= self.cfg['syn_rate']:
+            window, observed, pace = self.cfg['window_s'], syns, 'burst'
+            acks = self._acks.count(key, ts)
+        elif long_rate and slow_syns >= long_rate:
+            window, observed, pace = long_window, slow_syns, 'throttled'
+            acks = self._slow_acks.count(key, ts)
+        else:
             return []
-        acks = self._acks.count(key, ts)
-        ratio = syns / max(acks, 1)
+
+        ratio = observed / max(acks, 1)
+        # A ratio floor of 0 disables the corroboration entirely and alerts on
+        # SYN volume alone; that is what the untuned profile does.
         if ratio < self.cfg['min_syn_ack_ratio']:
             return []  # handshakes are completing — this is real load
-        if not self._cooled_down(key, ts):
+        if not self._cooled_down((key, pace), ts):
             return []
 
-        rate = syns / self.cfg['window_s']
+        rate = observed / window
         return [self._finding(
-            pkt, 'CRITICAL', min(0.97, 0.7 + syns / 5000.0),
+            pkt, 'CRITICAL', min(0.97, 0.7 + observed / 5000.0),
             'SYN flood against %s:%s — %d SYNs in %ds (%.0f/s) with only %d '
             'completed handshakes (ratio %.1f:1)'
-            % (pkt['dst_ip'], pkt.get('dst_port'), syns,
-               self.cfg['window_s'], rate, acks, ratio),
+            % (pkt['dst_ip'], pkt.get('dst_port'), observed, window, rate,
+               acks, ratio),
             ('T1498',),
-            syn_count=syns, ack_count=acks, syn_ack_ratio=round(ratio, 2),
-            rate_per_s=round(rate, 1), window_s=self.cfg['window_s'],
+            syn_count=observed, ack_count=acks, syn_ack_ratio=round(ratio, 2),
+            rate_per_s=round(rate, 1), window_s=window, pace=pace,
             target='%s:%s' % (pkt['dst_ip'], pkt.get('dst_port')),
         )]
 
@@ -67,6 +86,8 @@ class SYNFloodDetector(Detector):
         super().expire(now)
         self._syns.expire(now)
         self._acks.expire(now)
+        self._slow_syns.expire(now)
+        self._slow_acks.expire(now)
 
 
 class UDPFloodDetector(Detector):

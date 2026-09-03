@@ -132,6 +132,10 @@ class BruteForceDetector(Detector):
     def __init__(self, cfg):
         super().__init__(cfg)
         self._failures = TimedCounter(cfg['window_s'])
+        # Guessing paced below the per-window rate is still guessing, so
+        # failures also accumulate over a much longer window against a bar
+        # that ordinary user error does not reach.
+        self._slow_failures = TimedCounter(cfg.get('long_window_s', 900))
         self._recent_fail_keys = {}
 
     def inspect(self, pkt):
@@ -174,30 +178,48 @@ class BruteForceDetector(Detector):
         if service == 'SSH':
             # Session bursts are noisier evidence than an explicit 530, so
             # require more of them before alerting.
-            threshold = max(threshold * 2, 10)
-        if count < threshold:
+            threshold = max(threshold * self.cfg.get(
+                'ssh_threshold_multiplier', 2),
+                self.cfg.get('ssh_min_threshold', 10))
+
+        long_threshold = self.cfg.get('long_failures', 0)
+        long_window = self.cfg.get('long_window_s', 900)
+        slow_count = (self._slow_failures.add(key, ts)
+                      if long_threshold else 0)
+
+        if count >= threshold:
+            window, observed, pace = self.cfg['window_s'], count, 'burst'
+            effective = threshold
+        elif long_threshold and slow_count >= max(long_threshold, threshold):
+            window, observed, pace = long_window, slow_count, 'slow'
+            effective = max(long_threshold, threshold)
+        else:
             return []
-        if not self._cooled_down(key, ts):
+        if not self._cooled_down((key, pace), ts):
             return []
 
-        severity = 'CRITICAL' if count >= threshold * 5 else 'HIGH'
-        confidence = min(0.97, 0.65 + count / (threshold * 20.0))
+        severity = 'CRITICAL' if observed >= effective * 5 else 'HIGH'
+        confidence = min(0.97, 0.65 + observed / (effective * 20.0))
         if service == 'SSH':
             confidence = min(confidence, 0.85)  # inferred, not observed
+        if pace == 'slow':
+            confidence = min(confidence, 0.88)
         label = ('session attempts' if service == 'SSH'
                  else 'authentication failures')
         return [self._finding(
             pkt, severity, confidence,
-            '%d %s %s from %s to %s in %ds'
-            % (count, service, label, client, server, self.cfg['window_s']),
+            '%d %s %s from %s to %s in %ds%s'
+            % (observed, service, label, client, server, window,
+               ' — paced below the burst threshold' if pace == 'slow' else ''),
             ('T1110',), src_ip=client, dst_ip=server,
-            service=service, failure_count=count, evidence_type=label,
-            window_s=self.cfg['window_s'], threshold=threshold,
+            service=service, failure_count=observed, evidence_type=label,
+            window_s=window, threshold=effective, pace=pace,
         )]
 
     def expire(self, now):
         super().expire(now)
         self._failures.expire(now)
+        self._slow_failures.expire(now)
 
 
 class CredentialAttackDetector(Detector):

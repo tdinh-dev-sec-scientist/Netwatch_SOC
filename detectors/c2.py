@@ -116,7 +116,7 @@ class TLSAnomalyDetector(Detector):
                            'browser' % ciphers)
             score += 0.3
 
-        if score < 0.5:
+        if score < self.cfg.get('min_score', 0.5):
             return []
         key = (pkt['src_ip'], pkt['dst_ip'], pkt.get('dst_port'))
         if not self._cooled_down(key, ts):
