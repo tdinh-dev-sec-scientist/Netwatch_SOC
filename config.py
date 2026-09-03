@@ -238,18 +238,26 @@ DEFAULTS = {
 #        isolation rather than from what benign traffic actually does
 #   [C]  single-signal rules — each detector alerts on its primary indicator
 #        without requiring a second, independent one
-#   [D]  no per-rule cooldown, so one sustained event alerts once per packet
-#        that crosses the threshold instead of once per event
+#   [D]  one flat 30-second dedup timer for every rule, rather than a cooldown
+#        matched to the timescale of the behaviour each rule looks for. A
+#        first pass does deduplicate — leaving it out entirely would produce
+#        one alert per qualifying packet and make the comparison meaningless —
+#        it just does not vary the interval per rule.
 #
 # tools/noise_experiment.py replays the same corpus under this profile and
 # under DEFAULTS and reports the difference. Both run identical code.
+#
+# The profile is meant to be a plausible first pass, not a worst case: the
+# measurement is only worth something if the thing being improved on is
+# something a competent engineer would actually have written.
+UNTUNED_COOLDOWN_S = 30     # [D] one flat dedup timer, applied to every rule
 UNTUNED = {
     'port_scan': {
         'distinct_ports': 10,               # [T] "10 ports = a scan"
         'ignore_service_responses': False,  # [C]
         'ignore_rst': False,                # [C]
         'long_distinct_ports': 0,           # [C] no slow-scan time scale
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'network_recon': {
         'distinct_hosts': 10,               # [T]
@@ -257,24 +265,24 @@ UNTUNED = {
         'icmp_sweep_hosts': 5,              # [T]
         'group_by_subnet': False,           # [C] any hosts, not one /24
         'ignore_service_responses': False,  # [C]
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'brute_force': {
         'failures': 3,                      # [T] "three strikes"
         'ssh_threshold_multiplier': 1,      # [C] SSH treated like a 530
         'ssh_min_threshold': 3,             # [C]
         'long_failures': 0,                 # [C] no slow-guessing time scale
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'credential_attack': {
         'distinct_users': 3,                # [T]
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'c2_beacon': {
         'min_callbacks': 4,                 # [T] four points look periodic
         'max_jitter_ratio': 0.35,           # [T]
         'min_interval_s': 0,                # [C] no floor, so request/response
-        'cooldown_s': 0,                    # [D]  chatter counts as beaconing
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]  chatter counts as beaconing
     },
     'dns_tunnel': {
         'min_label_len': 20,                # [T]
@@ -284,7 +292,7 @@ UNTUNED = {
         'min_score': 0.3,                   # [C]
         'min_encoded_labels': 0,            # [C] no multi-label encoding check
         'query_volume': 10,                 # [T]
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'suspicious_dns': {
         'nxdomain_count': 5,                # [T]
@@ -292,59 +300,59 @@ UNTUNED = {
         'dga_entropy': 3.0,                 # [T]
         'dga_min_len': 8,                   # [T]
         'dga_count': 2,                     # [T]
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'icmp_tunnel': {
         'min_payload_len': 64,              # [T]
         'min_entropy': 0.0,                 # [C] size alone is enough
         'volume': 1,                        # [T]
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'protocol_tunnel': {
         'observations': 1,                  # [T] one mismatch is enough
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'tls_anomaly': {
         'min_cipher_count': 8,              # [T]
         'min_score': 0.25,                  # [C] any single anomaly alerts
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'data_exfil': {
         'bytes_threshold': 1_000_000,       # [T] "1 MB is a lot"
         'min_packets': 1,                   # [T]
         'outbound_only': False,             # [C] direction not checked
         'source_bytes_threshold': 0,        # [C] no per-source aggregation
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'lateral_movement': {
         'distinct_hosts': 1,                # [T] one admin session alerts
         'internal_only': False,             # [C]
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'syn_flood': {
         'syn_rate': 50,                     # [T]
         'min_syn_ack_ratio': 0.0,           # [C] rate without the handshake
         'long_syn_rate': 0,                 # [C]  completion ratio; and no
-        'cooldown_s': 0,                    # [D]  slower time scale either
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]  slower time scale either
     },
     'udp_flood': {
         'packet_rate': 100,                 # [T]
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'amplification': {
         'response_ratio': 2.0,              # [T]
         'min_response_len': 100,            # [T]
         'observations': 1,                  # [C] one exchange is enough
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'http_anomaly': {
         'max_uri_len': 512,                 # [T]
         'min_score': 0.25,                  # [C] weak fragment matches alert
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
     'arp_spoof': {
         'gratuitous_rate': 1,               # [T] one gratuitous reply alerts
-        'cooldown_s': 0,                    # [D]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
     },
 }
 
