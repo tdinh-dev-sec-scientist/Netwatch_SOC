@@ -274,7 +274,7 @@ def _register(app):
             dst_ip=request.args.get('dst_ip') or None,
             malicious_only=_bool_arg('malicious_only', False)))
 
-    # ── 21-23. engine introspection ──────────────────────────────────────────
+    # ── 21-25. engine introspection and validation ───────────────────────────
 
     @app.route('/api/performance')
     def performance():
@@ -302,11 +302,43 @@ def _register(app):
 
     @app.route('/api/scenarios')
     def scenarios():
-        """Attack scenarios the simulator can replay, with expected outcomes."""
+        """Attack scenarios the replay corpus is built from, with ground truth.
+
+        `class` says whether a scenario is a canonical attack or an evasion
+        variant shaped to sit under a threshold; the two are scored separately
+        by tests/replay.py.
+        """
         return jsonify([
-            {'name': name, 'expected_threats': expected}
-            for name, (_m, expected) in TrafficGenerator.SCENARIOS.items()
+            {'name': name,
+             'class': TrafficGenerator.scenario_class(name),
+             'expected_threats': expected}
+            for name, (_m, expected)
+            in sorted(TrafficGenerator.ALL_SCENARIOS.items())
         ])
+
+    @app.route('/api/validation')
+    def validation_runs():
+        """Measured detection quality from the PCAP replay and tuning runs.
+
+        Empty until `python -m tests.replay --persist` has been run against
+        this database. It returns what was measured, never a placeholder — an
+        unvalidated deployment says so by returning nothing.
+        """
+        runs = db.get_validation_runs(
+            limit=_int_arg('limit', 20, 1, 200),
+            kind=_choice_arg('kind', ('replay', 'tuning')))
+        latest = {}
+        for run in runs:
+            latest.setdefault(run['kind'], run)
+        return jsonify({
+            'runs': runs,
+            'latest': latest,
+            'formulas': {
+                'true_positive_rate': 'TP / (TP + FN)',
+                'precision': 'TP / (TP + FP)',
+                'noise_reduction': '(before - after) / before * 100',
+            },
+        })
 
     return app
 

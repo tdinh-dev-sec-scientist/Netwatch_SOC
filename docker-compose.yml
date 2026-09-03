@@ -1,16 +1,22 @@
 # NetWatch SOC — container topology.
 #
-#   docker compose up -d --build          all-in-one (engine + API in one process)
-#   docker compose --profile split up -d  dedicated engine + scalable API workers
+#   docker compose up -d --build              PostgreSQL + engine + API
+#   docker compose --profile sqlite up -d     single container, no database
 #   docker compose --profile test run --rm tests
+#   docker compose --profile bench run --rm benchmark
+#   docker compose --profile validate run --rm validate
 #
-# The `version:` key is deliberately absent — it is obsolete in Compose v2+ and
-# emits a warning.
+# The default topology is PostgreSQL-backed and splits the writer from the
+# readers: one engine process owns packet capture and detection, and any number
+# of API workers serve queries. That split is the reason for PostgreSQL — with
+# SQLite the single-writer constraint forces engine and API into one process
+# (the `sqlite` profile below), which is fine for a demo and wrong for anything
+# that needs to scale reads.
 #
-# Default posture is defence-in-depth: non-root, read-only root filesystem, all
-# Linux capabilities dropped, privilege escalation blocked, and no host network
-# access. See the note at the bottom about live packet capture, which is the one
-# mode that genuinely needs elevated privileges.
+# Defence in depth throughout: non-root, read-only root filesystem, all Linux
+# capabilities dropped, privilege escalation blocked, no host network access.
+# See the note at the bottom about live packet capture, which is the one mode
+# that genuinely needs elevated privileges.
 
 x-hardening: &hardening
   # Blocks setuid binaries from gaining privileges — stops a compromised
@@ -19,11 +25,9 @@ x-hardening: &hardening
     - no-new-privileges:true
   cap_drop:
     - ALL
-  # The application is pure Python over SQLite: it binds one port and writes
-  # one file. It needs no capabilities at all.
   read_only: true
   tmpfs:
-    - /tmp:rw,noexec,nosuid,nodev,size=64m
+    - /tmp:rw,noexec,nosuid,nodev,size=256m
   # Gunicorn's worker heartbeat lives in /dev/shm (see gunicorn.conf.py).
   shm_size: 64m
   init: true
@@ -35,78 +39,73 @@ x-hardening: &hardening
       max-file: "5"
 
 x-app-env: &app-env
-  NETWATCH_DB: /data/netwatch.db
+  NETWATCH_DB_URL: postgresql://netwatch:${POSTGRES_PASSWORD:-netwatch}@postgres:5432/netwatch
   PYTHONDONTWRITEBYTECODE: "1"
   PYTHONUNBUFFERED: "1"
   TZ: UTC
 
+x-app-build: &app-build
+  build:
+    context: .
+    target: runtime
+    args:
+      PYTHON_IMAGE: python:3.11-slim-bookworm
+  image: netwatch-soc:latest
+
 services:
-  # ── all-in-one: the default, and the correct shape for SQLite ─────────────
-  # One process owns both the detection engine and the API, so there is exactly
-  # one writer. gunicorn.conf.py refuses to start this with >1 worker.
-  netwatch:
-    build:
-      context: .
-      target: runtime
-      args:
-        PYTHON_IMAGE: python:3.11-slim-bookworm
-    image: netwatch-soc:latest
-    container_name: netwatch-soc
-    <<: *hardening
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  # The schema is created by the application on startup (DatabaseManager
+  # renders it through the PostgreSQL dialect), so there is no migration step
+  # and no init SQL to drift out of sync with the code.
+  postgres:
+    image: postgres:16-alpine
+    container_name: netwatch-postgres
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
     environment:
-      <<: *app-env
-      NETWATCH_SIMULATE: "1"
-      GUNICORN_WORKERS: "1"
-      GUNICORN_THREADS: "8"
-      GUNICORN_LOGLEVEL: info
-    ports:
-      # Bound to loopback: this app has no authentication, so it must sit
-      # behind a reverse proxy that terminates TLS and authenticates before
-      # it is reachable off-host. Change to "5001:5001" only deliberately.
-      - "127.0.0.1:5001:5001"
+      POSTGRES_DB: netwatch
+      POSTGRES_USER: netwatch
+      # Override in a .env file or the environment. The default exists so
+      # `docker compose up` works out of the box on a laptop; it is not a
+      # credential for anything reachable, since no port is published.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-netwatch}
+      # Deterministic collation, so ORDER BY does not depend on the host.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     volumes:
-      - netwatch-data:/data
+      - netwatch-pgdata:/var/lib/postgresql/data
+    # No `ports:` — PostgreSQL is reachable only on the compose network.
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - |
-          import json,sys,urllib.request
-          d=json.load(urllib.request.urlopen('http://127.0.0.1:5001/api/health',timeout=4))
-          sys.exit(0 if d.get('status')=='ok' and d.get('table_count')==8 else 1)
-      interval: 30s
+      test: ["CMD-SHELL", "pg_isready -U netwatch -d netwatch"]
+      interval: 10s
       timeout: 5s
       start_period: 20s
-      retries: 3
+      retries: 5
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: 512M
-        reservations:
-          memory: 128M
+          cpus: "2.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # ── split topology (profile: split) ───────────────────────────────────────
-  # One writer, many readers. SQLite WAL allows concurrent readers alongside a
-  # single writer, so the API scales horizontally without touching the write
-  # path. Requires engine and web to share a filesystem — see the caveat below.
+  # ── detection engine (the writer) ─────────────────────────────────────────
   engine:
-    build:
-      context: .
-      target: runtime
-    image: netwatch-soc:latest
+    <<: [*app-build, *hardening]
     container_name: netwatch-engine
-    profiles: ["split"]
-    <<: *hardening
     command: ["python", "engine.py"]
     entrypoint: []           # override gunicorn; this service serves no HTTP
     environment:
       <<: *app-env
       NETWATCH_SIMULATE: "1"
       NETWATCH_RATE_PPS: "95"
-    volumes:
-      - netwatch-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       # No HTTP surface, so health is "is the database still advancing?".
       test:
@@ -114,10 +113,11 @@ services:
         - python
         - -c
         - |
-          import os,sqlite3,sys,time
-          c=sqlite3.connect('file:%s?mode=ro' % os.environ['NETWATCH_DB'], uri=True)
-          fresh=c.execute('SELECT COUNT(*) FROM packets WHERE ts > ?', (time.time()-120,)).fetchone()[0]
-          sys.exit(0 if fresh > 0 else 1)
+          import os,sys,time,psycopg
+          c=psycopg.connect(os.environ['NETWATCH_DB_URL'])
+          n=c.execute('SELECT COUNT(*) FROM packets WHERE ts > %s',
+                      (time.time()-120,)).fetchone()[0]
+          sys.exit(0 if n > 0 else 1)
       interval: 60s
       timeout: 10s
       start_period: 60s
@@ -128,31 +128,25 @@ services:
           cpus: "1.0"
           memory: 512M
 
+  # ── API + dashboard (the readers) ─────────────────────────────────────────
   web:
-    build:
-      context: .
-      target: runtime
-    image: netwatch-soc:latest
-    profiles: ["split"]
-    <<: *hardening
+    <<: [*app-build, *hardening]
     environment:
       <<: *app-env
-      # Read-only API: no engine in these processes, so multiple workers are
-      # safe and gunicorn.conf.py permits them.
+      # No engine in these processes, so multiple workers are safe.
       NETWATCH_SIMULATE: "0"
       GUNICORN_WORKERS: "4"
       GUNICORN_THREADS: "4"
       # Trust X-Forwarded-* only from the proxy network in front of this.
       GUNICORN_FORWARDED_ALLOW_IPS: "172.16.0.0/12"
     ports:
+      # Bound to loopback: this app has no authentication, so it must sit
+      # behind a reverse proxy that terminates TLS and authenticates before it
+      # is reachable off-host. Change to "5001:5001" only deliberately.
       - "127.0.0.1:5001:5001"
-    volumes:
-      # Readers still need write access to the -wal and -shm sidecar files;
-      # SQLite cannot open a WAL database read-only without them.
-      - netwatch-data:/data
     depends_on:
-      engine:
-        condition: service_started
+      postgres:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD
@@ -161,10 +155,10 @@ services:
         - |
           import json,sys,urllib.request
           d=json.load(urllib.request.urlopen('http://127.0.0.1:5001/api/health',timeout=4))
-          sys.exit(0 if d.get('status')=='ok' else 1)
+          sys.exit(0 if d.get('status')=='ok' and d.get('table_count')==9 else 1)
       interval: 30s
       timeout: 5s
-      start_period: 15s
+      start_period: 20s
       retries: 3
     deploy:
       replicas: 2
@@ -173,7 +167,48 @@ services:
           cpus: "1.0"
           memory: 256M
 
-  # ── test / benchmark (profile: test) ──────────────────────────────────────
+  # ── all-in-one over SQLite (profile: sqlite) ──────────────────────────────
+  # No database server. One process owns both the engine and the API, because
+  # SQLite permits exactly one writer. gunicorn.conf.py refuses to start this
+  # with more than one worker.
+  netwatch:
+    <<: [*app-build, *hardening]
+    container_name: netwatch-soc
+    profiles: ["sqlite"]
+    environment:
+      NETWATCH_DB: /data/netwatch.db
+      NETWATCH_SIMULATE: "1"
+      GUNICORN_WORKERS: "1"
+      GUNICORN_THREADS: "8"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:5001:5001"
+    volumes:
+      - netwatch-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import json,sys,urllib.request
+          d=json.load(urllib.request.urlopen('http://127.0.0.1:5001/api/health',timeout=4))
+          sys.exit(0 if d.get('status')=='ok' and d.get('table_count')==9 else 1)
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 512M
+
+  # ── tests (profile: test) ─────────────────────────────────────────────────
+  # Runs the full suite against the PostgreSQL service, which is the point:
+  # the same tests that pass on SQLite have to pass on the deployment backend.
   tests:
     build:
       context: .
@@ -181,36 +216,101 @@ services:
     image: netwatch-soc:test
     profiles: ["test"]
     <<: *hardening
-    read_only: false          # pytest writes temporary databases
+    read_only: false          # pytest writes temporary databases and captures
     restart: "no"
     entrypoint: []
     command: ["python", "-m", "pytest", "-q"]
     environment:
       <<: *app-env
-      NETWATCH_DB: /tmp/test.db
+      NETWATCH_TEST_DB_URL: postgresql://netwatch:${POSTGRES_PASSWORD:-netwatch}@postgres:5432/netwatch
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── throughput benchmark (profile: bench) ─────────────────────────────────
+  benchmark:
+    build:
+      context: .
+      target: test
+    image: netwatch-soc:test
+    profiles: ["bench"]
+    <<: *hardening
+    read_only: false
+    restart: "no"
+    entrypoint: []
+    command: ["python", "benchmark.py", "--runs", "6", "--warmup", "1",
+              "--json", "/results/benchmark.json"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      TZ: UTC
+    volumes:
+      - ./results:/results
+
+  # ── PCAP replay validation (profile: validate) ────────────────────────────
+  validate:
+    build:
+      context: .
+      target: test
+    image: netwatch-soc:test
+    profiles: ["validate"]
+    <<: *hardening
+    read_only: false
+    restart: "no"
+    entrypoint: []
+    command: ["sh", "-c",
+              "python -m tools.make_pcaps && \
+               python -m tests.replay --json /results/replay.json --persist && \
+               python -m tools.noise_experiment --json /results/noise.json --persist"]
+    environment:
+      <<: *app-env
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./results:/results
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
+  netwatch-pgdata:
+    driver: local
   netwatch-data:
     driver: local
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Operational notes
 #
-# SQLite and the split topology
-#   WAL requires the database, its -wal and its -shm sidecars to sit on a
-#   filesystem supporting POSIX advisory locks and shared mmap. A local Docker
-#   volume qualifies; NFS does not. Do not spread engine and web across hosts
-#   with a network filesystem — move to Postgres before you do that.
+# Why PostgreSQL is the default
+#   The engine writes continuously while the API reads. SQLite allows one
+#   writer, so scaling reads means either sharing a filesystem between
+#   containers (which needs POSIX advisory locks and shared mmap — a local
+#   Docker volume qualifies, NFS does not) or collapsing everything into one
+#   process. PostgreSQL removes the constraint; the `sqlite` profile remains
+#   for a single-container demo with no database server to run.
+#
+# Schema management
+#   There is no migration tool. DatabaseManager renders one schema definition
+#   through the active dialect and applies it with CREATE TABLE IF NOT EXISTS
+#   at startup, so a fresh volume and an existing one converge on the same
+#   shape. That is adequate because the schema is additive so far; a column
+#   type change would need a real migration and this would have to grow one.
+#
+# Credentials
+#   POSTGRES_PASSWORD defaults to a development value so `docker compose up`
+#   works unmodified. PostgreSQL publishes no port, so it is reachable only
+#   from the compose network. Set POSTGRES_PASSWORD in a .env file for anything
+#   beyond a laptop, and use a secrets manager beyond that.
 #
 # Live packet capture
 #   The shipped engine generates synthetic traffic and needs no privileges. To
-#   capture real traffic you must add, for that service only:
+#   capture real traffic with pcap_io.live_sniffer() you must add, for the
+#   engine service only:
 #       cap_add: [NET_ADMIN, NET_RAW]
 #       network_mode: host
 #   That is a genuine privilege increase: host networking removes network
-#   namespace isolation, and NET_RAW permits arbitrary packet crafting. Grant it
-#   to the engine container alone, never to the web tier, and keep read_only
-#   and no-new-privileges in place.
+#   namespace isolation, and NET_RAW permits arbitrary packet crafting. Grant
+#   it to the engine container alone, never to the web tier, and keep
+#   read_only and no-new-privileges in place.
 #
 # Exposure
 #   The API has no authentication or rate limiting. Ports are bound to
@@ -218,5 +318,6 @@ volumes:
 #   in front for TLS, authn and rate limiting before changing that.
 #
 # Backups
-#   Copy the database with `sqlite3 /data/netwatch.db ".backup /backup/x.db"`,
-#   not `cp` — a plain copy of a live WAL database can be torn.
+#   pg_dump against the postgres service. For the sqlite profile, use
+#   `sqlite3 /data/netwatch.db ".backup /backup/x.db"` rather than cp — a plain
+#   copy of a live WAL database can be torn.

@@ -27,6 +27,7 @@ ENDPOINTS = [
     ('GET', '/api/detectors'),
     ('GET', '/api/protocols'),
     ('GET', '/api/scenarios'),
+    ('GET', '/api/validation'),
 ]
 
 
@@ -379,3 +380,49 @@ def test_dashboard_page_renders(client):
     response = client.get('/')
     assert response.status_code == 200
     assert b'<canvas' in response.data or b'<div' in response.data
+
+
+def test_scenarios_expose_ground_truth_and_class(client):
+    """The replay corpus's ground truth, served rather than documented."""
+    body = get(client, '/api/scenarios')
+    assert len(body) >= 18
+    classes = {s['class'] for s in body}
+    assert classes == {'attack', 'evasion'}
+    for scenario in body:
+        assert scenario['expected_threats'], \
+            '%s has no expected threat' % scenario['name']
+
+
+def test_validation_endpoint_is_empty_before_a_run(client):
+    """An unvalidated database must say so, not invent a figure."""
+    body = get(client, '/api/validation')
+    assert body['runs'] == []
+    assert body['latest'] == {}
+    assert 'TP / (TP + FN)' in body['formulas']['true_positive_rate']
+
+
+def test_validation_endpoint_returns_a_recorded_run(client, populated_db):
+    run_id = populated_db.record_validation_run({
+        'kind': 'replay', 'profile': 'tuned', 'corpus': 'api-test',
+        'pcap_count': 24, 'packets': 152624, 'true_positives': 19,
+        'false_positives': 0, 'false_negatives': 0, 'tpr_pct': 100.0,
+        'precision_pct': 100.0, 'alerts_total': 25,
+        'detail': {'primary': {'true_positive_rate_pct': 100.0}},
+    })
+    try:
+        body = get(client, '/api/validation')
+        assert body['runs'][0]['id'] == run_id
+        assert body['latest']['replay']['tpr_pct'] == 100.0
+        assert body['latest']['replay']['detail']['primary'][
+            'true_positive_rate_pct'] == 100.0
+        filtered = get(client, '/api/validation', kind='replay')
+        assert filtered['runs'][0]['id'] == run_id
+    finally:
+        populated_db._exec(populated_db._write_conn,
+                           'DELETE FROM validation_runs WHERE id = ?',
+                           (run_id,))
+
+
+def test_validation_rejects_an_unknown_kind(client):
+    response = client.get('/api/validation', query_string={'kind': 'bogus'})
+    assert response.status_code == 400

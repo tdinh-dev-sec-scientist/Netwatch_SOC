@@ -19,7 +19,8 @@ MODULES = {
     'protocols': ['/api/stats/protocols', '/api/protocols'],
     'hosts': ['/api/hosts/top', '/api/geo', '/api/connections'],
     'timeline': ['/api/stats/timeline', '/api/stats/throughput'],
-    'performance': ['/api/performance', '/api/health'],
+    'performance': ['/api/performance', '/api/health',
+                    '/api/validation'],
     'packets': ['/api/packets'],
 }
 
@@ -129,3 +130,44 @@ def test_dashboard_served_by_flask(client):
     assert 'NETWATCH' in body
     assert 'view-overview' in body
     assert '/api/stats/overview' in body
+
+
+# ── resilience ───────────────────────────────────────────────────────────────
+
+def test_chart_library_is_used_defensively(markup):
+    """A blocked CDN must not take the whole dashboard down.
+
+    Chart.js is fetched from a CDN. Touching `Chart.defaults` at script scope
+    without a guard throws when that fetch fails, which aborts the rest of the
+    inline script — the navigation handlers and every data loader included —
+    and leaves a page that renders nothing at all. The charts illustrate data
+    the tables already carry, so their absence has to degrade to missing
+    charts, not a missing dashboard.
+    """
+    assert 'CHARTS_AVAILABLE' in markup
+    guard = re.search(r'const CHARTS_AVAILABLE = \(typeof Chart !== '
+                      r"'undefined'\);", markup)
+    assert guard, 'no availability guard for the chart library'
+
+    # No bare `Chart.` reference may execute at script scope.
+    for match in re.finditer(r'^Chart\.', markup, re.M):
+        raise AssertionError(
+            'unguarded top-level Chart reference at offset %d' % match.start())
+
+
+def test_chart_helper_degrades_without_the_library(markup):
+    helper = re.search(r'function upsertChart\(.*?\n\}', markup, re.S)
+    assert helper
+    assert 'CHARTS_AVAILABLE' in helper.group(0), \
+        'upsertChart calls new Chart() without checking availability'
+
+
+def test_validation_module_ships_no_measurement_in_the_template(markup):
+    """The validation panel must render API data, never a baked-in figure."""
+    panel = markup[markup.index('id="validation-body"') - 400:
+                   markup.index('id="validation-body"') + 200]
+    for token in ('100.0', '96.1', 'TPR', '%'):
+        if token == '%':
+            continue
+        assert token not in panel, \
+            'validation panel ships a hardcoded %r' % token
