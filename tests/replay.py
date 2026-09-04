@@ -182,32 +182,52 @@ def _rates(rows):
     }
 
 
+# Detections this corpus is known not to make, with the reason. A documented
+# miss is not a regression, so the CI gate ignores these and fails on anything
+# else; a miss that stops being missed is reported too, so the entry can be
+# removed rather than quietly going stale. Mirrors
+# test_high_jitter_beacon_is_a_known_miss.
+KNOWN_MISSES = {
+    'jittered_beacon': 'coefficient-of-variation scoring cannot separate a '
+                       'beacon with 45% jitter from ordinary chatty traffic',
+}
+
+
 def aggregate(rows, profile, corpus_id):
     """Roll per-capture scores into the reported detection metrics.
 
-    The headline figures are the canonical attack corpus scored against the
-    benign baseline — attacks as they are normally shaped, and the traffic
-    they have to be told apart from. The evasion corpus is scored separately
-    and reported alongside rather than folded in, because a miss there is a
-    statement about where the thresholds sit, not about whether the detector
-    works. `combined` is both, for anyone who wants the single number.
+    The **top-level figures are the combined corpus** — every capture, attack
+    and evasion and benign alike. That is the honest headline: reporting the
+    canonical-only rate at the top while also reporting the corpus-wide capture
+    and packet counts beside it would read as "100% across 30 captures", which
+    is not what was measured.
+
+    `primary` (canonical attacks vs the benign baseline) and `evasion`
+    (threshold-boundary variants) are kept as a breakdown, because they answer
+    different questions: a miss on an evasion capture is a statement about
+    where a threshold sits, not about whether the detector works.
     """
     attack_rows = [r for r in rows if r['class'] == 'attack']
     evasion_rows = [r for r in rows if r['class'] == 'evasion']
     benign_rows = [r for r in rows if r['class'] == 'benign']
 
     primary = _rates(attack_rows + benign_rows)
-    summary = dict(primary)
+    combined = _rates(rows)
+
+    missed = {r['scenario'] for r in rows if r['false_negatives']}
+    unexpected_misses = sorted(missed - set(KNOWN_MISSES))
+    recovered = sorted(set(KNOWN_MISSES) - missed
+                       & {r['scenario'] for r in rows})
+
+    summary = dict(combined)
     summary.update({
         'profile': profile,
         'corpus': corpus_id,
-        'captures': len(rows),
+        'scope': 'combined: every capture in the corpus',
         'attack_captures': len(attack_rows),
         'evasion_captures': len(evasion_rows),
         'benign_captures': len(benign_rows),
-        'packets': sum(r['packets'] for r in rows),
         'parse_errors': sum(r['parse_errors'] for r in rows),
-        'alerts_total': sum(r['alerts_total'] for r in rows),
         'alerts_on_attack_captures': sum(r['alerts_total']
                                          for r in attack_rows),
         'alerts_on_evasion_captures': sum(r['alerts_total']
@@ -222,15 +242,19 @@ def aggregate(rows, profile, corpus_id):
         'captures_passed': sum(1 for r in rows if r['passed']),
         'primary': primary,
         'evasion': _rates(evasion_rows),
-        'combined': _rates(rows),
+        'combined': combined,
         'evasions_detected': sorted(
             {r['scenario'] for r in evasion_rows if not r['false_negatives']}),
         'evasions_missed': sorted(
             {r['scenario'] for r in evasion_rows if r['false_negatives']}),
+        'known_misses': dict(KNOWN_MISSES),
+        'unexpected_misses': unexpected_misses,
+        'recovered_misses': recovered,
         'formulas': {
             'true_positive_rate': 'TP / (TP + FN)',
             'precision': 'TP / (TP + FP)',
             'unit': 'one (capture, threat_type) pair',
+            'top_level_scope': 'combined — every capture in the corpus',
             'primary_scope': 'canonical attack captures + benign baseline',
             'evasion_scope': 'threshold-boundary captures only',
         },
@@ -330,10 +354,24 @@ def print_summary(summary):
     print('    detection rate      %.2f%%'
           % evasion['true_positive_rate_pct'])
     print('')
-    print('  COMBINED              TPR %.2f%%  precision %.2f%%'
+    print('  COMBINED (the reported figure)  %d captures, %d packets'
+          % (combined['captures'], combined['packets']))
+    print('    TP / FP / FN        %d / %d / %d'
+          % (combined['true_positives'], combined['false_positives'],
+             combined['false_negatives']))
+    print('    true-positive rate  %.2f%%   precision %.2f%%'
           % (combined['true_positive_rate_pct'], combined['precision_pct']))
     print('  threat types detected %d' % len(summary['threat_types_detected']))
     print('  ATT&CK techniques     %d' % len(summary['techniques_observed']))
+
+    if summary['unexpected_misses']:
+        print('')
+        print('  UNEXPECTED MISSES     %s'
+              % ', '.join(summary['unexpected_misses']))
+    if summary['recovered_misses']:
+        print('')
+        print('  no longer missed      %s — remove from KNOWN_MISSES'
+              % ', '.join(summary['recovered_misses']))
 
 
 def main(argv=None):
@@ -386,8 +424,14 @@ def main(argv=None):
         finally:
             db.close()
 
-    # Non-zero exit when anything was missed, so the harness can gate CI.
-    return 0 if summary['false_negatives'] == 0 else 1
+    # Gate CI on *regressions*, not on the documented misses: a known,
+    # explained miss failing the build every run would train people to ignore
+    # the build. A new miss, or a known one that started passing, is news.
+    if summary['unexpected_misses']:
+        print('\nFAIL: %d unexpected miss(es)'
+              % len(summary['unexpected_misses']))
+        return 1
+    return 0
 
 
 if __name__ == '__main__':

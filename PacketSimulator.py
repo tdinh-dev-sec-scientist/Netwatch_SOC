@@ -638,11 +638,18 @@ class PacketSimulator:
         return findings
 
     def flush(self):
-        """Persist the buffered batch. Returns milliseconds spent writing."""
-        if not self._batch and not self._findings:
-            return 0.0
-        batch, findings = self._batch, self._findings
-        self._batch, self._findings = [], []
+        """Persist the buffered batch. Returns milliseconds spent writing.
+
+        The buffer swap is under the lock because gunicorn calls this from a
+        worker-exit hook while the engine thread is still appending: an
+        unguarded read-then-clear can drop packets buffered between the two
+        statements, or write them twice.
+        """
+        with self._lock:
+            if not self._batch and not self._findings:
+                return 0.0
+            batch, findings = self._batch, self._findings
+            self._batch, self._findings = [], []
         _p, _a, ms = self.db.persist_batch(batch, findings)
         self.db_write_ms += ms
         self._last_flush = time.time()
@@ -680,8 +687,15 @@ class PacketSimulator:
 
     # ── live loop ────────────────────────────────────────────────────────────
 
-    def run(self, rate_pps=95.0, duration_s=None):
-        """Continuous simulation. Injects attack scenarios periodically."""
+    def run(self, rate_pps=95.0, duration_s=None, metrics_window_s=60.0,
+            first_scenario_after_s=20.0, scenario_gap_s=(45.0, 120.0)):
+        """Continuous simulation. Injects attack scenarios periodically.
+
+        The three timing arguments are parameters rather than constants so the
+        loop's own accounting can be exercised by a test: with the shipped
+        defaults a test would have to run for a real minute before the first
+        metrics row, and 20 seconds before the first alert.
+        """
         self._running = True
         started = time.time()
         interval = 1.0 / rate_pps
@@ -689,7 +703,7 @@ class PacketSimulator:
         window_pkts = window_alerts = 0
         pending = []
         scenario_names = list(TrafficGenerator.SCENARIOS)
-        next_scenario = time.time() + 20
+        next_scenario = time.time() + first_scenario_after_s
 
         while self._running:
             now = time.time()
@@ -703,20 +717,23 @@ class PacketSimulator:
                     raw = self.gen.scenario(name, start_ts=0.0)
                     base = raw[0][0] if raw else 0.0
                     pending = [(now + (t - base), fr) for t, fr in raw]
-                    next_scenario = now + self.gen.rng.uniform(45, 120)
+                    next_scenario = now + self.gen.rng.uniform(*scenario_gap_s)
 
                 if pending and pending[0][0] <= now:
                     ts, frame = pending.pop(0)
-                    self.process(frame, now)
+                    found = self.process(frame, now)
                 else:
                     frame = self.gen.background_frame(now)
-                    self.process(frame, now)
+                    found = self.process(frame, now)
                 window_pkts += 1
+                # Without this the per-window metric row always reported zero
+                # alerts, however many the window actually raised.
+                window_alerts += len(found)
 
                 self.maybe_flush()
 
                 elapsed = now - window_start
-                if elapsed >= 60:
+                if elapsed >= metrics_window_s:
                     self._record_window(elapsed, window_pkts, window_alerts)
                     window_start, window_pkts, window_alerts = now, 0, 0
 
@@ -725,6 +742,14 @@ class PacketSimulator:
                 # Never let one bad frame kill the loop, but do not hide the
                 # failure either — parse_errors and detector_errors surface it.
                 time.sleep(0.05)
+
+        # Record the partial window the loop was in the middle of. Without
+        # this, everything measured since the last window boundary is thrown
+        # away on shutdown — up to a full window's packets and alerts on every
+        # `docker stop`, and the metrics never account for them.
+        final_elapsed = time.time() - window_start
+        if window_pkts and final_elapsed > 0:
+            self._record_window(final_elapsed, window_pkts, window_alerts)
         self.flush()
 
     def stop(self):

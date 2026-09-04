@@ -6,7 +6,13 @@ from urllib.parse import unquote_plus
 from .base import Detector
 
 # Patterns are matched against the URL-decoded request line and headers.
-# Each carries its own weight so a single weak hit cannot alert on its own.
+#
+# Each carries its own weight, and the score is the strongest hit plus a bonus
+# for each *additional* distinct category. So a strong signature stands alone,
+# while a weak one has to be corroborated by an independent category before it
+# can reach `min_score`. Without that, the weakest weight in this table sets
+# the effective alerting floor and the min_score threshold does nothing.
+CORROBORATION_BONUS = 0.15
 SIGNATURES = [
     (re.compile(r"(?i)\bunion\b\s+(all\s+)?\bselect\b"), 0.9, 'SQLi',
      'UNION SELECT'),
@@ -18,7 +24,11 @@ SIGNATURES = [
      0.8, 'SQLi', 'time-based injection function'),
     (re.compile(r"(?i)\b(information_schema|sysobjects|pg_catalog)\b"), 0.8,
      'SQLi', 'schema enumeration'),
-    (re.compile(r"(?i)\b(select|insert|update|delete)\b.{0,40}\bfrom\b"), 0.5,
+    # Deliberately weighted below `min_score`: the words alone are ordinary
+    # English that turns up in real query strings — "?action=delete&next=/from/
+    # home" is not an injection attempt. It contributes to a score, it cannot
+    # raise an alert on its own.
+    (re.compile(r"(?i)\b(select|insert|update|delete)\b.{0,40}\bfrom\b"), 0.35,
      'SQLi', 'SQL statement fragment'),
     (re.compile(r"(\.\./){2,}|(\.\.\\){2,}"), 0.85, 'Traversal',
      'directory traversal sequence'),
@@ -87,6 +97,11 @@ class HTTPAnomalyDetector(Detector):
             hits.append('header block %d bytes' % pkt['http_header_len'])
             categories.add('Oversized')
             score = max(score, 0.5)
+
+        # Independent categories corroborate each other: traversal *and* a
+        # scanner user-agent is stronger evidence than either alone.
+        if len(categories) > 1:
+            score = min(1.0, score + CORROBORATION_BONUS * (len(categories) - 1))
 
         if not hits or score < self.cfg.get('min_score', 0.5):
             return []

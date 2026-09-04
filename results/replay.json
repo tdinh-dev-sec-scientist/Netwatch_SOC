@@ -6,7 +6,7 @@
       },
       "alerts_total": 2,
       "class": "attack",
-      "elapsed_s": 0.3254,
+      "elapsed_s": 0.1643,
       "expected_threats": [
         "arp_spoof"
       ],
@@ -43,7 +43,7 @@
       },
       "alerts_total": 2,
       "class": "attack",
-      "elapsed_s": 0.3023,
+      "elapsed_s": 0.1778,
       "expected_threats": [
         "brute_force",
         "credential_attack"
@@ -83,7 +83,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.2949,
+      "elapsed_s": 0.1561,
       "expected_threats": [
         "c2_beacon"
       ],
@@ -118,7 +118,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.2834,
+      "elapsed_s": 0.1812,
       "expected_threats": [
         "credential_attack"
       ],
@@ -154,7 +154,7 @@
       },
       "alerts_total": 2,
       "class": "attack",
-      "elapsed_s": 1.9383,
+      "elapsed_s": 1.1581,
       "expected_threats": [
         "data_exfil"
       ],
@@ -189,7 +189,7 @@
       },
       "alerts_total": 2,
       "class": "attack",
-      "elapsed_s": 0.296,
+      "elapsed_s": 0.2032,
       "expected_threats": [
         "suspicious_dns"
       ],
@@ -225,7 +225,7 @@
       },
       "alerts_total": 1,
       "class": "evasion",
-      "elapsed_s": 1.4601,
+      "elapsed_s": 0.9193,
       "expected_threats": [
         "data_exfil"
       ],
@@ -260,7 +260,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.293,
+      "elapsed_s": 0.2159,
       "expected_threats": [
         "dns_tunnel"
       ],
@@ -296,7 +296,7 @@
       },
       "alerts_total": 1,
       "class": "evasion",
-      "elapsed_s": 0.3094,
+      "elapsed_s": 0.2094,
       "expected_threats": [
         "dns_tunnel"
       ],
@@ -332,7 +332,7 @@
       },
       "alerts_total": 5,
       "class": "attack",
-      "elapsed_s": 0.297,
+      "elapsed_s": 0.1735,
       "expected_threats": [
         "http_anomaly"
       ],
@@ -350,8 +350,7 @@
       "passed": true,
       "scenario": "http_attack",
       "severities": {
-        "CRITICAL": 4,
-        "HIGH": 1
+        "CRITICAL": 5
       },
       "sha256": "60b0be235c7208130ba45f121da8dd6ed5f5e8e2d9093783c641d62d37c3a129",
       "techniques": [
@@ -368,7 +367,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.2939,
+      "elapsed_s": 0.1704,
       "expected_threats": [
         "network_recon"
       ],
@@ -403,7 +402,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.2926,
+      "elapsed_s": 0.2004,
       "expected_threats": [
         "icmp_tunnel"
       ],
@@ -437,7 +436,7 @@
       "alerts_by_type": {},
       "alerts_total": 0,
       "class": "evasion",
-      "elapsed_s": 0.2967,
+      "elapsed_s": 0.1929,
       "expected_threats": [
         "c2_beacon"
       ],
@@ -466,7 +465,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.2981,
+      "elapsed_s": 0.2076,
       "expected_threats": [
         "lateral_movement"
       ],
@@ -501,7 +500,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.3113,
+      "elapsed_s": 0.1953,
       "expected_threats": [
         "network_recon"
       ],
@@ -536,7 +535,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.306,
+      "elapsed_s": 0.2028,
       "expected_threats": [
         "amplification"
       ],
@@ -571,7 +570,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.2972,
+      "elapsed_s": 0.1966,
       "expected_threats": [
         "port_scan"
       ],
@@ -606,7 +605,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.3023,
+      "elapsed_s": 0.1935,
       "expected_threats": [
         "protocol_tunnel"
       ],
@@ -642,7 +641,7 @@
       },
       "alerts_total": 6,
       "class": "evasion",
-      "elapsed_s": 0.3281,
+      "elapsed_s": 0.2019,
       "expected_threats": [
         "brute_force",
         "credential_attack"
@@ -682,7 +681,7 @@
       },
       "alerts_total": 1,
       "class": "evasion",
-      "elapsed_s": 0.3094,
+      "elapsed_s": 0.1983,
       "expected_threats": [
         "port_scan"
       ],
@@ -717,7 +716,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.3427,
+      "elapsed_s": 0.2369,
       "expected_threats": [
         "syn_flood"
       ],
@@ -752,7 +751,7 @@
       },
       "alerts_total": 1,
       "class": "evasion",
-      "elapsed_s": 0.461,
+      "elapsed_s": 0.3101,
       "expected_threats": [
         "syn_flood"
       ],
@@ -787,7 +786,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.2895,
+      "elapsed_s": 0.2297,
       "expected_threats": [
         "tls_anomaly"
       ],
@@ -822,7 +821,7 @@
       },
       "alerts_total": 1,
       "class": "attack",
-      "elapsed_s": 0.3816,
+      "elapsed_s": 0.2814,
       "expected_threats": [
         "udp_flood"
       ],
@@ -855,7 +854,7 @@
       "alerts_by_type": {},
       "alerts_total": 0,
       "class": "benign",
-      "elapsed_s": 4.7258,
+      "elapsed_s": 3.2538,
       "expected_threats": [],
       "false_negatives": [],
       "false_positives": [],
@@ -878,7 +877,7 @@
       "alerts_by_type": {},
       "alerts_total": 0,
       "class": "benign",
-      "elapsed_s": 4.6187,
+      "elapsed_s": 3.0577,
       "expected_threats": [],
       "false_negatives": [],
       "false_positives": [],
@@ -901,7 +900,7 @@
       "alerts_by_type": {},
       "alerts_total": 0,
       "class": "benign",
-      "elapsed_s": 4.721,
+      "elapsed_s": 3.0696,
       "expected_threats": [],
       "false_negatives": [],
       "false_positives": [],
@@ -924,7 +923,7 @@
       "alerts_by_type": {},
       "alerts_total": 0,
       "class": "benign",
-      "elapsed_s": 4.7736,
+      "elapsed_s": 3.0892,
       "expected_threats": [],
       "false_negatives": [],
       "false_positives": [],
@@ -947,7 +946,7 @@
       "alerts_by_type": {},
       "alerts_total": 0,
       "class": "benign",
-      "elapsed_s": 4.7932,
+      "elapsed_s": 3.1476,
       "expected_threats": [],
       "false_negatives": [],
       "false_positives": [],
@@ -970,7 +969,7 @@
       "alerts_by_type": {},
       "alerts_total": 0,
       "class": "benign",
-      "elapsed_s": 4.7414,
+      "elapsed_s": 3.0322,
       "expected_threats": [],
       "false_negatives": [],
       "false_positives": [],
@@ -990,7 +989,7 @@
       "true_positives": []
     }
   ],
-  "generated_at": 1788478046.5005367,
+  "generated_at": 1788486972.4920106,
   "summary": {
     "alerts_on_attack_captures": 26,
     "alerts_on_benign_captures": 0,
@@ -1044,16 +1043,20 @@
     "evasions_missed": [
       "jittered_beacon"
     ],
-    "expected_detections": 19,
-    "f1_pct": 100.0,
-    "false_negatives": 0,
+    "expected_detections": 26,
+    "f1_pct": 98.04,
+    "false_negatives": 1,
     "false_positives": 0,
     "formulas": {
       "evasion_scope": "threshold-boundary captures only",
       "precision": "TP / (TP + FP)",
       "primary_scope": "canonical attack captures + benign baseline",
+      "top_level_scope": "combined \u2014 every capture in the corpus",
       "true_positive_rate": "TP / (TP + FN)",
       "unit": "one (capture, threat_type) pair"
+    },
+    "known_misses": {
+      "jittered_beacon": "coefficient-of-variation scoring cannot separate a beacon with 45% jitter from ordinary chatty traffic"
     },
     "packets": 167259,
     "parse_errors": 0,
@@ -1072,7 +1075,9 @@
       "true_positives": 19
     },
     "profile": "tuned",
-    "recall_pct": 100.0,
+    "recall_pct": 96.15,
+    "recovered_misses": [],
+    "scope": "combined: every capture in the corpus",
     "techniques_observed": [
       "T1021",
       "T1041",
@@ -1109,7 +1114,8 @@
       "tls_anomaly",
       "udp_flood"
     ],
-    "true_positive_rate_pct": 100.0,
-    "true_positives": 19
+    "true_positive_rate_pct": 96.15,
+    "true_positives": 25,
+    "unexpected_misses": []
   }
 }

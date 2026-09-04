@@ -213,3 +213,63 @@ def test_config_profiles_differ_only_in_documented_sections():
         assert untuned_value != tuned_value, \
             '%s.%s is listed as an override but matches DEFAULTS' \
             % (section, key)
+
+
+# ── scope and the CI gate ────────────────────────────────────────────────────
+
+def test_top_level_metrics_are_the_combined_scope():
+    """The headline numbers must describe the corpus they are printed beside.
+
+    Reporting the canonical-only TPR at the top while reporting corpus-wide
+    capture and packet counts next to it reads as "100 % across 30 captures",
+    which is not what was measured. The two must come from the same scope.
+    """
+    rows = [_row('attack', tp=2, fp=0, fn=0),
+            _row('benign', tp=0, fp=0, fn=0),
+            _row('evasion', tp=0, fp=0, fn=1, scenario='e')]
+    summary = replay.aggregate(rows, 'tuned', 'test')
+
+    for key in ('captures', 'packets', 'true_positives', 'false_positives',
+                'false_negatives', 'true_positive_rate_pct', 'alerts_total'):
+        assert summary[key] == summary['combined'][key], \
+            '%s at the top level does not match the combined scope' % key
+    assert summary['captures'] == 3
+    assert summary['true_positive_rate_pct'] == summary['combined'][
+        'true_positive_rate_pct']
+    assert 'combined' in summary['scope']
+
+
+def test_documented_misses_do_not_count_as_regressions():
+    known = sorted(replay.KNOWN_MISSES)[0]
+    rows = [_row('attack', tp=2, fp=0, fn=0),
+            _row('evasion', tp=0, fp=0, fn=1, scenario=known)]
+    summary = replay.aggregate(rows, 'tuned', 'test')
+    assert summary['unexpected_misses'] == []
+    assert known in summary['known_misses']
+
+
+def test_an_undocumented_miss_is_a_regression():
+    rows = [_row('attack', tp=2, fp=0, fn=0),
+            _row('evasion', tp=0, fp=0, fn=1, scenario='brand_new_gap')]
+    summary = replay.aggregate(rows, 'tuned', 'test')
+    assert summary['unexpected_misses'] == ['brand_new_gap']
+
+
+def test_a_recovered_known_miss_is_reported():
+    """If a documented miss starts passing, say so — the docs need updating."""
+    known = sorted(replay.KNOWN_MISSES)[0]
+    rows = [_row('evasion', tp=1, fp=0, fn=0, scenario=known)]
+    summary = replay.aggregate(rows, 'tuned', 'test')
+    assert summary['recovered_misses'] == [known]
+
+
+def test_every_known_miss_is_a_real_scenario():
+    """A stale entry would silently excuse a regression in a renamed capture."""
+    for scenario in replay.KNOWN_MISSES:
+        assert scenario in TrafficGenerator.ALL_SCENARIOS, \
+            '%s is in KNOWN_MISSES but is not a scenario' % scenario
+
+
+def test_known_misses_carry_a_written_reason():
+    for scenario, reason in replay.KNOWN_MISSES.items():
+        assert len(reason) > 30, '%s has no real explanation' % scenario

@@ -103,10 +103,19 @@ class TimedSet:
         self._items = defaultdict(dict)
 
     def add(self, key, item, ts):
+        """Record `item` under `key` and return the live count in the window.
+
+        The count is what every caller thresholds on, so it has to exclude
+        members that have aged out — pruning only above some size, as an
+        earlier version did, let a detector with a threshold of 3 fire on three
+        events hours apart and then describe them as "3 hosts in 300s". The
+        dicts here are bounded by the thresholds that read them (tens of
+        entries), so the scan is cheap next to the per-packet parse cost.
+        """
         items = self._items[key]
         items[item] = ts
         cutoff = ts - self.window
-        if len(items) > 8:  # prune lazily; scanning a tiny dict is wasted work
+        if any(t < cutoff for t in items.values()):
             for stale in [i for i, t in items.items() if t < cutoff]:
                 del items[stale]
         return len(items)

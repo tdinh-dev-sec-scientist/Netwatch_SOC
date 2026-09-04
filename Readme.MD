@@ -19,7 +19,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python App.py                     # dashboard + live simulation → http://127.0.0.1:5001
-pytest                            # 360 tests
+pytest                            # 379 tests
 python -m tools.make_pcaps        # build the PCAP corpus (once, ~40 s)
 python -m tests.replay            # detection quality: TP/FP/FN, TPR, precision
 python -m tools.noise_experiment  # alert-noise reduction, untuned vs tuned
@@ -139,14 +139,22 @@ the remaining 10.
 
 | Backend | pipeline (parse+detect+persist) | replay (incl. Scapy PCAP read) |
 |---|---|---|
-| SQLite | **3,800.8 pkt/s** (3,625–4,290, σ 238) | 3,343.6 pkt/s |
-| PostgreSQL | **3,449.0 pkt/s** (3,323–3,594, σ 91) | 3,090.0 pkt/s |
+| SQLite | **5,720.9 pkt/s** (5,144–7,030, σ 576) | 5,196.4 pkt/s |
+| PostgreSQL | **5,185.8 pkt/s** (4,467–5,476, σ 291) | 4,556.6 pkt/s |
 
-Per packet: 46.8 µs parse + 32.1 µs detect. Zero parse errors.
+Per packet: 30.1 µs parse + 22.5 µs detect. Zero parse errors.
+
+Measured on an otherwise idle machine. The same benchmark run while a gunicorn
+pool, a loaded PostgreSQL and a Docker daemon were competing for the CPU gave
+3,800.8 pkt/s — 34 % lower. Throughput also declines across the runs within one
+invocation (7,030 → 5,144) because each run appends to the same store, so the
+median describes a database growing to ~427k packets rather than a steady
+state. Both effects are documented in
+[`docs/VALIDATION.md`](docs/VALIDATION.md).
 
 Query latency over the 22 queries backing the API, against the 469,436-packet
-dataset the throughput phase wrote: **p50 0.29 ms / p95 1.02 ms** (SQLite),
-**p50 0.64 ms / p95 8.98 ms** (PostgreSQL). Both under the 50 ms budget.
+dataset the throughput phase wrote: **p50 0.17 ms / p95 0.54 ms** (SQLite),
+**p50 0.45 ms / p95 5.34 ms** (PostgreSQL). Both under the 50 ms budget.
 
 ### Alert noise — `python -m tools.noise_experiment`
 
@@ -299,14 +307,16 @@ NETWATCH_TEST_DB_URL=postgresql://… pytest -q          # run the suite on Post
 | 8 | `performance_metrics` | measured engine and benchmark throughput/latency |
 | 9 | `validation_runs` | PCAP replay and tuning results (TP/FP/FN, TPR) |
 
-24 indexes on SQLite, 36 on PostgreSQL. Index usage is **tested, not assumed** —
+26 explicit indexes on SQLite; PostgreSQL reports 36 for the same schema
+because it counts primary-key and unique constraints as index objects of their
+own. Index usage is **tested, not assumed** —
 `test_hot_queries_use_an_index` runs the backend's own planner and fails on a
 full scan. Batched writes: one transaction per batch, which is the single
 largest throughput factor.
 
 `protocol_stats` is a genuine rollup, not a convenience copy: it keeps the
 charts *and* the KPI counters off the packet table. Moving two unbounded counts
-onto it took `/api/stats/overview` from 51 ms to 3.9 ms on PostgreSQL at 469k
+onto it took `/api/stats/overview` from 51 ms to 2.0 ms on PostgreSQL at 469k
 packets.
 
 ---
@@ -355,23 +365,23 @@ the charts alone; the rest of the dashboard keeps working.
 ## Testing
 
 ```bash
-pytest -q                                     # 360 tests on SQLite
+pytest -q                                     # 379 tests on SQLite
 NETWATCH_TEST_DB_URL=postgresql://… pytest -q # the same suite on PostgreSQL
 ```
 
-**360 passed on SQLite; 359 passed, 1 skipped on PostgreSQL** (the skip is a
+**379 passed on SQLite; 378 passed, 1 skipped on PostgreSQL** (the skip is a
 SQLite journal-mode assertion with no PostgreSQL equivalent).
 
 | File | Tests | Covers |
 |---|---|---|
-| `test_detectors.py` | 79 | every detector, negative cases, evasion variants, state bounding |
+| `test_detectors.py` | 87 | every detector, negative cases, evasion variants, state bounding |
 | `test_api.py` | 69 | every endpoint, schemas, pagination, 400/404, SQL injection |
 | `test_protocol_analyzer.py` | 44 | every protocol, entropy, malformed and truncated input |
-| `test_database.py` | 36 | 9 tables, rollup consistency, index usage, latency, transactionality |
+| `test_database.py` | 41 | 9 tables, rollup consistency, index usage, latency, transactionality |
 | `test_dashboard.py` | 30 | modules wired to working endpoints, escaping, CDN resilience |
 | `test_noise.py` | 29 | reduction arithmetic, both profiles, no detection lost to tuning |
 | `test_packaging.py` | 22 | image contents, dependencies, healthchecks, port exposure |
-| `test_replay.py` | 15 | scoring arithmetic, corpus determinism, state isolation |
+| `test_replay.py` | 21 | scoring arithmetic, corpus determinism, state isolation |
 | `test_benchmark.py` | 12 | capture reproducibility, median reporting, warm-up handling |
 | `test_pcap_io.py` | 12 | byte-identical PCAP round trip, streaming, manifest |
 | `test_mitre.py` | 12 | catalog integrity, no orphans, no invented IDs |

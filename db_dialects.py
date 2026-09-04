@@ -117,8 +117,13 @@ class SQLiteDialect(Dialect):
 
     def connect(self, readonly=False):
         import sqlite3
-        conn = sqlite3.connect(self.path, timeout=30,
-                               check_same_thread=not readonly)
+        # check_same_thread=False on both: the single write connection is
+        # shared across threads (the engine thread writes while gunicorn's
+        # worker threads acknowledge alerts) and is serialised by
+        # DatabaseManager's own lock, which is the guarantee sqlite3's check
+        # exists to approximate. Reader connections are thread-local, so the
+        # check would never fire for them either way.
+        conn = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
         # Explicit transaction control on both backends: nothing is implicitly
         # wrapped, so BEGIN/COMMIT in the write path mean the same thing here
         # as they do on PostgreSQL.

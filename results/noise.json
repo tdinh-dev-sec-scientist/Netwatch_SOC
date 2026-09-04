@@ -460,18 +460,18 @@
       "threat_type": "syn_flood"
     },
     {
-      "alerts_after": 3,
-      "alerts_before": 4,
-      "alerts_removed": 1,
-      "share_of_reduction_pct": 0.01,
-      "threat_type": "data_exfil"
-    },
-    {
       "alerts_after": 2,
       "alerts_before": 3,
       "alerts_removed": 1,
       "share_of_reduction_pct": 0.01,
       "threat_type": "arp_spoof"
+    },
+    {
+      "alerts_after": 3,
+      "alerts_before": 4,
+      "alerts_removed": 1,
+      "share_of_reduction_pct": 0.01,
+      "threat_type": "data_exfil"
     }
   ],
   "delta": {
@@ -499,7 +499,7 @@
     "python": "3.11.15",
     "scapy": "2.7.0"
   },
-  "generated_at": 1788478144.665698,
+  "generated_at": 1788487041.8740776,
   "tuned": {
     "alerts_by_type": {
       "amplification": 1,

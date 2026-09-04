@@ -18,7 +18,7 @@ PostgreSQL, Docker | May 2025 – Present
   true-positive rate and 100% precision, with zero false positives over 120,000
   benign packets.
 - Implemented a deep-packet-inspection pipeline parsing **21** protocols (TCP,
-  UDP, HTTP/S, DNS, TLS, ARP) at a sustained **3,801 packets/sec** on replayed
+  UDP, HTTP/S, DNS, TLS, ARP) at a sustained **5,721 packets/sec** on replayed
   capture — median of **10** runs after a discarded warm-up, same 21,338-packet
   PCAP each run.
 - Cut alert noise **99%** (6,739 → 36 alerts) through severity scoring and
@@ -40,7 +40,7 @@ PostgreSQL, Docker | May 2025 – Present
 | Precision | 100.00 % (0 false positives) | same |
 | Benign false positives | 0 over 120,000 packets | `summary.alerts_on_benign_captures` |
 | Protocols parsed | 21 | `ProtocolAnalyzer.SUPPORTED_PROTOCOLS` |
-| Throughput | 3,800.8 pkt/s median | `results/benchmark.json` → `throughput.pipeline_packets_per_s.median` |
+| Throughput | 5,720.9 pkt/s median | `results/benchmark.json` → `throughput.pipeline_packets_per_s.median` |
 | Benchmark runs | 10 measured, 1 warm-up discarded | `throughput.measured_runs` / `warmup_runs` |
 | Alerts before tuning | 6,739 | `results/noise.json` → `delta.alerts_before` |
 | Alerts after tuning | 36 | `delta.alerts_after` |
@@ -54,7 +54,7 @@ PostgreSQL, Docker | May 2025 – Present
 ## Rounding
 
 - **96.2%** ← 96.15 %, one decimal.
-- **3,801 packets/sec** ← 3,800.8, nearest whole packet.
+- **5,721 packets/sec** ← 5,720.9, nearest whole packet.
 - **99%** ← 99.47 %. Rounded *down* to the whole percent, and the raw counts
   (6,739 → 36) are given alongside so the exact figure is recoverable. Writing
   "99.5%" would round up and read as precision the experiment does not warrant.
@@ -102,10 +102,16 @@ absence of deduplication. The baseline now carries a flat 30-second dedup timer
 on every rule, a test enforces it, and all 68 differing configuration values
 are printed by `config.profile_diff('untuned')`.
 
-**Throughput is single-threaded, outside Docker, on one machine.** 3,801 pkt/s
-is what this CPU did. The methodology transfers; the figure does not. On
-PostgreSQL the same capture runs at 3,449 pkt/s — about 9% slower, the price of
-a round trip per batch in exchange for concurrent writers.
+**Throughput is single-threaded, outside Docker, on one idle machine.**
+5,721 pkt/s is what this CPU did with nothing else running. The same benchmark
+under load — a gunicorn pool, a busy PostgreSQL and a Docker daemon competing
+for four cores — gave 3,801 pkt/s, 34% lower, and reported a higher *parse*
+cost despite the parser being identical. The figure also drifts downward across
+the runs inside one invocation, from 7,030 to 5,144, because each run appends
+to the same store. The methodology transfers; the number is a statement about
+a machine at a moment. On PostgreSQL the same capture runs at 5,186 pkt/s —
+about 9% slower, the price of a round trip per batch in exchange for concurrent
+writers.
 
 **Docker images were not built during validation.** The registry CDN is blocked
 by the environment's egress policy. The compose topology was verified by
@@ -121,7 +127,7 @@ taken inside a container.
 **If a shorter second bullet is needed** (drops the methodology clause):
 
 > Implemented a deep-packet-inspection pipeline parsing 21 protocols (TCP, UDP,
-> HTTP/S, DNS, TLS, ARP) with sustained throughput of 3,801 packets/sec on
+> HTTP/S, DNS, TLS, ARP) with sustained throughput of 5,721 packets/sec on
 > replayed PCAP capture, measured as the median of 10 runs.
 
 **If the reader is likely to distrust a 99% figure**, lead with the rate:

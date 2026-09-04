@@ -7,7 +7,7 @@ import pytest
 
 from DB_Manager import TABLES
 
-from conftest import BACKEND, BASE_TS, clone_manager
+from conftest import BACKEND, BASE_TS, SEED, clone_manager
 
 EXPECTED_TABLES = {
     'packets', 'connections', 'hosts', 'alerts', 'mitre_techniques',
@@ -357,3 +357,127 @@ def test_overview_avoids_scanning_the_packet_table(populated_db):
     """Guards the fix: the KPI strip must not full-scan packets."""
     sql = 'SELECT SUM(packets) FROM protocol_stats'
     assert not populated_db.scans_table(sql, table='packets')
+
+
+def test_write_connection_is_usable_from_another_thread(db):
+    """The shared writer must not be pinned to its constructing thread.
+
+    `create_app()` builds the manager on the main thread and runs the capture
+    engine on a background one, so a thread-pinned write connection makes the
+    whole pipeline persist nothing while the healthcheck stays green — the
+    failure is swallowed by the engine loop's own error handling. It is
+    invisible to any single-threaded test, hence this one.
+    """
+    import threading
+
+    failures = []
+
+    def write():
+        try:
+            db.persist_batch([{
+                'ts': BASE_TS, 'src_ip': '10.0.1.77', 'dst_ip': '10.0.2.77',
+                'protocol': 'TCP', 'frame_len': 64}], [])
+        except Exception as exc:            # noqa: BLE001 - reporting it
+            failures.append(repr(exc))
+
+    thread = threading.Thread(target=write)
+    thread.start()
+    thread.join()
+    assert not failures, failures
+    assert db.health()['tables']['packets'] == 1
+
+
+def test_reads_work_from_several_threads_at_once(populated_db):
+    """Reader connections are thread-local; concurrent reads must not clash."""
+    import threading
+
+    errors, results = [], []
+
+    def read():
+        try:
+            results.append(populated_db.get_alerts(limit=5)['total'])
+        except Exception as exc:            # noqa: BLE001 - reporting it
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=read) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors, errors
+    assert len(set(results)) == 1, 'threads disagreed on the row count'
+
+
+def test_batch_run_metrics_record_the_alerts_they_saw(db, engine, analyzer):
+    """A metrics row claiming zero alerts for a window that raised some is
+    worse than no row: the Detection Performance module charts it."""
+    from PacketSimulator import PacketSimulator
+    from PacketSimulator import TrafficGenerator as Generator
+
+    sim = PacketSimulator(db, engine, analyzer, seed=SEED)
+    frames = Generator(seed=SEED).scenario('port_scan', start_ts=BASE_TS)
+    found = sim.run_frames(frames)
+    assert found, 'fixture raised no alerts, so this proves nothing'
+
+    rows = db.get_performance(limit=5)
+    assert rows
+    assert rows[0]['alerts_generated'] == len(found)
+
+
+def test_live_loop_metrics_record_the_alerts_they_saw(db, engine, analyzer):
+    """Same guarantee for the continuous loop, which counts separately.
+
+    The live loop keeps its own per-window counters rather than diffing the
+    totals, and its alert counter was never incremented — every row it wrote
+    reported zero alerts however many the window raised. Exercised with a
+    short metrics window so the test does not have to run for a real minute.
+    """
+    from PacketSimulator import PacketSimulator
+
+    sim = PacketSimulator(db, engine, analyzer, seed=SEED)
+
+    def stop_soon():
+        time.sleep(2.5)
+        sim.stop()
+
+    import threading
+    threading.Thread(target=stop_soon, daemon=True).start()
+    # Inject an attack immediately and write a metrics row twice a second, so
+    # the window that raises alerts is one the assertions can see.
+    sim.run(rate_pps=600.0, metrics_window_s=0.5, first_scenario_after_s=0.0,
+            scenario_gap_s=(0.5, 1.0))
+
+    rows = db.get_performance(limit=50)
+    assert rows, 'the loop wrote no metrics at all'
+    assert sum(r['packets_processed'] for r in rows) > 0
+    assert sim.alerts_generated > 0, \
+        'the loop raised no alerts, so this proves nothing'
+    assert sum(r['alerts_generated'] for r in rows) == sim.alerts_generated, \
+        'the metric rows do not account for the alerts the loop raised'
+
+
+def test_shutdown_records_the_window_in_progress(db, engine, analyzer):
+    """Stopping mid-window must not discard what that window measured.
+
+    The loop wrote a metrics row only on a window boundary, so everything
+    since the last boundary — up to a full window on every `docker stop` —
+    went unrecorded.
+    """
+    import threading
+    from PacketSimulator import PacketSimulator
+
+    sim = PacketSimulator(db, engine, analyzer, seed=SEED)
+
+    def stop_soon():
+        time.sleep(1.0)
+        sim.stop()
+
+    threading.Thread(target=stop_soon, daemon=True).start()
+    # A window far longer than the run: every packet lands in the partial
+    # window, so nothing is recorded at all unless shutdown records it.
+    sim.run(rate_pps=600.0, metrics_window_s=3600.0,
+            first_scenario_after_s=3600.0)
+
+    rows = db.get_performance(limit=10)
+    assert rows, 'the window in progress was discarded on shutdown'
+    assert sum(r['packets_processed'] for r in rows) == sim.packets_processed

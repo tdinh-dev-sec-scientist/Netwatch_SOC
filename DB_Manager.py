@@ -637,10 +637,12 @@ class DatabaseManager:
             'packets_last_hour': self._scalar(
                 'SELECT SUM(packets) FROM protocol_stats WHERE bucket > ?',
                 (int(hour),)),
+            # The derived table needs a name: PostgreSQL 15 and earlier
+            # reject an unaliased subquery in FROM, and SQLite does not mind.
             'packets_per_min': round(self._scalar(
                 """SELECT AVG(pm) FROM (
                      SELECT SUM(packets) AS pm FROM protocol_stats
-                     WHERE bucket > ? GROUP BY bucket)""",
+                     WHERE bucket > ? GROUP BY bucket) AS per_minute""",
                 (int(now - 600),), 0.0), 1),
             'total_alerts': self._scalar('SELECT COUNT(*) FROM alerts'),
             'alerts_24h': self._scalar(

@@ -13,7 +13,7 @@ Reproduce everything:
 ```bash
 pip install -r requirements.txt
 python -m tools.make_pcaps          # build the corpus (57 MB, ~40 s)
-pytest -q                           # 360 tests
+pytest -q                           # 379 tests
 python -m tests.replay              # detection quality
 python -m tools.noise_experiment    # alert-noise reduction
 python benchmark.py --runs 11 --warmup 1 --packets 20000   # throughput
@@ -57,7 +57,7 @@ asserted by a test.
 | REST endpoints | **25** under `/api/` | `App.py` route table | `test_all_registered_routes_are_covered_by_tests` |
 | Dashboard modules | **9** | `<section id="view-…">` in the template | `test_at_least_eight_modules_exist` |
 | Database tables | **9** | `DB_Manager.TABLES` | `test_schema_has_exactly_nine_tables` |
-| Indexes | **24** (SQLite) / **36** (PostgreSQL) | catalog introspection | `test_index_count_is_substantial` |
+| Indexes | **26** (SQLite) / **36** (PostgreSQL) | catalog introspection | `test_index_count_is_substantial` |
 
 The target counts in the project brief were 15 threat categories, 12
 techniques, 15 protocols, 14 endpoints and 8 dashboard modules. Every one is
@@ -371,31 +371,50 @@ python benchmark.py --runs 11 --warmup 1 --packets 20000 --query-repeats 30 \
 
 | Run | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| pipeline pkt/s | 4,190 | 4,290 | 4,071 | 4,011 | 3,703 | 3,740 | 3,861 | 3,625 | 3,656 | 3,721 |
-| replay pkt/s | 3,892 | 3,505 | 3,547 | 3,558 | 3,363 | 3,149 | 3,324 | 3,321 | 3,239 | 3,191 |
+| pipeline pkt/s | 7,030 | 6,484 | 6,338 | 6,124 | 5,812 | 5,591 | 5,573 | 5,377 | 5,144 | 5,630 |
+| replay pkt/s | 6,050 | 5,891 | 5,570 | 5,430 | 5,397 | 4,995 | 4,913 | 4,836 | 4,748 | 4,665 |
 
 | | median | mean | min | max | stdev |
 |---|---|---|---|---|---|
-| **pipeline** | **3,800.8 pkt/s** | 3,886.9 | 3,625.3 | 4,290.0 | 237.8 |
-| **replay** | **3,343.6 pkt/s** | 3,408.9 | 3,149.1 | 3,892.3 | 222.3 |
+| **pipeline** | **5,720.9 pkt/s** | 5,910.3 | 5,144.4 | 7,029.6 | 575.9 |
+| **replay** | **5,196.4 pkt/s** | 5,249.7 | 4,665.0 | 6,050.2 | 488.9 |
 
-Median pipeline rate is **3,800.8 packets/sec** (228,048 packets/min).
-Per packet: 46.8 µs parse + 32.1 µs detect. Parse errors: 0.
+Median pipeline rate is **5,720.9 packets/sec** (343,254 packets/min).
+Per packet: 30.1 µs parse + 22.5 µs detect. Parse errors: 0.
 
 ### PostgreSQL (deployment backend)
 
 | Run | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| pipeline pkt/s | 3,416 | 3,407 | 3,484 | 3,460 | 3,574 | 3,590 | 3,438 | 3,594 | 3,410 | 3,323 |
+| pipeline pkt/s | 5,256 | 5,476 | 4,897 | 5,051 | 4,887 | 5,204 | 4,467 | 5,168 | 5,380 | 5,220 |
+| replay pkt/s | 4,768 | 4,773 | 4,842 | 4,402 | 4,495 | 4,444 | 4,488 | 3,935 | 4,619 | 4,664 |
 
 | | median | mean | min | max | stdev |
 |---|---|---|---|---|---|
-| **pipeline** | **3,449.0 pkt/s** | 3,469.4 | 3,322.8 | 3,593.5 | 90.6 |
-| **replay** | **3,090.0 pkt/s** | 3,062.5 | 2,961.9 | 3,175.4 | 74.7 |
+| **pipeline** | **5,185.8 pkt/s** | 5,100.7 | 4,467.3 | 5,476.4 | 291.2 |
+| **replay** | **4,556.6 pkt/s** | 4,542.9 | 3,935.2 | 4,842.2 | 262.1 |
 
 PostgreSQL costs about 9 % of pipeline throughput against SQLite on the same
-capture, which is the price of a network round trip per batch in exchange for
-concurrent writers. The variance is markedly lower.
+capture — the price of a round trip per batch, in exchange for concurrent
+writers.
+
+#### Two things about these numbers
+
+**They are sensitive to what else the machine is doing.** An earlier run of
+this same benchmark, taken while a gunicorn worker pool, a loaded PostgreSQL
+and a Docker daemon were also running, measured 3,800.8 pkt/s — 34 % lower —
+and reported a *parse* cost of 46.8 µs against 30.1 µs here, even though the
+parser was not touched between the two. The figures above were taken on an
+otherwise idle machine (load average 0.6). Any throughput number of this kind
+is a statement about a machine at a moment, and this one is worth repeating
+rather than trusting once.
+
+**Throughput declines across the runs within a single invocation** — 7,030
+down to 5,144 pkt/s on SQLite. Each run appends to the same database, so run 1
+writes into an empty store and run 10 into one holding ~427,000 packets. The
+reported median therefore describes a store growing over that range, not a
+steady state. Pass `--runs 3` for a figure closer to a small store, or point
+`--db` at a pre-populated one for a figure closer to a large one.
 
 ### Query latency
 
@@ -405,8 +424,8 @@ the throughput phase actually wrote (469,436 packets, 9,169 flows, 711 hosts,
 
 | Backend | p50 | p95 | p99 | max |
 |---|---|---|---|---|
-| SQLite | 0.293 ms | 1.017 ms | 2.710 ms | 3.184 ms |
-| PostgreSQL | 0.636 ms | 8.977 ms | 45.823 ms | 54.966 ms |
+| SQLite | 0.166 ms | 0.543 ms | 1.527 ms | 1.553 ms |
+| PostgreSQL | 0.451 ms | 5.339 ms | 26.327 ms | 28.848 ms |
 
 Both meet the < 50 ms p95 budget. The PostgreSQL tail is one query — see the
 next section.
@@ -423,9 +442,13 @@ asserted to agree with the packet table by
 
 | | before | after |
 |---|---|---|
-| `overview` p50, PostgreSQL | 51.1 ms | 3.9 ms |
-| overall p95, PostgreSQL | 42.1 ms | 9.0 ms |
-| overall p95, SQLite | 2.7 ms | 1.0 ms |
+| `overview` p50, PostgreSQL | 51.1 ms | 2.0 ms |
+| overall p95, PostgreSQL | 42.1 ms | 5.3 ms |
+| overall p95, SQLite | 2.7 ms | 0.5 ms |
+
+(The before figures were taken under the machine load described above; the
+after figures on the idle machine. The `overview` query was over the 50 ms
+budget in both conditions before the fix.)
 
 `test_overview_total_packets_agrees_with_the_packet_table` guards the shortcut:
 the optimisation is only valid while the rollup and the table agree.
@@ -453,8 +476,14 @@ Tables 1–8 are asserted populated by the live pipeline
 replay and tuning harnesses and round-tripped by
 `test_validation_runs_round_trip`.
 
-Both backends run the same schema, rendered through `db_dialects.py`. Index
-usage is asserted, not assumed: `test_hot_queries_use_an_index` runs the
+Both backends run the same schema, rendered through `db_dialects.py`. SQLite
+reports **26** explicit indexes; PostgreSQL reports **36** because it
+materialises primary-key and unique constraints as index objects of their own,
+which SQLite does not for rowid tables. The difference is in the counting, not
+in the schema — check either with `curl -s localhost:5001/api/health | jq
+.index_count`.
+
+Index usage is asserted, not assumed: `test_hot_queries_use_an_index` runs the
 backend's own planner over the hot queries and fails on a full scan.
 
 **There is deliberately no `threats` table.** A "threat" is an aggregation over
@@ -586,22 +615,22 @@ NETWATCH_TEST_DB_URL=postgresql://… pytest -q                # PostgreSQL
 
 | Backend | Total | Passed | Failed | Skipped | Time |
 |---|---|---|---|---|---|
-| SQLite | 360 | **360** | 0 | 0 | 55.5 s |
-| PostgreSQL | 360 | **359** | 0 | 1 | 59.8 s |
+| SQLite | 379 | **379** | 0 | 0 | 36.0 s |
+| PostgreSQL | 379 | **378** | 0 | 1 | 40.8 s |
 
 The single skip is `test_wal_mode_enabled`, which asserts a SQLite journal mode
 that has no PostgreSQL equivalent.
 
 | File | Tests | Covers |
 |---|---|---|
-| `test_detectors.py` | 79 | every detector fires on its scenario; negative cases; evasion variants; thresholds; state bounding; detector isolation |
+| `test_detectors.py` | 87 | every detector fires on its scenario; negative cases; evasion variants; thresholds; state bounding; detector isolation |
 | `test_api.py` | 69 | every endpoint, schemas, pagination, 400/404, SQL injection |
 | `test_protocol_analyzer.py` | 44 | every protocol, entropy, malformed and truncated input |
-| `test_database.py` | 36 | 9 tables, rollup consistency, index usage, latency, transactionality |
+| `test_database.py` | 41 | 9 tables, rollup consistency, index usage, latency, transactionality |
 | `test_dashboard.py` | 30 | each module wired to a working endpoint, escaping, no mock data, CDN resilience |
 | `test_noise.py` | 29 | reduction arithmetic, both config profiles, no detection lost to tuning |
 | `test_packaging.py` | 22 | image contents, dependencies, healthchecks, port exposure |
-| `test_replay.py` | 15 | scoring arithmetic, corpus determinism, state isolation, persistence |
+| `test_replay.py` | 21 | scoring arithmetic, corpus determinism, state isolation, persistence |
 | `test_benchmark.py` | 12 | capture reproducibility, median reporting, warm-up handling, targets |
 | `test_pcap_io.py` | 12 | byte-identical PCAP round trip, streaming, corpus manifest |
 | `test_mitre.py` | 12 | catalog integrity, no orphans, no invented IDs, database linkage |
@@ -642,11 +671,11 @@ directly against PostgreSQL, not by a container run. Nothing in this document
 claims a measurement taken inside a container.
 
 **`/api/health` does not scale.** It reports exact row counts for all nine
-tables, which means an unbounded `COUNT(*)` over `packets`. At 469k packets
-that is 42 ms immediately after a bulk load and 25 ms after `VACUUM ANALYZE` —
-within budget, but linear in table size, and it is polled every 30 s by the
-container healthcheck. Capped or estimated counts would fix it; not done,
-because the endpoint's contract is exact counts.
+tables, which means an unbounded `COUNT(*)` over `packets`. At 469k packets on
+PostgreSQL that is 25 ms, and it is now the slowest query in the API — within
+budget, but linear in table size, and polled every 30 s by the container
+healthcheck. Capped or estimated counts would fix it; not done, because the
+endpoint's contract is exact counts.
 
 **High-jitter C2 beaconing is not detected.** See the known miss above. This is
 a limitation of coefficient-of-variation scoring, not a tuning choice.

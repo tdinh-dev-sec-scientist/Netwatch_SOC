@@ -494,3 +494,113 @@ def test_high_jitter_beacon_is_a_known_miss(analyzer, cfg):
     findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
                             'jittered_beacon')
     assert not [f for f in findings if f.threat_type == 'c2_beacon']
+
+
+# ── windowed state must actually be windowed ─────────────────────────────────
+
+def test_timed_set_count_excludes_expired_members():
+    """add() returns the count callers threshold on, so it must be live.
+
+    Pruning only above some size let a detector with a threshold of 3 fire on
+    three events hours apart and then describe them as happening inside its
+    window.
+    """
+    from detectors.base import TimedSet
+
+    window = TimedSet(300)
+    for offset in (0.0, 4500.0, 9000.0):
+        count = window.add('src', 'host-%s' % offset, offset)
+    assert count == 1, 'expired members are still counted (%d)' % count
+    assert window.size('src', 9000.0) == 1
+
+
+def test_timed_set_counts_everything_inside_the_window():
+    from detectors.base import TimedSet
+
+    window = TimedSet(300)
+    for i in range(30):
+        count = window.add('src', 'port-%d' % i, float(i))
+    assert count == 30
+
+
+def test_lateral_movement_ignores_sessions_spread_across_hours(engine,
+                                                              analyzer):
+    """Three admin sessions hours apart are not a 300-second fan-out."""
+    findings = []
+    for i, offset in enumerate((0.0, 4500.0, 9000.0)):
+        frame = F.tcp_frame(b'', '10.0.1.60', '10.0.2.%d' % (80 + i),
+                            40000 + i, 445, 'SYN')
+        pkt = analyzer.safe_parse(frame, BASE_TS + offset)
+        findings.extend(engine.analyze(pkt))
+    assert not [f for f in findings if f.threat_type == 'lateral_movement']
+
+
+def test_credential_stuffing_ignores_usernames_spread_across_hours(engine,
+                                                                   analyzer):
+    findings = []
+    for i in range(9):
+        frame = F.tcp_frame(F.line_protocol('USER user%d' % i),
+                            '45.33.32.200', '10.0.2.12', 40000 + i, 21,
+                            'PSH|ACK')
+        # window_s is 300; one attempt per hour is not stuffing.
+        pkt = analyzer.safe_parse(frame, BASE_TS + i * 3600.0)
+        findings.extend(engine.analyze(pkt))
+    assert not [f for f in findings
+                if f.evidence.get('pattern') == 'credential_stuffing']
+
+
+def test_weak_sql_keywords_alone_do_not_alert(engine, analyzer):
+    """"delete … from" is ordinary English in a query string, not an injection.
+
+    The weakest signature must sit below min_score, or the lowest weight in the
+    table silently becomes the alerting floor and the threshold does nothing.
+    """
+    for uri in ('/admin?action=delete&next=/from/home',
+                '/reports?select=summary&period=from/2024',
+                '/orders?update=1&redirect=/from/cart'):
+        pkt = analyzer.safe_parse(F.tcp_frame(
+            F.http_request('GET', uri, 'app.corp.local', 'Mozilla/5.0'),
+            '10.0.1.5', '10.0.2.10', 40000, 80, 'PSH|ACK'), BASE_TS)
+        findings = engine.analyze(pkt)
+        assert not [f for f in findings if f.threat_type == 'http_anomaly'], \
+            'benign URL alerted: %s' % uri
+
+
+def test_min_score_is_reachable_in_both_directions(analyzer):
+    """The knob must actually change behaviour, or it is decoration.
+
+    A weak fragment must be suppressed at the tuned floor and alert at the
+    untuned one — otherwise its entry in the untuned profile contributes
+    nothing to the noise measurement that cites it.
+    """
+    uri = '/admin?action=delete&next=/from/home'
+    seen = {}
+    for profile in ('tuned', 'untuned'):
+        engine = ThreatDetector(cfg=config_module.load(profile=profile))
+        pkt = analyzer.safe_parse(F.tcp_frame(
+            F.http_request('GET', uri, 'app.corp.local', 'Mozilla/5.0'),
+            '10.0.1.5', '10.0.2.10', 40000, 80, 'PSH|ACK'), BASE_TS)
+        seen[profile] = [f for f in engine.analyze(pkt)
+                         if f.threat_type == 'http_anomaly']
+    assert not seen['tuned']
+    assert seen['untuned'], 'min_score has no effect between the profiles'
+
+
+def test_independent_categories_corroborate(engine, analyzer):
+    """A weak fragment plus a scanner UA is stronger than either alone."""
+    pkt = analyzer.safe_parse(F.tcp_frame(
+        F.http_request('GET', '/admin?action=delete&next=/from/home',
+                       'app.corp.local', 'sqlmap/1.7'),
+        '45.33.32.156', '10.0.2.10', 40000, 80, 'PSH|ACK'), BASE_TS)
+    findings = [f for f in engine.analyze(pkt)
+                if f.threat_type == 'http_anomaly']
+    assert findings
+    assert len(findings[0].evidence['categories']) > 1
+
+
+def test_every_injection_payload_still_fires(engine, analyzer, gen):
+    """The corroboration change must not weaken real attack detection."""
+    findings = run_scenario(engine, analyzer, gen, 'http_attack')
+    hits = [f for f in findings if f.threat_type == 'http_anomaly']
+    assert len(hits) == 5, 'expected all five payloads, saw %d' % len(hits)
+    assert all(f.severity == 'CRITICAL' for f in hits)
