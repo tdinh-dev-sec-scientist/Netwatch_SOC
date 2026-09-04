@@ -106,7 +106,10 @@ def test_port_scan_needs_the_configured_port_count(analyzer, cfg):
 def test_thresholds_are_configurable(analyzer):
     """Raising a threshold must actually suppress a formerly-firing scan."""
     tuned = config_module.load()
+    # Both time scales have to be raised: port_scan alerts on a burst inside
+    # the short window *or* a slow accumulation inside the long one.
     tuned['port_scan']['distinct_ports'] = 500
+    tuned['port_scan']['long_distinct_ports'] = 500
     engine = ThreatDetector(cfg=tuned)
     findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
                             'port_scan', ports=60)
@@ -354,3 +357,250 @@ def test_cooldown_suppresses_duplicate_alerts(analyzer, cfg):
                             'port_scan', ports=400)
     scans = [f for f in findings if f.threat_type == 'port_scan']
     assert 1 <= len(scans) <= 5, 'expected deduplication, got %d' % len(scans)
+
+
+# ── evasion variants: the detection boundary ─────────────────────────────────
+#
+# Each of these is the same attack shaped to sit under a per-window threshold.
+# The positive cases prove the second time scale (or the aggregate signal)
+# closes the gap; the negative cases prove it did not do so by simply lowering
+# the bar for benign traffic.
+
+EVASIONS = sorted(TrafficGenerator.EVASIONS)
+
+
+@pytest.mark.parametrize('scenario', EVASIONS)
+def test_evasion_variant_is_scored_against_the_attack_it_hides(
+        engine, analyzer, gen, scenario):
+    """Every evasion declares the threat it is a variant of.
+
+    Whether the engine catches it is measured by tests/replay.py; what is
+    asserted here is that the ground truth exists, so a miss is recorded as a
+    false negative rather than silently going unscored.
+    """
+    expected = TrafficGenerator.expected_threats(scenario)
+    assert expected
+    findings = run_scenario(engine, analyzer, gen, scenario)
+    for finding in findings:
+        assert finding.confidence <= 1.0
+
+
+def test_slow_port_scan_is_caught_by_the_long_window(analyzer, cfg):
+    """A scan paced across windows still accumulates against the slow bar."""
+    engine = ThreatDetector(cfg=cfg)
+    findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
+                            'slow_port_scan')
+    scans = [f for f in findings if f.threat_type == 'port_scan']
+    assert scans, 'slow scan evaded both time scales'
+    assert scans[0].evidence['pace'] == 'slow'
+    # Slower evidence is weaker evidence, and the score says so.
+    assert scans[0].confidence <= 0.85
+
+
+def test_long_window_scan_still_needs_its_own_threshold(analyzer, cfg):
+    """Ordinary multi-service traffic must not reach the slow-scan bar."""
+    cfg['port_scan']['long_distinct_ports'] = 500
+    cfg['port_scan']['distinct_ports'] = 500
+    engine = ThreatDetector(cfg=cfg)
+    findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
+                            'slow_port_scan')
+    assert not [f for f in findings if f.threat_type == 'port_scan']
+
+
+def test_slow_brute_force_is_caught_by_the_long_window(analyzer, cfg):
+    engine = ThreatDetector(cfg=cfg)
+    findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
+                            'slow_brute_force')
+    hits = [f for f in findings if f.threat_type == 'brute_force']
+    assert hits
+    assert hits[0].evidence['pace'] == 'slow'
+
+
+def test_throttled_syn_flood_is_caught_over_a_minute(analyzer, cfg):
+    engine = ThreatDetector(cfg=cfg)
+    findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
+                            'throttled_syn_flood')
+    hits = [f for f in findings if f.threat_type == 'syn_flood']
+    assert hits
+    assert hits[0].evidence['pace'] == 'throttled'
+
+
+def test_throttled_flood_still_requires_incomplete_handshakes(analyzer, cfg):
+    """The slower window must not drop the handshake-completion guard."""
+    engine = ThreatDetector(cfg=cfg)
+    findings = []
+    ts = BASE_TS
+    for i in range(1200):
+        # Every SYN is answered by a completed handshake, so this is load.
+        for frame in (F.tcp_frame(b'', '10.0.1.%d' % (i % 200 + 10),
+                                  '10.0.2.10', 40000 + i, 80, 'SYN'),
+                      F.tcp_frame(b'', '10.0.1.%d' % (i % 200 + 10),
+                                  '10.0.2.10', 40000 + i, 80, 'ACK')):
+            pkt = analyzer.safe_parse(frame, ts)
+            findings.extend(engine.analyze(pkt))
+        ts += 0.04
+    assert not [f for f in findings if f.threat_type == 'syn_flood']
+
+
+def test_distributed_exfil_is_caught_by_the_per_source_total(analyzer, cfg):
+    engine = ThreatDetector(cfg=cfg)
+    findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
+                            'distributed_exfil')
+    hits = [f for f in findings if f.threat_type == 'data_exfil']
+    assert hits
+    assert hits[0].evidence['pattern'] == 'distributed'
+    assert hits[0].evidence['distinct_peers'] >= 3
+
+
+def test_per_source_exfil_still_requires_peer_fan_out(analyzer, cfg):
+    """One big transfer to one peer must not double-count as distributed."""
+    engine = ThreatDetector(cfg=cfg)
+    findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
+                            'data_exfil')
+    hits = [f for f in findings if f.threat_type == 'data_exfil']
+    assert hits
+    assert all(f.evidence['pattern'] == 'single_destination' for f in hits)
+
+
+def test_fragmented_dns_tunnel_is_caught_by_the_label_run(analyzer, cfg):
+    engine = ThreatDetector(cfg=cfg)
+    findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
+                            'fragmented_dns_tunnel')
+    hits = [f for f in findings if f.threat_type == 'dns_tunnel']
+    assert hits
+    assert hits[0].evidence['encoded_labels'] >= 3
+
+
+def test_label_run_does_not_fire_on_ordinary_hostnames(engine, analyzer):
+    """Multi-label detection must not catch normal three-label domains."""
+    findings = []
+    for i in range(200):
+        frame = F.udp_frame(
+            F.dns_query('static%d.assets.cdn.example.com' % i, 'A'),
+            '10.0.1.20', '8.8.8.8', 40000 + i, 53)
+        pkt = analyzer.safe_parse(frame, BASE_TS + i * 0.2)
+        findings.extend(engine.analyze(pkt))
+    assert not [f for f in findings if f.threat_type == 'dns_tunnel']
+
+
+def test_high_jitter_beacon_is_a_known_miss(analyzer, cfg):
+    """Documented limitation: CV scoring cannot see through heavy jitter.
+
+    Asserted rather than left implicit so that if a future change does catch
+    it, this test fails and the limitation gets removed from the docs instead
+    of quietly going stale.
+    """
+    engine = ThreatDetector(cfg=cfg)
+    findings = run_scenario(engine, analyzer, TrafficGenerator(seed=SEED),
+                            'jittered_beacon')
+    assert not [f for f in findings if f.threat_type == 'c2_beacon']
+
+
+# ── windowed state must actually be windowed ─────────────────────────────────
+
+def test_timed_set_count_excludes_expired_members():
+    """add() returns the count callers threshold on, so it must be live.
+
+    Pruning only above some size let a detector with a threshold of 3 fire on
+    three events hours apart and then describe them as happening inside its
+    window.
+    """
+    from detectors.base import TimedSet
+
+    window = TimedSet(300)
+    for offset in (0.0, 4500.0, 9000.0):
+        count = window.add('src', 'host-%s' % offset, offset)
+    assert count == 1, 'expired members are still counted (%d)' % count
+    assert window.size('src', 9000.0) == 1
+
+
+def test_timed_set_counts_everything_inside_the_window():
+    from detectors.base import TimedSet
+
+    window = TimedSet(300)
+    for i in range(30):
+        count = window.add('src', 'port-%d' % i, float(i))
+    assert count == 30
+
+
+def test_lateral_movement_ignores_sessions_spread_across_hours(engine,
+                                                              analyzer):
+    """Three admin sessions hours apart are not a 300-second fan-out."""
+    findings = []
+    for i, offset in enumerate((0.0, 4500.0, 9000.0)):
+        frame = F.tcp_frame(b'', '10.0.1.60', '10.0.2.%d' % (80 + i),
+                            40000 + i, 445, 'SYN')
+        pkt = analyzer.safe_parse(frame, BASE_TS + offset)
+        findings.extend(engine.analyze(pkt))
+    assert not [f for f in findings if f.threat_type == 'lateral_movement']
+
+
+def test_credential_stuffing_ignores_usernames_spread_across_hours(engine,
+                                                                   analyzer):
+    findings = []
+    for i in range(9):
+        frame = F.tcp_frame(F.line_protocol('USER user%d' % i),
+                            '45.33.32.200', '10.0.2.12', 40000 + i, 21,
+                            'PSH|ACK')
+        # window_s is 300; one attempt per hour is not stuffing.
+        pkt = analyzer.safe_parse(frame, BASE_TS + i * 3600.0)
+        findings.extend(engine.analyze(pkt))
+    assert not [f for f in findings
+                if f.evidence.get('pattern') == 'credential_stuffing']
+
+
+def test_weak_sql_keywords_alone_do_not_alert(engine, analyzer):
+    """"delete … from" is ordinary English in a query string, not an injection.
+
+    The weakest signature must sit below min_score, or the lowest weight in the
+    table silently becomes the alerting floor and the threshold does nothing.
+    """
+    for uri in ('/admin?action=delete&next=/from/home',
+                '/reports?select=summary&period=from/2024',
+                '/orders?update=1&redirect=/from/cart'):
+        pkt = analyzer.safe_parse(F.tcp_frame(
+            F.http_request('GET', uri, 'app.corp.local', 'Mozilla/5.0'),
+            '10.0.1.5', '10.0.2.10', 40000, 80, 'PSH|ACK'), BASE_TS)
+        findings = engine.analyze(pkt)
+        assert not [f for f in findings if f.threat_type == 'http_anomaly'], \
+            'benign URL alerted: %s' % uri
+
+
+def test_min_score_is_reachable_in_both_directions(analyzer):
+    """The knob must actually change behaviour, or it is decoration.
+
+    A weak fragment must be suppressed at the tuned floor and alert at the
+    untuned one — otherwise its entry in the untuned profile contributes
+    nothing to the noise measurement that cites it.
+    """
+    uri = '/admin?action=delete&next=/from/home'
+    seen = {}
+    for profile in ('tuned', 'untuned'):
+        engine = ThreatDetector(cfg=config_module.load(profile=profile))
+        pkt = analyzer.safe_parse(F.tcp_frame(
+            F.http_request('GET', uri, 'app.corp.local', 'Mozilla/5.0'),
+            '10.0.1.5', '10.0.2.10', 40000, 80, 'PSH|ACK'), BASE_TS)
+        seen[profile] = [f for f in engine.analyze(pkt)
+                         if f.threat_type == 'http_anomaly']
+    assert not seen['tuned']
+    assert seen['untuned'], 'min_score has no effect between the profiles'
+
+
+def test_independent_categories_corroborate(engine, analyzer):
+    """A weak fragment plus a scanner UA is stronger than either alone."""
+    pkt = analyzer.safe_parse(F.tcp_frame(
+        F.http_request('GET', '/admin?action=delete&next=/from/home',
+                       'app.corp.local', 'sqlmap/1.7'),
+        '45.33.32.156', '10.0.2.10', 40000, 80, 'PSH|ACK'), BASE_TS)
+    findings = [f for f in engine.analyze(pkt)
+                if f.threat_type == 'http_anomaly']
+    assert findings
+    assert len(findings[0].evidence['categories']) > 1
+
+
+def test_every_injection_payload_still_fires(engine, analyzer, gen):
+    """The corroboration change must not weaken real attack detection."""
+    findings = run_scenario(engine, analyzer, gen, 'http_attack')
+    hits = [f for f in findings if f.threat_type == 'http_anomaly']
+    assert len(hits) == 5, 'expected all five payloads, saw %d' % len(hits)
+    assert all(f.severity == 'CRITICAL' for f in hits)

@@ -27,6 +27,7 @@ GUNICORN_TIMEOUT, GUNICORN_LOGLEVEL, NETWATCH_BIND.
 """
 
 import multiprocessing
+import re
 import os
 
 
@@ -94,13 +95,17 @@ def on_starting(server):
     if _simulation_enabled() and workers > 1:
         server.log.error(
             'Refusing to start: NETWATCH_SIMULATE is on with %d workers.\n'
-            '  Each worker would start its own capture/detection engine and '
-            'write to the same SQLite database,\n'
-            '  producing duplicated packets and alerts plus writer-lock '
-            'contention.\n'
+            '  Each worker would start its own capture/detection engine '
+            'against the same database,\n'
+            '  so the packet and alert counts would be multiplied by the '
+            'worker count. On SQLite the\n'
+            '  workers would also contend for the single writer lock; on '
+            'PostgreSQL the duplication\n'
+            '  remains even though the contention does not.\n'
             '  Either set GUNICORN_WORKERS=1 (all-in-one), or run a dedicated '
             'engine container and set\n'
-            '  NETWATCH_SIMULATE=0 on these API workers (split topology).',
+            '  NETWATCH_SIMULATE=0 on these API workers (the default compose '
+            'topology).',
             workers)
         raise SystemExit(1)
 
@@ -109,10 +114,13 @@ def on_starting(server):
             'GUNICORN_WORKERS=%d exceeds the usual 2*CPU+1 ceiling (%d CPUs)',
             workers, multiprocessing.cpu_count())
 
+    # Report the store without leaking a password from the URL.
+    url = os.environ.get('NETWATCH_DB_URL')
+    target = (re.sub(r'//[^@/]*@', '//***@', url) if url
+              else os.environ.get('NETWATCH_DB', '<default sqlite>'))
     server.log.info(
         'NetWatch SOC starting: workers=%d threads=%d simulation=%s db=%s',
-        workers, threads, 'on' if _simulation_enabled() else 'off',
-        os.environ.get('NETWATCH_DB', '<default>'))
+        workers, threads, 'on' if _simulation_enabled() else 'off', target)
 
 
 def worker_exit(server, worker):

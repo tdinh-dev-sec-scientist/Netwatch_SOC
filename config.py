@@ -2,14 +2,27 @@
 Detection thresholds and engine tuning for NetWatch SOC.
 
 Every threshold a detector uses lives here so it can be tuned without touching
-detection logic. Overrides are layered on top of the defaults from a JSON file
-pointed at by the NETWATCH_CONFIG environment variable:
+detection logic. Three layers compose, in order:
+
+  1. DEFAULTS      the shipped, tuned posture
+  2. a profile     PROFILES[name], applied on top (see UNTUNED below)
+  3. a JSON file   NETWATCH_CONFIG, a partial nested override
 
     NETWATCH_CONFIG=/etc/netwatch/thresholds.json python App.py
-
-The JSON is a partial, nested override — only the keys you name are replaced:
-
     {"port_scan": {"distinct_ports": 30}, "engine": {"packet_batch": 500}}
+
+The `untuned` profile is not a strawman — it is the posture this detector set
+actually started from, and it is what tools/noise_experiment.py measures
+against. Every difference between it and DEFAULTS is one of three kinds of
+decision, each annotated inline:
+
+  * a textbook threshold that a benign baseline showed was too tight
+  * a corroborating signal that a first pass did not require
+  * alert deduplication, which a first pass has none of
+
+Both profiles run the same detection code down the same paths, so the
+difference in alert volume between them is a property of the configuration
+and nothing else.
 """
 
 import copy
@@ -31,6 +44,16 @@ DEFAULTS = {
         'distinct_ports': 20,       # distinct dst ports on one host
         'window_s': 60,
         'cooldown_s': 120,
+        # A service reply fans out across the *client's* ephemeral ports, so
+        # counting replies makes every busy resolver look like a scanner.
+        'ignore_service_responses': True,
+        'ignore_rst': True,         # a RST back to the scanner is not scanning
+        # Second, slower time scale. A scan paced at one port every 12s never
+        # puts enough ports inside a 60s window, but it is still a scan. The
+        # threshold is higher because 900s of ordinary traffic legitimately
+        # touches more ports than 60s of it does.
+        'long_window_s': 900,
+        'long_distinct_ports': 30,
     },
     'network_recon': {
         'distinct_hosts': 25,       # distinct dst IPs from one source
@@ -38,6 +61,10 @@ DEFAULTS = {
         'max_distinct_ports': 3,    # a sweep hits few ports on many hosts
         'icmp_sweep_hosts': 15,
         'cooldown_s': 120,
+        # A sweep walks one contiguous range; ordinary browsing is scattered
+        # across unrelated networks. Grouping targets per /24 separates them.
+        'group_by_subnet': True,
+        'ignore_service_responses': True,
     },
 
     # ── credential access ────────────────────────────────────────────────────
@@ -45,6 +72,13 @@ DEFAULTS = {
         'failures': 5,              # in-protocol auth failures per service
         'window_s': 120,
         'cooldown_s': 120,
+        # SSH auth happens inside the encrypted channel, so only session
+        # bursts are observable — noisier evidence, so it needs more of it.
+        'ssh_threshold_multiplier': 2,
+        'ssh_min_threshold': 10,
+        # Second time scale, for guessing paced below the per-window rate.
+        'long_window_s': 900,
+        'long_failures': 10,
     },
     'credential_attack': {
         'distinct_users': 8,        # distinct usernames from one source
@@ -74,6 +108,25 @@ DEFAULTS = {
         'query_volume': 40,         # queries to one zone in the window
         'window_s': 300,
         'cooldown_s': 300,
+        # Tunnelling must stuff payload into the name, so an oversized label
+        # is a necessary condition. Without it, CDN and antivirus hostnames —
+        # legitimately long, numerous and random-looking — score highly on
+        # entropy and volume alone.
+        'require_oversized_label': True,
+        'min_signals': 2,           # one indicator alone is too weak
+        'min_score': 0.6,
+        # ...but payload can also be split across several medium labels
+        # (iodine and dnscat both do this), so a run of them satisfies the
+        # same necessary condition. Three labels of 12+ chars in one name is
+        # not a shape ordinary hostnames take.
+        'min_encoded_labels': 3,
+        'min_encoded_label_len': 12,
+        'min_encoded_total_len': 45,
+        # Shannon entropy is bounded by log2(label length), so a 12-character
+        # label cannot exceed 3.58 bits/byte however random it is. The
+        # per-label floor has to be lower than the whole-name one for that
+        # reason, not because the bar is being relaxed.
+        'min_encoded_label_entropy': 3.2,
     },
     'icmp_tunnel': {
         'min_payload_len': 128,     # normal ping payloads are 32-56 bytes
@@ -91,6 +144,7 @@ DEFAULTS = {
         'obsolete_versions': ['SSLv3', 'TLS1.0', 'TLS1.1'],
         'min_cipher_count': 3,      # unusually short cipher lists
         'cooldown_s': 300,
+        'min_score': 0.5,           # accumulated weight of the anomalies seen
     },
 
     # ── exfiltration ─────────────────────────────────────────────────────────
@@ -99,6 +153,14 @@ DEFAULTS = {
         'window_s': 300,
         'min_packets': 20,
         'cooldown_s': 600,
+        # A large *inbound* transfer is a user downloading something. Only
+        # bytes leaving the perimeter have the exfiltration shape.
+        'outbound_only': True,
+        # Splitting a transfer across several destinations keeps every flow
+        # under the per-peer threshold, so the same volume is also totalled
+        # per source across all of its external peers.
+        'source_bytes_threshold': 5_000_000,
+        'source_min_peers': 3,
     },
 
     # ── lateral movement ─────────────────────────────────────────────────────
@@ -107,6 +169,9 @@ DEFAULTS = {
         'distinct_hosts': 3,        # internal fan-out on admin services
         'window_s': 300,
         'cooldown_s': 300,
+        # Lateral movement is internal->internal by definition; a client
+        # reaching an external SMB share is a different problem.
+        'internal_only': True,
     },
 
     # ── impact / denial of service ───────────────────────────────────────────
@@ -115,6 +180,10 @@ DEFAULTS = {
         'window_s': 10,
         'min_syn_ack_ratio': 5.0,   # SYNs per completed handshake
         'cooldown_s': 60,
+        # Second time scale: a flood throttled below the 10s rate still
+        # exhausts a connection table over a minute.
+        'long_window_s': 60,
+        'long_syn_rate': 600,
     },
     'udp_flood': {
         'packet_rate': 400,         # UDP packets to one destination
@@ -134,6 +203,9 @@ DEFAULTS = {
         'max_uri_len': 2048,
         'max_header_len': 8192,
         'cooldown_s': 60,
+        # Signature weights are graded; a weak fragment match alone is not
+        # enough to alert.
+        'min_score': 0.5,
     },
 
     # ── ARP ──────────────────────────────────────────────────────────────────
@@ -156,6 +228,139 @@ DEFAULTS = {
     },
 }
 
+# ── the pre-tuning profile ───────────────────────────────────────────────────
+#
+# This is the first-pass detection posture, before any of it was measured
+# against a benign baseline. It differs from DEFAULTS in exactly three ways,
+# marked [T] threshold, [C] corroborating signal, [D] deduplication:
+#
+#   [T]  textbook thresholds, taken from what the technique looks like in
+#        isolation rather than from what benign traffic actually does
+#   [C]  single-signal rules — each detector alerts on its primary indicator
+#        without requiring a second, independent one
+#   [D]  one flat 30-second dedup timer for every rule, rather than a cooldown
+#        matched to the timescale of the behaviour each rule looks for. A
+#        first pass does deduplicate — leaving it out entirely would produce
+#        one alert per qualifying packet and make the comparison meaningless —
+#        it just does not vary the interval per rule.
+#
+# tools/noise_experiment.py replays the same corpus under this profile and
+# under DEFAULTS and reports the difference. Both run identical code.
+#
+# The profile is meant to be a plausible first pass, not a worst case: the
+# measurement is only worth something if the thing being improved on is
+# something a competent engineer would actually have written.
+UNTUNED_COOLDOWN_S = 30     # [D] one flat dedup timer, applied to every rule
+UNTUNED = {
+    'port_scan': {
+        'distinct_ports': 10,               # [T] "10 ports = a scan"
+        'ignore_service_responses': False,  # [C]
+        'ignore_rst': False,                # [C]
+        'long_distinct_ports': 0,           # [C] no slow-scan time scale
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'network_recon': {
+        'distinct_hosts': 10,               # [T]
+        'max_distinct_ports': 65535,        # [C] no narrow-port-set check
+        'icmp_sweep_hosts': 5,              # [T]
+        'group_by_subnet': False,           # [C] any hosts, not one /24
+        'ignore_service_responses': False,  # [C]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'brute_force': {
+        'failures': 3,                      # [T] "three strikes"
+        'ssh_threshold_multiplier': 1,      # [C] SSH treated like a 530
+        'ssh_min_threshold': 3,             # [C]
+        'long_failures': 0,                 # [C] no slow-guessing time scale
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'credential_attack': {
+        'distinct_users': 3,                # [T]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'c2_beacon': {
+        'min_callbacks': 4,                 # [T] four points look periodic
+        'max_jitter_ratio': 0.35,           # [T]
+        'min_interval_s': 0,                # [C] no floor, so request/response
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]  chatter counts as beaconing
+    },
+    'dns_tunnel': {
+        'min_label_len': 20,                # [T]
+        'min_entropy': 3.0,                 # [T]
+        'require_oversized_label': False,   # [C] entropy alone is enough
+        'min_signals': 1,                   # [C]
+        'min_score': 0.3,                   # [C]
+        'min_encoded_labels': 0,            # [C] no multi-label encoding check
+        'query_volume': 10,                 # [T]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'suspicious_dns': {
+        'nxdomain_count': 5,                # [T]
+        'nxdomain_ratio': 0.0,              # [C] count without a ratio check
+        'dga_entropy': 3.0,                 # [T]
+        'dga_min_len': 8,                   # [T]
+        'dga_count': 2,                     # [T]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'icmp_tunnel': {
+        'min_payload_len': 64,              # [T]
+        'min_entropy': 0.0,                 # [C] size alone is enough
+        'volume': 1,                        # [T]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'protocol_tunnel': {
+        'observations': 1,                  # [T] one mismatch is enough
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'tls_anomaly': {
+        'min_cipher_count': 8,              # [T]
+        'min_score': 0.25,                  # [C] any single anomaly alerts
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'data_exfil': {
+        'bytes_threshold': 1_000_000,       # [T] "1 MB is a lot"
+        'min_packets': 1,                   # [T]
+        'outbound_only': False,             # [C] direction not checked
+        'source_bytes_threshold': 0,        # [C] no per-source aggregation
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'lateral_movement': {
+        'distinct_hosts': 1,                # [T] one admin session alerts
+        'internal_only': False,             # [C]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'syn_flood': {
+        'syn_rate': 50,                     # [T]
+        'min_syn_ack_ratio': 0.0,           # [C] rate without the handshake
+        'long_syn_rate': 0,                 # [C]  completion ratio; and no
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]  slower time scale either
+    },
+    'udp_flood': {
+        'packet_rate': 100,                 # [T]
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'amplification': {
+        'response_ratio': 2.0,              # [T]
+        'min_response_len': 100,            # [T]
+        'observations': 1,                  # [C] one exchange is enough
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'http_anomaly': {
+        'max_uri_len': 512,                 # [T]
+        'min_score': 0.25,                  # [C] weak fragment matches alert
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+    'arp_spoof': {
+        'gratuitous_rate': 1,               # [T] one gratuitous reply alerts
+        'cooldown_s': UNTUNED_COOLDOWN_S,   # [D]
+    },
+}
+
+PROFILES = {
+    'tuned': {},        # DEFAULTS as-is: what ships and what the API runs
+    'untuned': UNTUNED,
+}
+
 _INTERNAL_NETS = [
     ('10.0.0.0', 8), ('172.16.0.0', 12), ('192.168.0.0', 16),
     ('127.0.0.0', 8), ('169.254.0.0', 16),
@@ -172,10 +377,34 @@ def _deep_merge(base, override):
     return out
 
 
-def load(path=None):
-    """Return the effective threshold config (defaults + optional overrides)."""
+def load(path=None, profile=None):
+    """Return the effective threshold config.
+
+    Layers, in order: DEFAULTS, the named profile, then the JSON override at
+    `path` (or NETWATCH_CONFIG). `profile` defaults to NETWATCH_PROFILE, and
+    then to 'tuned', which is DEFAULTS unchanged.
+    """
+    profile = profile or os.environ.get('NETWATCH_PROFILE') or 'tuned'
+    if profile not in PROFILES:
+        raise ValueError('unknown profile %r; choose from %s'
+                         % (profile, ', '.join(sorted(PROFILES))))
+    cfg = _deep_merge(DEFAULTS, PROFILES[profile])
+
     path = path or os.environ.get('NETWATCH_CONFIG')
     if not path:
-        return copy.deepcopy(DEFAULTS)
+        return cfg
     with open(path, 'r', encoding='utf-8') as fh:
-        return _deep_merge(DEFAULTS, json.load(fh))
+        return _deep_merge(cfg, json.load(fh))
+
+
+def profile_diff(profile):
+    """(section, key, untuned_value, tuned_value) for every difference.
+
+    Used by the noise-reduction report so the two postures can be compared
+    line by line rather than taken on trust.
+    """
+    rows = []
+    for section, overrides in sorted(PROFILES[profile].items()):
+        for key, value in sorted(overrides.items()):
+            rows.append((section, key, value, DEFAULTS[section][key]))
+    return rows

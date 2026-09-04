@@ -32,7 +32,10 @@ class LateralMovementDetector(Detector):
         if dport not in self.cfg['admin_ports']:
             return []
         src, dst = pkt.get('src_ip'), pkt.get('dst_ip')
-        if not is_internal(src) or not is_internal(dst):
+        if not src or not dst:
+            return []
+        if self.cfg.get('internal_only', True) \
+                and not (is_internal(src) and is_internal(dst)):
             return []
         # Count session initiations, not every packet in an established session.
         if pkt.get('protocol') == 'TCP' and pkt.get('flags') != 'SYN':

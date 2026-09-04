@@ -45,8 +45,13 @@ secrets/
 dist
 build
 *.egg-info
-results.json
 benchmark_results.json
+results.json
+# Measured artifacts and the generated PCAP corpus are repository content, not
+# image content: nothing in the runtime needs them.
+results/
+pcaps/
+docs/
 *.patch
 *.bundle
 

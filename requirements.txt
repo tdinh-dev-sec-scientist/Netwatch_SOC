@@ -1,9 +1,17 @@
 # NetWatch SOC runtime dependencies.
-# The capture, parsing, detection and persistence layers use only the Python
-# standard library (struct, sqlite3, re, math). Flask serves the API and
-# dashboard; gunicorn runs it in production.
+#
+# Parsing, detection and the query layer use only the Python standard library
+# (struct, sqlite3, re, math). Scapy owns the capture boundary — PCAP read and
+# write, and live sniffing — but not protocol decoding: ProtocolAnalyzer
+# decodes raw frames itself, so detectors see the same fields whether a frame
+# came from a file, an interface or the traffic generator.
 Flask>=3.0,<4.0
 gunicorn>=22.0,<24.0
+scapy>=2.5,<3.0
+
+# PostgreSQL driver. Optional: without it NetWatch runs on SQLite, which is
+# the default and what the test suite uses unless NETWATCH_TEST_DB_URL is set.
+psycopg[binary]>=3.1,<4.0
 
 # Development / testing
 pytest>=8.0

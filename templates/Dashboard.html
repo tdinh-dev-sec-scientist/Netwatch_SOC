@@ -452,6 +452,15 @@ table.alerts-tbl {
   display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
   padding: 14px;
 }
+/* The validation strip carries four gauges rather than five. */
+#perf-strip-val {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+  padding: 4px 0 14px;
+}
+@media (max-width: 1100px) {
+  #perf-strip     { grid-template-columns: repeat(2, 1fr); }
+  #perf-strip-val { grid-template-columns: repeat(2, 1fr); }
+}
 .perf-gauge { text-align: center; }
 .gauge-label { font-family: var(--mono); font-size: 9px; color: var(--text2); letter-spacing: 1.5px; margin-bottom: 6px; }
 .gauge-val   { font-family: var(--title); font-size: 22px; font-weight: 700; color: var(--cyan); }
@@ -786,6 +795,13 @@ table.alerts-tbl {
           <div class="panel-body"><canvas id="chart-perf-q" height="110"></canvas></div>
         </div>
       </div>
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-header">
+          <div class="panel-title">Detection Validation (PCAP replay)</div>
+          <span class="panel-badge" id="val-badge">…</span>
+        </div>
+        <div class="panel-body" id="validation-body"><div class="loading">LOADING</div></div>
+      </div>
       <div class="panel">
         <div class="panel-header"><div class="panel-title">Database Health</div></div>
         <div class="panel-body" id="db-health"><div class="loading">LOADING</div></div>
@@ -878,15 +894,35 @@ function esc(s) {
 const empty = msg => `<div class="empty-state">${esc(msg)}</div>`;
 
 /* ── chart defaults ── */
-Chart.defaults.color = '#7899b0';
-Chart.defaults.font.family = "'Share Tech Mono', monospace";
-Chart.defaults.font.size = 10;
-Chart.defaults.animation.duration = 400;
+/* Chart.js is loaded from a CDN. If that fetch fails — an offline host, a
+   restrictive egress policy, a CSP — every module still has to work: the
+   charts are an illustration of data the tables and panels already show.
+   Touching Chart.defaults unguarded at this point would throw here and abort
+   the rest of the script, taking the navigation and every data loader with
+   it. */
+const CHARTS_AVAILABLE = (typeof Chart !== 'undefined');
+if (CHARTS_AVAILABLE) {
+  Chart.defaults.color = '#7899b0';
+  Chart.defaults.font.family = "'Share Tech Mono', monospace";
+  Chart.defaults.font.size = 10;
+  Chart.defaults.animation.duration = 400;
+}
 const GRID = { color: 'rgba(0,212,255,0.06)' };
 
 function upsertChart(key, canvasId, config) {
   const el = document.getElementById(canvasId);
   if (!el) return;
+  if (!CHARTS_AVAILABLE) {
+    // Say why the canvas is blank rather than leaving an empty rectangle.
+    if (!el.dataset.unavailable) {
+      el.dataset.unavailable = '1';
+      const note = document.createElement('div');
+      note.className = 'empty-state';
+      note.textContent = 'CHART LIBRARY UNAVAILABLE — DATA SHOWN IN TABLES';
+      el.replaceWith(note);
+    }
+    return;
+  }
   if (charts[key]) { charts[key].destroy(); }
   charts[key] = new Chart(el.getContext('2d'), config);
 }
@@ -1289,11 +1325,74 @@ async function loadTimeline() {
 }
 
 /* ══════════════ MODULE 8 — Detection Performance / Health ══════════════ */
+/* Detection validation. Populated by `python -m tests.replay --persist`.
+   When nothing has been recorded the panel says so rather than showing a
+   figure nothing measured — an unvalidated deployment must look unvalidated. */
+function renderValidation(data) {
+  const body = document.getElementById('validation-body');
+  const badge = document.getElementById('val-badge');
+  const replay = (data.latest || {}).replay;
+  const tuning = (data.latest || {}).tuning;
+
+  if (!replay && !tuning) {
+    badge.textContent = 'NOT RUN';
+    body.innerHTML = `<div class="empty-state">No validation run recorded against this database.
+      Run <code>python -m tests.replay --persist</code> to populate it.</div>`;
+    return;
+  }
+  badge.textContent = 'MEASURED';
+
+  let html = '';
+  if (replay) {
+    const detail = replay.detail || {};
+    const primary = detail.primary || {};
+    const evasion = detail.evasion || {};
+    html += `
+      <div id="perf-strip-val">
+        ${gauge('TRUE-POSITIVE RATE', (replay.tpr_pct || 0).toFixed(1), '% of expected detections',
+                Math.min(100, replay.tpr_pct || 0))}
+        ${gauge('PRECISION', (replay.precision_pct || 0).toFixed(1), '% TP / (TP + FP)',
+                Math.min(100, replay.precision_pct || 0))}
+        ${gauge('CAPTURES REPLAYED', fmtInt(replay.pcap_count), 'PCAP files', 0)}
+        ${gauge('PACKETS REPLAYED', fmtInt(replay.packets), 'through the pipeline', 0)}
+      </div>
+      <dl class="kv" style="margin-top:14px">
+        <dt>True positives</dt><dd>${fmtInt(replay.true_positives)}</dd>
+        <dt>False positives</dt><dd style="color:${replay.false_positives ? 'var(--amber)' : 'var(--green)'}">${fmtInt(replay.false_positives)}</dd>
+        <dt>False negatives</dt><dd style="color:${replay.false_negatives ? 'var(--amber)' : 'var(--green)'}">${fmtInt(replay.false_negatives)}</dd>
+        <dt>Canonical attacks TPR</dt><dd>${(primary.true_positive_rate_pct != null ? primary.true_positive_rate_pct.toFixed(1) : '—')}%</dd>
+        <dt>Evasion variants TPR</dt><dd>${(evasion.true_positive_rate_pct != null ? evasion.true_positive_rate_pct.toFixed(1) : '—')}%</dd>
+        <dt>Alerts on benign baseline</dt><dd>${fmtInt(detail.alerts_on_benign_captures)} over ${fmtInt(detail.benign_packets)} packets</dd>
+        <dt>Corpus</dt><dd>${esc(replay.corpus)}</dd>
+        <dt>Profile</dt><dd>${esc(replay.profile)}</dd>
+        <dt>Recorded</dt><dd>${fmtTime(replay.ts)}</dd>
+      </dl>`;
+    if ((detail.evasions_missed || []).length) {
+      html += `<h4 style="margin-top:16px">Known misses</h4>
+        <div>${detail.evasions_missed.map(m => `<span class="chip">${esc(m)}</span>`).join(' ')}</div>`;
+    }
+  }
+  if (tuning) {
+    const delta = (tuning.detail || {}).delta || {};
+    html += `<h4 style="margin-top:18px">Alert-noise tuning</h4>
+      <dl class="kv">
+        <dt>Alerts before tuning</dt><dd>${fmtInt(delta.alerts_before)}</dd>
+        <dt>Alerts after tuning</dt><dd>${fmtInt(delta.alerts_after)}</dd>
+        <dt>Reduction</dt><dd>${(delta.total_reduction_pct != null ? delta.total_reduction_pct.toFixed(2) : '—')}%</dd>
+        <dt>Benign false positives</dt><dd>${fmtInt(delta.benign_alerts_before)} &rarr; ${fmtInt(delta.benign_alerts_after)}</dd>
+        <dt>Detection preserved</dt><dd style="color:${delta.detection_preserved ? 'var(--green)' : 'var(--red)'}">${delta.detection_preserved ? 'yes' : 'no'}</dd>
+      </dl>`;
+  }
+  body.innerHTML = html;
+}
+
 async function loadPerformance() {
-  const [perf, health] = await Promise.all([
+  const [perf, health, validation] = await Promise.all([
     api('/api/performance', { limit: 120 }),
     api('/api/health'),
+    api('/api/validation', { limit: 20 }),
   ]);
+  renderValidation(validation);
   const history = perf.history.slice().reverse();
   const latest = perf.history[0] || {};
   const live = perf.live || {};

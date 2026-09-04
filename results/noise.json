@@ -1,0 +1,605 @@
+{
+  "config_diff": [
+    {
+      "key": "cooldown_s",
+      "section": "amplification",
+      "tuned": 300,
+      "untuned": 30
+    },
+    {
+      "key": "min_response_len",
+      "section": "amplification",
+      "tuned": 400,
+      "untuned": 100
+    },
+    {
+      "key": "observations",
+      "section": "amplification",
+      "tuned": 3,
+      "untuned": 1
+    },
+    {
+      "key": "response_ratio",
+      "section": "amplification",
+      "tuned": 5.0,
+      "untuned": 2.0
+    },
+    {
+      "key": "cooldown_s",
+      "section": "arp_spoof",
+      "tuned": 120,
+      "untuned": 30
+    },
+    {
+      "key": "gratuitous_rate",
+      "section": "arp_spoof",
+      "tuned": 5,
+      "untuned": 1
+    },
+    {
+      "key": "cooldown_s",
+      "section": "brute_force",
+      "tuned": 120,
+      "untuned": 30
+    },
+    {
+      "key": "failures",
+      "section": "brute_force",
+      "tuned": 5,
+      "untuned": 3
+    },
+    {
+      "key": "long_failures",
+      "section": "brute_force",
+      "tuned": 10,
+      "untuned": 0
+    },
+    {
+      "key": "ssh_min_threshold",
+      "section": "brute_force",
+      "tuned": 10,
+      "untuned": 3
+    },
+    {
+      "key": "ssh_threshold_multiplier",
+      "section": "brute_force",
+      "tuned": 2,
+      "untuned": 1
+    },
+    {
+      "key": "cooldown_s",
+      "section": "c2_beacon",
+      "tuned": 600,
+      "untuned": 30
+    },
+    {
+      "key": "max_jitter_ratio",
+      "section": "c2_beacon",
+      "tuned": 0.12,
+      "untuned": 0.35
+    },
+    {
+      "key": "min_callbacks",
+      "section": "c2_beacon",
+      "tuned": 8,
+      "untuned": 4
+    },
+    {
+      "key": "min_interval_s",
+      "section": "c2_beacon",
+      "tuned": 15,
+      "untuned": 0
+    },
+    {
+      "key": "cooldown_s",
+      "section": "credential_attack",
+      "tuned": 300,
+      "untuned": 30
+    },
+    {
+      "key": "distinct_users",
+      "section": "credential_attack",
+      "tuned": 8,
+      "untuned": 3
+    },
+    {
+      "key": "bytes_threshold",
+      "section": "data_exfil",
+      "tuned": 5000000,
+      "untuned": 1000000
+    },
+    {
+      "key": "cooldown_s",
+      "section": "data_exfil",
+      "tuned": 600,
+      "untuned": 30
+    },
+    {
+      "key": "min_packets",
+      "section": "data_exfil",
+      "tuned": 20,
+      "untuned": 1
+    },
+    {
+      "key": "outbound_only",
+      "section": "data_exfil",
+      "tuned": true,
+      "untuned": false
+    },
+    {
+      "key": "source_bytes_threshold",
+      "section": "data_exfil",
+      "tuned": 5000000,
+      "untuned": 0
+    },
+    {
+      "key": "cooldown_s",
+      "section": "dns_tunnel",
+      "tuned": 300,
+      "untuned": 30
+    },
+    {
+      "key": "min_encoded_labels",
+      "section": "dns_tunnel",
+      "tuned": 3,
+      "untuned": 0
+    },
+    {
+      "key": "min_entropy",
+      "section": "dns_tunnel",
+      "tuned": 3.8,
+      "untuned": 3.0
+    },
+    {
+      "key": "min_label_len",
+      "section": "dns_tunnel",
+      "tuned": 40,
+      "untuned": 20
+    },
+    {
+      "key": "min_score",
+      "section": "dns_tunnel",
+      "tuned": 0.6,
+      "untuned": 0.3
+    },
+    {
+      "key": "min_signals",
+      "section": "dns_tunnel",
+      "tuned": 2,
+      "untuned": 1
+    },
+    {
+      "key": "query_volume",
+      "section": "dns_tunnel",
+      "tuned": 40,
+      "untuned": 10
+    },
+    {
+      "key": "require_oversized_label",
+      "section": "dns_tunnel",
+      "tuned": true,
+      "untuned": false
+    },
+    {
+      "key": "cooldown_s",
+      "section": "http_anomaly",
+      "tuned": 60,
+      "untuned": 30
+    },
+    {
+      "key": "max_uri_len",
+      "section": "http_anomaly",
+      "tuned": 2048,
+      "untuned": 512
+    },
+    {
+      "key": "min_score",
+      "section": "http_anomaly",
+      "tuned": 0.5,
+      "untuned": 0.25
+    },
+    {
+      "key": "cooldown_s",
+      "section": "icmp_tunnel",
+      "tuned": 300,
+      "untuned": 30
+    },
+    {
+      "key": "min_entropy",
+      "section": "icmp_tunnel",
+      "tuned": 5.5,
+      "untuned": 0.0
+    },
+    {
+      "key": "min_payload_len",
+      "section": "icmp_tunnel",
+      "tuned": 128,
+      "untuned": 64
+    },
+    {
+      "key": "volume",
+      "section": "icmp_tunnel",
+      "tuned": 10,
+      "untuned": 1
+    },
+    {
+      "key": "cooldown_s",
+      "section": "lateral_movement",
+      "tuned": 300,
+      "untuned": 30
+    },
+    {
+      "key": "distinct_hosts",
+      "section": "lateral_movement",
+      "tuned": 3,
+      "untuned": 1
+    },
+    {
+      "key": "internal_only",
+      "section": "lateral_movement",
+      "tuned": true,
+      "untuned": false
+    },
+    {
+      "key": "cooldown_s",
+      "section": "network_recon",
+      "tuned": 120,
+      "untuned": 30
+    },
+    {
+      "key": "distinct_hosts",
+      "section": "network_recon",
+      "tuned": 25,
+      "untuned": 10
+    },
+    {
+      "key": "group_by_subnet",
+      "section": "network_recon",
+      "tuned": true,
+      "untuned": false
+    },
+    {
+      "key": "icmp_sweep_hosts",
+      "section": "network_recon",
+      "tuned": 15,
+      "untuned": 5
+    },
+    {
+      "key": "ignore_service_responses",
+      "section": "network_recon",
+      "tuned": true,
+      "untuned": false
+    },
+    {
+      "key": "max_distinct_ports",
+      "section": "network_recon",
+      "tuned": 3,
+      "untuned": 65535
+    },
+    {
+      "key": "cooldown_s",
+      "section": "port_scan",
+      "tuned": 120,
+      "untuned": 30
+    },
+    {
+      "key": "distinct_ports",
+      "section": "port_scan",
+      "tuned": 20,
+      "untuned": 10
+    },
+    {
+      "key": "ignore_rst",
+      "section": "port_scan",
+      "tuned": true,
+      "untuned": false
+    },
+    {
+      "key": "ignore_service_responses",
+      "section": "port_scan",
+      "tuned": true,
+      "untuned": false
+    },
+    {
+      "key": "long_distinct_ports",
+      "section": "port_scan",
+      "tuned": 30,
+      "untuned": 0
+    },
+    {
+      "key": "cooldown_s",
+      "section": "protocol_tunnel",
+      "tuned": 600,
+      "untuned": 30
+    },
+    {
+      "key": "observations",
+      "section": "protocol_tunnel",
+      "tuned": 3,
+      "untuned": 1
+    },
+    {
+      "key": "cooldown_s",
+      "section": "suspicious_dns",
+      "tuned": 300,
+      "untuned": 30
+    },
+    {
+      "key": "dga_count",
+      "section": "suspicious_dns",
+      "tuned": 5,
+      "untuned": 2
+    },
+    {
+      "key": "dga_entropy",
+      "section": "suspicious_dns",
+      "tuned": 3.6,
+      "untuned": 3.0
+    },
+    {
+      "key": "dga_min_len",
+      "section": "suspicious_dns",
+      "tuned": 12,
+      "untuned": 8
+    },
+    {
+      "key": "nxdomain_count",
+      "section": "suspicious_dns",
+      "tuned": 15,
+      "untuned": 5
+    },
+    {
+      "key": "nxdomain_ratio",
+      "section": "suspicious_dns",
+      "tuned": 0.4,
+      "untuned": 0.0
+    },
+    {
+      "key": "cooldown_s",
+      "section": "syn_flood",
+      "tuned": 60,
+      "untuned": 30
+    },
+    {
+      "key": "long_syn_rate",
+      "section": "syn_flood",
+      "tuned": 600,
+      "untuned": 0
+    },
+    {
+      "key": "min_syn_ack_ratio",
+      "section": "syn_flood",
+      "tuned": 5.0,
+      "untuned": 0.0
+    },
+    {
+      "key": "syn_rate",
+      "section": "syn_flood",
+      "tuned": 200,
+      "untuned": 50
+    },
+    {
+      "key": "cooldown_s",
+      "section": "tls_anomaly",
+      "tuned": 300,
+      "untuned": 30
+    },
+    {
+      "key": "min_cipher_count",
+      "section": "tls_anomaly",
+      "tuned": 3,
+      "untuned": 8
+    },
+    {
+      "key": "min_score",
+      "section": "tls_anomaly",
+      "tuned": 0.5,
+      "untuned": 0.25
+    },
+    {
+      "key": "cooldown_s",
+      "section": "udp_flood",
+      "tuned": 60,
+      "untuned": 30
+    },
+    {
+      "key": "packet_rate",
+      "section": "udp_flood",
+      "tuned": 400,
+      "untuned": 100
+    }
+  ],
+  "contributors": [
+    {
+      "alerts_after": 2,
+      "alerts_before": 2580,
+      "alerts_removed": 2578,
+      "share_of_reduction_pct": 38.46,
+      "threat_type": "network_recon"
+    },
+    {
+      "alerts_after": 1,
+      "alerts_before": 1793,
+      "alerts_removed": 1792,
+      "share_of_reduction_pct": 26.73,
+      "threat_type": "lateral_movement"
+    },
+    {
+      "alerts_after": 1,
+      "alerts_before": 1593,
+      "alerts_removed": 1592,
+      "share_of_reduction_pct": 23.75,
+      "threat_type": "c2_beacon"
+    },
+    {
+      "alerts_after": 2,
+      "alerts_before": 395,
+      "alerts_removed": 393,
+      "share_of_reduction_pct": 5.86,
+      "threat_type": "port_scan"
+    },
+    {
+      "alerts_after": 2,
+      "alerts_before": 336,
+      "alerts_removed": 334,
+      "share_of_reduction_pct": 4.98,
+      "threat_type": "dns_tunnel"
+    },
+    {
+      "alerts_after": 5,
+      "alerts_before": 17,
+      "alerts_removed": 12,
+      "share_of_reduction_pct": 0.18,
+      "threat_type": "credential_attack"
+    },
+    {
+      "alerts_after": 2,
+      "alerts_before": 5,
+      "alerts_removed": 3,
+      "share_of_reduction_pct": 0.04,
+      "threat_type": "syn_flood"
+    },
+    {
+      "alerts_after": 2,
+      "alerts_before": 3,
+      "alerts_removed": 1,
+      "share_of_reduction_pct": 0.01,
+      "threat_type": "arp_spoof"
+    },
+    {
+      "alerts_after": 3,
+      "alerts_before": 4,
+      "alerts_removed": 1,
+      "share_of_reduction_pct": 0.01,
+      "threat_type": "data_exfil"
+    }
+  ],
+  "delta": {
+    "alerts_after": 36,
+    "alerts_before": 6739,
+    "attack_alerts_after": 36,
+    "attack_alerts_before": 1938,
+    "attack_reduction_pct": 98.14,
+    "benign_alerts_after": 0,
+    "benign_alerts_before": 4801,
+    "benign_reduction_pct": 100.0,
+    "detection_preserved": true,
+    "false_positives_per_10k_benign_packets_after": 0.0,
+    "false_positives_per_10k_benign_packets_before": 400.083,
+    "formula": "reduction = (before - after) / before * 100",
+    "threat_types_lost_to_tuning": [],
+    "total_reduction_pct": 99.47,
+    "true_positive_rate_after_pct": 96.15,
+    "true_positive_rate_before_pct": 92.31,
+    "true_positives_after": 25,
+    "true_positives_before": 24
+  },
+  "environment": {
+    "platform": "Linux x86_64",
+    "python": "3.11.15",
+    "scapy": "2.7.0"
+  },
+  "generated_at": 1788487041.8740776,
+  "tuned": {
+    "alerts_by_type": {
+      "amplification": 1,
+      "arp_spoof": 2,
+      "brute_force": 4,
+      "c2_beacon": 1,
+      "credential_attack": 5,
+      "data_exfil": 3,
+      "dns_tunnel": 2,
+      "http_anomaly": 5,
+      "icmp_tunnel": 1,
+      "lateral_movement": 1,
+      "network_recon": 2,
+      "port_scan": 2,
+      "protocol_tunnel": 1,
+      "suspicious_dns": 2,
+      "syn_flood": 2,
+      "tls_anomaly": 1,
+      "udp_flood": 1
+    },
+    "alerts_on_attack": 36,
+    "alerts_on_benign": 0,
+    "alerts_total": 36,
+    "benign_packets": 120000,
+    "captures": 30,
+    "false_negatives": 1,
+    "false_positives": 0,
+    "packets": 167259,
+    "profile": "tuned",
+    "threat_types_detected": [
+      "amplification",
+      "arp_spoof",
+      "brute_force",
+      "c2_beacon",
+      "credential_attack",
+      "data_exfil",
+      "dns_tunnel",
+      "http_anomaly",
+      "icmp_tunnel",
+      "lateral_movement",
+      "network_recon",
+      "port_scan",
+      "protocol_tunnel",
+      "suspicious_dns",
+      "syn_flood",
+      "tls_anomaly",
+      "udp_flood"
+    ],
+    "true_positive_rate_pct": 96.15,
+    "true_positives": 25
+  },
+  "untuned": {
+    "alerts_by_type": {
+      "amplification": 1,
+      "arp_spoof": 3,
+      "brute_force": 1,
+      "c2_beacon": 1593,
+      "credential_attack": 17,
+      "data_exfil": 4,
+      "dns_tunnel": 336,
+      "http_anomaly": 5,
+      "icmp_tunnel": 1,
+      "lateral_movement": 1793,
+      "network_recon": 2580,
+      "port_scan": 395,
+      "protocol_tunnel": 1,
+      "suspicious_dns": 2,
+      "syn_flood": 5,
+      "tls_anomaly": 1,
+      "udp_flood": 1
+    },
+    "alerts_on_attack": 1938,
+    "alerts_on_benign": 4801,
+    "alerts_total": 6739,
+    "benign_packets": 120000,
+    "captures": 30,
+    "false_negatives": 2,
+    "false_positives": 99,
+    "packets": 167259,
+    "profile": "untuned",
+    "threat_types_detected": [
+      "amplification",
+      "arp_spoof",
+      "brute_force",
+      "c2_beacon",
+      "credential_attack",
+      "data_exfil",
+      "dns_tunnel",
+      "http_anomaly",
+      "icmp_tunnel",
+      "lateral_movement",
+      "network_recon",
+      "port_scan",
+      "protocol_tunnel",
+      "suspicious_dns",
+      "syn_flood",
+      "tls_anomaly",
+      "udp_flood"
+    ],
+    "true_positive_rate_pct": 92.31,
+    "true_positives": 24
+  }
+}

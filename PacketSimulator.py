@@ -436,12 +436,114 @@ class TrafficGenerator:
             ts += 5.0
         return out
 
+    # ── evasion variants ─────────────────────────────────────────────────────
+    #
+    # Same attacks, shaped to sit near or under a tuned threshold. These exist
+    # to measure where detection actually stops rather than to flatter it: a
+    # threshold that suppresses benign noise necessarily creates a band an
+    # attacker can hide in, and the replay report quantifies that band instead
+    # of leaving it unstated.
+
+    def slow_port_scan(self, start_ts=0.0, attacker='185.220.101.44',
+                       target='10.0.2.10', ports=30, spacing=12.0):
+        """A scan paced so few ports land inside any one detection window."""
+        out, ts = [], start_ts
+        for i in range(ports):
+            out.append((ts, F.tcp_frame(b'', attacker, target,
+                                        self._ephemeral(), 1 + i * 7, 'SYN',
+                                        ident=self._next_ident())))
+            ts += spacing
+        return out
+
+    def jittered_beacon(self, start_ts=0.0, implant='10.0.1.24',
+                        c2='91.108.4.78', callbacks=14, interval=45.0,
+                        jitter=0.45):
+        """C2 check-ins with human-scale jitter added to defeat CV scoring."""
+        return self.c2_beacon(start_ts=start_ts, implant=implant, c2=c2,
+                              callbacks=callbacks, interval=interval,
+                              jitter=jitter)
+
+    def fragmented_dns_tunnel(self, start_ts=0.0, victim='10.0.1.32',
+                              resolver='8.8.8.8', zone='split-c2.net',
+                              queries=60):
+        """Payload split across several short labels instead of one long one."""
+        alphabet = 'abcdefghijklmnopqrstuvwxyz234567'
+        out, ts = [], start_ts
+        for _ in range(queries):
+            labels = ['.'.join(
+                ''.join(self.rng.choice(alphabet) for _ in range(14))
+                for _ in range(4))]
+            out.append((ts, F.udp_frame(
+                F.dns_query('%s.%s' % (labels[0], zone), 'A'), victim,
+                resolver, self._ephemeral(), 53, ident=self._next_ident())))
+            ts += 0.5
+        return out
+
+    def distributed_exfil(self, start_ts=0.0, victim='10.0.1.26',
+                          remotes=('95.163.1.21', '95.163.2.22',
+                                   '95.163.3.23', '95.163.4.24',
+                                   '95.163.5.25'),
+                          total_bytes=6_000_000, chunk=1400):
+        """The same volume, spread across peers so no single flow stands out."""
+        out, ts = [], start_ts
+        sent = 0
+        ports = {r: self._ephemeral() for r in remotes}
+        index = 0
+        while sent < total_bytes:
+            remote = remotes[index % len(remotes)]
+            out.append((ts, F.tcp_frame(
+                F.tls_application_data(chunk), victim, remote, ports[remote],
+                443, 'PSH|ACK', ident=self._next_ident())))
+            sent += chunk
+            index += 1
+            ts += 0.02
+        return out
+
+    def throttled_syn_flood(self, start_ts=0.0, target='10.0.2.10', port=80,
+                            packets=1200, sources=200, spacing=0.09):
+        """SYN volume held just under the per-window rate threshold."""
+        out, ts = [], start_ts
+        for i in range(packets):
+            spoofed = '198.19.%d.%d' % (i % sources // 254, i % 254 + 1)
+            out.append((ts, F.tcp_frame(b'', spoofed, target,
+                                        self._ephemeral(), port, 'SYN',
+                                        ident=self._next_ident())))
+            ts += spacing
+        return out
+
+    def slow_brute_force(self, start_ts=0.0, attacker='45.33.32.157',
+                         target='10.0.2.12', attempts=15, spacing=70.0):
+        """Password guessing paced below the failures-per-window threshold."""
+        out, ts = [], start_ts
+        sport = self._ephemeral()
+        for i in range(attempts):
+            out.append((ts, F.tcp_frame(
+                F.line_protocol('USER admin'), attacker, target, sport, 21,
+                'PSH|ACK', ident=self._next_ident())))
+            ts += 1.0
+            out.append((ts, F.tcp_frame(
+                F.line_protocol('PASS guess%d' % i), attacker, target, sport,
+                21, 'PSH|ACK', ident=self._next_ident())))
+            ts += 1.0
+            out.append((ts, F.tcp_frame(
+                F.line_protocol('530 Login incorrect'), target, attacker, 21,
+                sport, 'PSH|ACK', ident=self._next_ident())))
+            ts += spacing
+        return out
+
     # Scenario name -> (method, threat types it is expected to raise)
+    #
+    # This is the ground truth the PCAP replay suite scores against, so a
+    # scenario lists *every* threat its traffic genuinely exhibits, not just
+    # the one it is named for. `brute_force` is the case that makes the point:
+    # guessing an FTP password necessarily sends that password in cleartext,
+    # so the traffic is both a brute-force attempt and a credential exposure,
+    # and an analyst should see both alerts.
     SCENARIOS = {
         'port_scan': ('port_scan', ['port_scan']),
         'network_recon': ('network_recon', ['network_recon']),
         'icmp_sweep': ('icmp_sweep', ['network_recon']),
-        'brute_force': ('brute_force', ['brute_force']),
+        'brute_force': ('brute_force', ['brute_force', 'credential_attack']),
         'credential_stuffing': ('credential_stuffing', ['credential_attack']),
         'c2_beacon': ('c2_beacon', ['c2_beacon']),
         'dns_tunnel': ('dns_tunnel', ['dns_tunnel']),
@@ -458,13 +560,37 @@ class TrafficGenerator:
         'tls_anomaly': ('tls_anomaly', ['tls_anomaly']),
     }
 
+    # Evasion variants, kept separate from SCENARIOS so the canonical corpus
+    # and the boundary corpus are scored — and reported — apart from each
+    # other. Expected threats are what the traffic *is*, not what the current
+    # thresholds happen to catch.
+    EVASIONS = {
+        'slow_port_scan': ('slow_port_scan', ['port_scan']),
+        'jittered_beacon': ('jittered_beacon', ['c2_beacon']),
+        'fragmented_dns_tunnel': ('fragmented_dns_tunnel', ['dns_tunnel']),
+        'distributed_exfil': ('distributed_exfil', ['data_exfil']),
+        'throttled_syn_flood': ('throttled_syn_flood', ['syn_flood']),
+        'slow_brute_force': ('slow_brute_force',
+                             ['brute_force', 'credential_attack']),
+    }
+
+    ALL_SCENARIOS = {}      # populated below; SCENARIOS + EVASIONS
+
     def scenario(self, name, start_ts=0.0, **kwargs):
-        method, _expected = self.SCENARIOS[name]
+        method, _expected = self.ALL_SCENARIOS[name]
         return getattr(self, method)(start_ts=start_ts, **kwargs)
 
     @classmethod
     def expected_threats(cls, name):
-        return cls.SCENARIOS[name][1]
+        return cls.ALL_SCENARIOS[name][1]
+
+    @classmethod
+    def scenario_class(cls, name):
+        return 'attack' if name in cls.SCENARIOS else 'evasion'
+
+
+TrafficGenerator.ALL_SCENARIOS = dict(TrafficGenerator.SCENARIOS,
+                                      **TrafficGenerator.EVASIONS)
 
 
 class PacketSimulator:
@@ -512,11 +638,18 @@ class PacketSimulator:
         return findings
 
     def flush(self):
-        """Persist the buffered batch. Returns milliseconds spent writing."""
-        if not self._batch and not self._findings:
-            return 0.0
-        batch, findings = self._batch, self._findings
-        self._batch, self._findings = [], []
+        """Persist the buffered batch. Returns milliseconds spent writing.
+
+        The buffer swap is under the lock because gunicorn calls this from a
+        worker-exit hook while the engine thread is still appending: an
+        unguarded read-then-clear can drop packets buffered between the two
+        statements, or write them twice.
+        """
+        with self._lock:
+            if not self._batch and not self._findings:
+                return 0.0
+            batch, findings = self._batch, self._findings
+            self._batch, self._findings = [], []
         _p, _a, ms = self.db.persist_batch(batch, findings)
         self.db_write_ms += ms
         self._last_flush = time.time()
@@ -554,8 +687,15 @@ class PacketSimulator:
 
     # ── live loop ────────────────────────────────────────────────────────────
 
-    def run(self, rate_pps=95.0, duration_s=None):
-        """Continuous simulation. Injects attack scenarios periodically."""
+    def run(self, rate_pps=95.0, duration_s=None, metrics_window_s=60.0,
+            first_scenario_after_s=20.0, scenario_gap_s=(45.0, 120.0)):
+        """Continuous simulation. Injects attack scenarios periodically.
+
+        The three timing arguments are parameters rather than constants so the
+        loop's own accounting can be exercised by a test: with the shipped
+        defaults a test would have to run for a real minute before the first
+        metrics row, and 20 seconds before the first alert.
+        """
         self._running = True
         started = time.time()
         interval = 1.0 / rate_pps
@@ -563,7 +703,7 @@ class PacketSimulator:
         window_pkts = window_alerts = 0
         pending = []
         scenario_names = list(TrafficGenerator.SCENARIOS)
-        next_scenario = time.time() + 20
+        next_scenario = time.time() + first_scenario_after_s
 
         while self._running:
             now = time.time()
@@ -577,20 +717,23 @@ class PacketSimulator:
                     raw = self.gen.scenario(name, start_ts=0.0)
                     base = raw[0][0] if raw else 0.0
                     pending = [(now + (t - base), fr) for t, fr in raw]
-                    next_scenario = now + self.gen.rng.uniform(45, 120)
+                    next_scenario = now + self.gen.rng.uniform(*scenario_gap_s)
 
                 if pending and pending[0][0] <= now:
                     ts, frame = pending.pop(0)
-                    self.process(frame, now)
+                    found = self.process(frame, now)
                 else:
                     frame = self.gen.background_frame(now)
-                    self.process(frame, now)
+                    found = self.process(frame, now)
                 window_pkts += 1
+                # Without this the per-window metric row always reported zero
+                # alerts, however many the window actually raised.
+                window_alerts += len(found)
 
                 self.maybe_flush()
 
                 elapsed = now - window_start
-                if elapsed >= 60:
+                if elapsed >= metrics_window_s:
                     self._record_window(elapsed, window_pkts, window_alerts)
                     window_start, window_pkts, window_alerts = now, 0, 0
 
@@ -599,6 +742,14 @@ class PacketSimulator:
                 # Never let one bad frame kill the loop, but do not hide the
                 # failure either — parse_errors and detector_errors surface it.
                 time.sleep(0.05)
+
+        # Record the partial window the loop was in the middle of. Without
+        # this, everything measured since the last window boundary is thrown
+        # away on shutdown — up to a full window's packets and alerts on every
+        # `docker stop`, and the metrics never account for them.
+        final_elapsed = time.time() - window_start
+        if window_pkts and final_elapsed > 0:
+            self._record_window(final_elapsed, window_pkts, window_alerts)
         self.flush()
 
     def stop(self):
