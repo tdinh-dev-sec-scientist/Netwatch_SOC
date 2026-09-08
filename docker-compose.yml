@@ -1,0 +1,222 @@
+# NetWatch SOC — container topology.
+#
+#   docker compose up -d --build          all-in-one (engine + API in one process)
+#   docker compose --profile split up -d  dedicated engine + scalable API workers
+#   docker compose --profile test run --rm tests
+#
+# The `version:` key is deliberately absent — it is obsolete in Compose v2+ and
+# emits a warning.
+#
+# Default posture is defence-in-depth: non-root, read-only root filesystem, all
+# Linux capabilities dropped, privilege escalation blocked, and no host network
+# access. See the note at the bottom about live packet capture, which is the one
+# mode that genuinely needs elevated privileges.
+
+x-hardening: &hardening
+  # Blocks setuid binaries from gaining privileges — stops a compromised
+  # process escalating even if such a binary exists in the image.
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  # The application is pure Python over SQLite: it binds one port and writes
+  # one file. It needs no capabilities at all.
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+  # Gunicorn's worker heartbeat lives in /dev/shm (see gunicorn.conf.py).
+  shm_size: 64m
+  init: true
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+x-app-env: &app-env
+  NETWATCH_DB: /data/netwatch.db
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+  TZ: UTC
+
+services:
+  # ── all-in-one: the default, and the correct shape for SQLite ─────────────
+  # One process owns both the detection engine and the API, so there is exactly
+  # one writer. gunicorn.conf.py refuses to start this with >1 worker.
+  netwatch:
+    build:
+      context: .
+      target: runtime
+      args:
+        PYTHON_IMAGE: python:3.11-slim-bookworm
+    image: netwatch-soc:latest
+    container_name: netwatch-soc
+    <<: *hardening
+    environment:
+      <<: *app-env
+      NETWATCH_SIMULATE: "1"
+      GUNICORN_WORKERS: "1"
+      GUNICORN_THREADS: "8"
+      GUNICORN_LOGLEVEL: info
+    ports:
+      # Bound to loopback: this app has no authentication, so it must sit
+      # behind a reverse proxy that terminates TLS and authenticates before
+      # it is reachable off-host. Change to "5001:5001" only deliberately.
+      - "127.0.0.1:5001:5001"
+    volumes:
+      - netwatch-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import json,sys,urllib.request
+          d=json.load(urllib.request.urlopen('http://127.0.0.1:5001/api/health',timeout=4))
+          sys.exit(0 if d.get('status')=='ok' and d.get('table_count')==8 else 1)
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # ── split topology (profile: split) ───────────────────────────────────────
+  # One writer, many readers. SQLite WAL allows concurrent readers alongside a
+  # single writer, so the API scales horizontally without touching the write
+  # path. Requires engine and web to share a filesystem — see the caveat below.
+  engine:
+    build:
+      context: .
+      target: runtime
+    image: netwatch-soc:latest
+    container_name: netwatch-engine
+    profiles: ["split"]
+    <<: *hardening
+    command: ["python", "engine.py"]
+    entrypoint: []           # override gunicorn; this service serves no HTTP
+    environment:
+      <<: *app-env
+      NETWATCH_SIMULATE: "1"
+      NETWATCH_RATE_PPS: "95"
+    volumes:
+      - netwatch-data:/data
+    healthcheck:
+      # No HTTP surface, so health is "is the database still advancing?".
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import os,sqlite3,sys,time
+          c=sqlite3.connect('file:%s?mode=ro' % os.environ['NETWATCH_DB'], uri=True)
+          fresh=c.execute('SELECT COUNT(*) FROM packets WHERE ts > ?', (time.time()-120,)).fetchone()[0]
+          sys.exit(0 if fresh > 0 else 1)
+      interval: 60s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  web:
+    build:
+      context: .
+      target: runtime
+    image: netwatch-soc:latest
+    profiles: ["split"]
+    <<: *hardening
+    environment:
+      <<: *app-env
+      # Read-only API: no engine in these processes, so multiple workers are
+      # safe and gunicorn.conf.py permits them.
+      NETWATCH_SIMULATE: "0"
+      GUNICORN_WORKERS: "4"
+      GUNICORN_THREADS: "4"
+      # Trust X-Forwarded-* only from the proxy network in front of this.
+      GUNICORN_FORWARDED_ALLOW_IPS: "172.16.0.0/12"
+    ports:
+      - "127.0.0.1:5001:5001"
+    volumes:
+      # Readers still need write access to the -wal and -shm sidecar files;
+      # SQLite cannot open a WAL database read-only without them.
+      - netwatch-data:/data
+    depends_on:
+      engine:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import json,sys,urllib.request
+          d=json.load(urllib.request.urlopen('http://127.0.0.1:5001/api/health',timeout=4))
+          sys.exit(0 if d.get('status')=='ok' else 1)
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+
+  # ── test / benchmark (profile: test) ──────────────────────────────────────
+  tests:
+    build:
+      context: .
+      target: test
+    image: netwatch-soc:test
+    profiles: ["test"]
+    <<: *hardening
+    read_only: false          # pytest writes temporary databases
+    restart: "no"
+    entrypoint: []
+    command: ["python", "-m", "pytest", "-q"]
+    environment:
+      <<: *app-env
+      NETWATCH_DB: /tmp/test.db
+
+volumes:
+  netwatch-data:
+    driver: local
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Operational notes
+#
+# SQLite and the split topology
+#   WAL requires the database, its -wal and its -shm sidecars to sit on a
+#   filesystem supporting POSIX advisory locks and shared mmap. A local Docker
+#   volume qualifies; NFS does not. Do not spread engine and web across hosts
+#   with a network filesystem — move to Postgres before you do that.
+#
+# Live packet capture
+#   The shipped engine generates synthetic traffic and needs no privileges. To
+#   capture real traffic you must add, for that service only:
+#       cap_add: [NET_ADMIN, NET_RAW]
+#       network_mode: host
+#   That is a genuine privilege increase: host networking removes network
+#   namespace isolation, and NET_RAW permits arbitrary packet crafting. Grant it
+#   to the engine container alone, never to the web tier, and keep read_only
+#   and no-new-privileges in place.
+#
+# Exposure
+#   The API has no authentication or rate limiting. Ports are bound to
+#   127.0.0.1 so nothing is reachable off-host by default. Put a reverse proxy
+#   in front for TLS, authn and rate limiting before changing that.
+#
+# Backups
+#   Copy the database with `sqlite3 /data/netwatch.db ".backup /backup/x.db"`,
+#   not `cp` — a plain copy of a live WAL database can be torn.
