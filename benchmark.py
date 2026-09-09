@@ -10,10 +10,18 @@ Measures two things, both end-to-end and both actually observed:
   Query latency  the same queries the REST API issues, run against whatever
                  the throughput phase actually wrote. Reported as p50/p95/p99.
 
+  Alert volume   how much of the raw detector output the shipped tuning
+                 suppresses, measured against two explicit baselines on the
+                 same workload: the same rules with per-rule dedup disabled,
+                 and a benign-only corpus. Reported as a reduction ratio plus
+                 the number of distinct incidents lost to that suppression,
+                 which must be zero.
+
 Usage:
     python benchmark.py                          # 5 iterations x 20k packets
     python benchmark.py --iterations 3 --packets 50000
     python benchmark.py --json results.json --keep-db
+    python benchmark.py --skip-reduction         # throughput + latency only
 
 The workload is seeded, so a given --seed reproduces byte-identical traffic.
 Iterations accumulate into one database so the query phase runs against a
@@ -22,6 +30,8 @@ latencies so the numbers can be judged in context.
 """
 
 import argparse
+import collections
+import copy
 import json
 import os
 import statistics
@@ -112,6 +122,85 @@ def run_throughput(db, frames, iteration):
     }
 
 
+def undeduplicated_config(cfg):
+    """The same detection rules with per-rule dedup switched off.
+
+    This is the baseline the alert-reduction figure is measured against, and
+    it is deliberately the *only* thing that changes: every threshold keeps
+    its tuned value, so the ratio isolates what cooldown-based deduplication
+    contributes and cannot be inflated by also loosening detection.
+    """
+    baseline = copy.deepcopy(cfg)
+    for section in baseline.values():
+        if isinstance(section, dict) and 'cooldown_s' in section:
+            section['cooldown_s'] = 0
+    return baseline
+
+
+def collect_findings(frames, cfg, db):
+    """Run frames through parse + detect only. Returns the findings list."""
+    engine = ThreatDetector(db, cfg=cfg)
+    analyzer = ProtocolAnalyzer()
+    findings = []
+    for ts, frame in frames:
+        pkt = analyzer.safe_parse(frame, ts)
+        if pkt is not None:
+            findings.extend(engine.analyze(pkt))
+    return findings
+
+
+def incidents(findings):
+    """Distinct incidents behind a set of findings.
+
+    Identity is the detector's own dedup key, which is what an alert is
+    actually *about* — for a flood that is the victim, not the spoofed source
+    the packet carried. Falling back to the source address would count one
+    spoofed flood as hundreds of separate incidents and make any suppression
+    look lossy.
+    """
+    return {(f.detector, f.threat_type,
+             f.incident_key if f.incident_key is not None else f.src_ip)
+            for f in findings}
+
+
+def run_alert_reduction(db, frames, benign_frames, cfg):
+    """Measure alert-volume reduction against two explicit baselines.
+
+    Baseline 1 (`undeduplicated`) is the same rules with every `cooldown_s`
+    at 0 — every raw detection the tuned engine would have collapsed. The
+    reduction is only meaningful if nothing is lost with it, so the distinct
+    incidents behind both alert sets are compared and any incident present in
+    the baseline but missing from the tuned run is reported.
+
+    Baseline 2 (`benign`) is a benign-only corpus of the same size through the
+    tuned config: the false-positive count the thresholds were tuned for.
+    """
+    tuned = collect_findings(frames, cfg, db)
+    raw = collect_findings(frames, undeduplicated_config(cfg), db)
+    benign = collect_findings(benign_frames, cfg, db)
+
+    tuned_incidents, raw_incidents = incidents(tuned), incidents(raw)
+    lost = sorted((raw_incidents - tuned_incidents), key=repr)
+
+    severities = collections.Counter(f.severity for f in tuned)
+    return {
+        'workload_frames': len(frames),
+        'benign_frames': len(benign_frames),
+        'undeduplicated_alerts': len(raw),
+        'tuned_alerts': len(tuned),
+        'reduction_pct': (round(100.0 * (1 - len(tuned) / len(raw)), 1)
+                          if raw else 0.0),
+        'distinct_incidents_undeduplicated': len(raw_incidents),
+        'distinct_incidents_tuned': len(tuned_incidents),
+        'incidents_lost': ['%s %s' % (t, k) for _d, t, k in lost],
+        'benign_alerts': len(benign),
+        'benign_alerts_per_10k_packets': (
+            round(10000.0 * len(benign) / len(benign_frames), 3)
+            if benign_frames else 0.0),
+        'tuned_severity_mix': dict(severities),
+    }
+
+
 QUERIES = [
     ('health', lambda db, ctx: db.health()),
     ('overview', lambda db, ctx: db.get_overview()),
@@ -174,6 +263,11 @@ def main(argv=None):
     ap.add_argument('--packets', type=int, default=20000,
                     help='benign background packets per iteration')
     ap.add_argument('--query-repeats', type=int, default=30)
+    ap.add_argument('--skip-reduction', action='store_true',
+                    help='skip the alert-volume reduction measurement')
+    ap.add_argument('--reduction-packets', type=int, default=None,
+                    help='benign packets per reduction corpus '
+                         '(default: --packets)')
     ap.add_argument('--seed', type=int, default=1337)
     ap.add_argument('--db', default=None,
                     help='database path (default: a temporary file)')
@@ -205,13 +299,15 @@ def main(argv=None):
                                 base_ts + (i - 1) * 3600)
         result = run_throughput(db, frames, i)
         runs.append(result)
-        print('  iteration %d/%d: %8.1f pkt/min  (%d packets in %.2fs, '
-              '%d alerts, %d parse errors)'
+        print('  iteration %d/%d: %8.1f pkt/min = %7.1f pkt/s  (%d packets '
+              'in %.2fs, %d alerts, %d parse errors)'
               % (i, args.iterations, result['packets_per_min'],
-                 result['packets_processed'], result['elapsed_s'],
-                 result['alerts_generated'], result['parse_errors']))
+                 result['packets_per_s'], result['packets_processed'],
+                 result['elapsed_s'], result['alerts_generated'],
+                 result['parse_errors']))
 
     throughputs = [r['packets_per_min'] for r in runs]
+    rates = [r['packets_per_s'] for r in runs]
     health = db.health()
 
     print('\n  populating query benchmark dataset: '
@@ -221,6 +317,16 @@ def main(argv=None):
 
     per_query, all_samples = run_query_latency(db, args.query_repeats)
 
+    reduction = None
+    if not args.skip_reduction:
+        cfg = config_module.load()
+        n = args.reduction_packets or args.packets
+        reduction = run_alert_reduction(
+            db,
+            build_workload(n, args.seed, base_ts),
+            TrafficGenerator(args.seed + 1000).background(n, start_ts=base_ts),
+            cfg)
+
     throughput_summary = {
         'iterations': len(runs),
         'mean_packets_per_min': round(statistics.fmean(throughputs), 1),
@@ -229,6 +335,12 @@ def main(argv=None):
         'max_packets_per_min': round(max(throughputs), 1),
         'stdev_packets_per_min': round(
             statistics.stdev(throughputs), 1) if len(throughputs) > 1 else 0.0,
+        'mean_packets_per_s': round(statistics.fmean(rates), 1),
+        'median_packets_per_s': round(statistics.median(rates), 1),
+        'min_packets_per_s': round(min(rates), 1),
+        'max_packets_per_s': round(max(rates), 1),
+        'stdev_packets_per_s': round(
+            statistics.stdev(rates), 1) if len(rates) > 1 else 0.0,
         'total_packets': sum(r['packets_processed'] for r in runs),
         'total_alerts': sum(r['alerts_generated'] for r in runs),
         'total_parse_errors': sum(r['parse_errors'] for r in runs),
@@ -241,13 +353,17 @@ def main(argv=None):
     slowest = sorted(per_query.items(), key=lambda kv: -kv[1]['p95_ms'])[:5]
 
     print('\n── Throughput ' + '─' * 52)
-    print('  mean      : %9.1f packets/min' %
-          throughput_summary['mean_packets_per_min'])
-    print('  median    : %9.1f packets/min' %
-          throughput_summary['median_packets_per_min'])
-    print('  range     : %9.1f - %.1f packets/min'
+    print('  mean      : %9.1f packets/min  (%.1f packets/s)'
+          % (throughput_summary['mean_packets_per_min'],
+             throughput_summary['mean_packets_per_s']))
+    print('  median    : %9.1f packets/min  (%.1f packets/s)'
+          % (throughput_summary['median_packets_per_min'],
+             throughput_summary['median_packets_per_s']))
+    print('  range     : %9.1f - %.1f packets/min  (%.1f - %.1f packets/s)'
           % (throughput_summary['min_packets_per_min'],
-             throughput_summary['max_packets_per_min']))
+             throughput_summary['max_packets_per_min'],
+             throughput_summary['min_packets_per_s'],
+             throughput_summary['max_packets_per_s']))
     print('  per packet: %.1f us parse + %.1f us detect'
           % (throughput_summary['mean_parse_us'],
              throughput_summary['mean_detect_us']))
@@ -266,6 +382,34 @@ def main(argv=None):
     for name, stats in slowest:
         print('    %-26s p50 %7.3f ms   p95 %7.3f ms'
               % (name, stats['p50_ms'], stats['p95_ms']))
+
+    if reduction is not None:
+        print('\n── Alert volume ' + '─' * 51)
+        print('  workload            : %d frames (benign background + '
+              '%d attack scenarios)'
+              % (reduction['workload_frames'], len(WORKLOAD_SCENARIOS)))
+        print('  same rules, no dedup: %d alerts (%d distinct incidents)'
+              % (reduction['undeduplicated_alerts'],
+                 reduction['distinct_incidents_undeduplicated']))
+        print('  shipped tuning      : %d alerts (%d distinct incidents)'
+              % (reduction['tuned_alerts'],
+                 reduction['distinct_incidents_tuned']))
+        print('  reduction           : %.1f%%' % reduction['reduction_pct'])
+        lost = reduction['incidents_lost']
+        print('  incidents lost      : %d%s'
+              % (len(lost), ('  ' + ', '.join(lost[:5])
+                             + (' ...' if len(lost) > 5 else '')) if lost
+                 else ''))
+        print('  benign-only corpus  : %d alerts over %d frames '
+              '(%.3f per 10k packets)'
+              % (reduction['benign_alerts'], reduction['benign_frames'],
+                 reduction['benign_alerts_per_10k_packets']))
+        print('  severity mix        : %s'
+              % ', '.join('%s %d' % kv
+                          for kv in sorted(
+                              reduction['tuned_severity_mix'].items())))
+        print('  no incident lost to suppression: %s'
+              % ('MET' if not reduction['incidents_lost'] else 'NOT MET'))
 
     db.record_performance({
         'source': 'benchmark',
@@ -290,6 +434,7 @@ def main(argv=None):
         'throughput_runs': runs,
         'query_latency_overall': query_summary,
         'query_latency_by_query': per_query,
+        'alert_reduction': reduction,
         'dataset': health['tables'],
         'index_count': health['index_count'],
         'targets': {
@@ -298,6 +443,8 @@ def main(argv=None):
                 throughput_summary['mean_packets_per_min'] >= 5000,
             'query_latency_ms': 50,
             'query_latency_met': query_summary['p95_ms'] < 50,
+            'no_incident_lost_to_suppression':
+                not reduction['incidents_lost'] if reduction else None,
         },
     }
 
@@ -312,9 +459,10 @@ def main(argv=None):
             if os.path.exists(db_path + suffix):
                 os.remove(db_path + suffix)
 
-    both_met = results['targets']['throughput_met'] and \
-        results['targets']['query_latency_met']
-    return 0 if both_met else 1
+    met = (results['targets']['throughput_met']
+           and results['targets']['query_latency_met']
+           and results['targets']['no_incident_lost_to_suppression'] is not False)
+    return 0 if met else 1
 
 
 if __name__ == '__main__':
