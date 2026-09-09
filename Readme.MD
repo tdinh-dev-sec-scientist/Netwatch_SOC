@@ -5,7 +5,9 @@ A network security monitoring platform: deep packet inspection over 21 protocols
 store, a 24-endpoint REST API, and a 9-module analyst dashboard.
 
 Every number in this README is measured, and the commands to reproduce each one
-are given. Where a number falls short of a target, it says so.
+are given. Where a number falls short of a target, it says so. The headline
+counts are pinned by `tests/test_readme.py`, so the documentation cannot drift
+from the code without a test failing.
 
 ---
 
@@ -16,7 +18,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python App.py                 # dashboard + live simulation → http://127.0.0.1:5001
-pytest                        # 254 tests
+pytest                        # 260 tests
 python benchmark.py           # throughput, query latency, alert-volume reduction
 ```
 
@@ -28,7 +30,7 @@ python benchmark.py           # throughput, query latency, alert-volume reductio
 
 ```
  frames.py ──────► ProtocolAnalyzer ──────► ThreatDetector ──────► DB_Manager ──────► App.py ──────► Dashboard.html
- (or a live       parses raw bytes         17 detectors,           8 tables,          21 REST        9 modules
+ (or a live       parses raw bytes         17 detectors,           8 tables,          24 REST        9 modules
   capture)        into 21 protocols        bounded state           batched writes     endpoints
 ```
 
@@ -70,7 +72,7 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 | `geoip.py` | Coarse prefix→country enrichment (**not** a geolocation DB) |
 | `config.py` | Every detection threshold, overridable via `NETWATCH_CONFIG` |
 | `PacketSimulator.py` | Traffic generation, attack scenarios, engine loop |
-| `App.py` | Flask app, 21 REST endpoints |
+| `App.py` | Flask app, 24 REST endpoints |
 | `benchmark.py` | Reproducible throughput, latency and alert-volume measurement |
 
 ---
@@ -321,7 +323,7 @@ Every table is written by the live pipeline; this is asserted by
 | 7 | `protocol_stats` | Per-minute protocol rollup backing the charts | `bucket` |
 | 8 | `performance_metrics` | Measured throughput and query latency | `ts`, `(source,ts)` |
 
-**22 indexes.** WAL journal mode, one long-lived writer connection under a lock
+**24 indexes.** WAL journal mode, one long-lived writer connection under a lock
 plus thread-local reader connections, and foreign keys enforced.
 
 ### Design notes
@@ -401,7 +403,7 @@ the ATT&CK mapping *with its rationale*, and the related packets.
 ## Testing
 
 ```bash
-pytest                                  # 254 tests
+pytest                                  # 260 tests
 pytest tests/test_detectors.py -v       # every detector + false-positive control
 pytest tests/test_database.py -v        # schema, indexes, query plans, latency
 pytest tests/test_benchmark.py -v       # targets met, alert reduction lossless
@@ -416,6 +418,7 @@ pytest tests/test_benchmark.py -v       # targets met, alert reduction lossless
 | `test_api.py` | All endpoints, schemas, pagination, 400/404, SQL injection |
 | `test_dashboard.py` | Each module wired to a working endpoint, escaping, no mock data |
 | `test_benchmark.py` | Determinism, targets met, results persisted; alert-reduction baseline is threshold-identical and suppression loses no incident |
+| `test_readme.py` | Every headline count in this README matches what the code produces |
 
 Fixtures are seeded (`TrafficGenerator(seed=…)` reproduces byte-identical
 traffic), and the attack scenarios double as ground truth: each has a known
