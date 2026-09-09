@@ -66,6 +66,28 @@ def test_findings_are_well_formed(engine, analyzer, gen, scenario):
             assert mitre.get(tid) is not None
 
 
+def test_findings_carry_the_incident_key_the_detector_dedups_on(
+        engine, analyzer, gen):
+    """A finding must identify the incident, not just the packet that showed it.
+
+    For a spoofed-source flood the incident is the victim; keying on `src_ip`
+    would make one flood look like hundreds of separate incidents.
+    """
+    findings = run_scenario(engine, analyzer, gen, 'syn_flood')
+    assert findings
+    for finding in findings:
+        assert finding.incident_key is not None
+        assert finding.incident_key[0] == finding.dst_ip, \
+            'flood incident should be keyed on the victim, not the source'
+
+    # Every detector stamps one; it is what the reduction measurement counts.
+    for scenario in ALL_SCENARIOS:
+        fresh = ThreatDetector(cfg=config_module.load())
+        for finding in run_scenario(fresh, analyzer,
+                                    TrafficGenerator(seed=SEED), scenario):
+            assert finding.incident_key is not None, scenario
+
+
 def test_no_false_positives_on_benign_background(engine, analyzer):
     """20k packets of ordinary enterprise traffic must stay silent."""
     generator = TrafficGenerator(seed=99)

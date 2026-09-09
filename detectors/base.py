@@ -29,6 +29,11 @@ class Finding:
     detector: str = None
     ts: float = None
     evidence: dict = field(default_factory=dict)
+    # The key the emitting detector deduplicates on: the identity of the
+    # incident, as opposed to the packet that happened to expose it. For a
+    # flood that is the victim, not the (often spoofed) source in `src_ip`.
+    # Stamped automatically by Detector._finding; see _cooled_down.
+    incident_key: tuple = None
 
     def __post_init__(self):
         if self.severity not in SEVERITY_ORDER:
@@ -186,6 +191,7 @@ class Detector:
     def __init__(self, cfg):
         self.cfg = cfg
         self._last_alert = {}
+        self._incident_key = None
         self.findings_emitted = 0
         self.packets_seen = 0
 
@@ -208,9 +214,14 @@ class Detector:
 
         Prevents one sustained attack from producing thousands of duplicate
         alerts while still re-alerting if the behaviour persists.
+
+        The key is also retained as the incident identity for the finding this
+        check gates, so suppression can be audited: collapsing duplicates must
+        not collapse two distinct incidents into one.
         """
         cooldown = cooldown if cooldown is not None else self.cfg.get(
             'cooldown_s', 300)
+        self._incident_key = key
         last = self._last_alert.get(key)
         if last is not None and ts - last < cooldown:
             return False
@@ -241,4 +252,5 @@ class Detector:
             detector=self.name,
             ts=pkt.get('ts') or time.time(),
             evidence=evidence,
+            incident_key=self._incident_key,
         )
