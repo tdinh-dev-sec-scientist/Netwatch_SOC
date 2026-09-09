@@ -17,11 +17,17 @@ Measures two things, both end-to-end and both actually observed:
                  the number of distinct incidents lost to that suppression,
                  which must be zero.
 
+  Detection      every attack scenario, at several seeds, embedded in benign
+                 background traffic and scored against its ground-truth threat
+                 type. Reported as a detection rate over that many independent
+                 captures, with every miss named.
+
 Usage:
     python benchmark.py                          # 5 iterations x 20k packets
     python benchmark.py --iterations 3 --packets 50000
     python benchmark.py --json results.json --keep-db
     python benchmark.py --skip-reduction         # throughput + latency only
+    python benchmark.py --detection-seeds 5      # 18 scenarios x 5 seeds
 
 The workload is seeded, so a given --seed reproduces byte-identical traffic.
 Iterations accumulate into one database so the query phase runs against a
@@ -201,6 +207,66 @@ def run_alert_reduction(db, frames, benign_frames, cfg):
     }
 
 
+def run_detection_rate(cfg, seeds, background_packets):
+    """Score every attack scenario against its ground truth, seed by seed.
+
+    Each capture is one scenario embedded in benign background traffic at the
+    given seed — not run in isolation, because a detector that only fires on a
+    clean-room replay has not been shown to work. A capture counts as detected
+    only if the threat type the scenario is *labelled* with fires; an alert of
+    some other type does not rescue it.
+
+    Detection rate is a recall figure and nothing more. It says how many known
+    attacks were caught, not how the engine behaves on unlabelled traffic; the
+    false-positive side of the ledger is the benign corpus measured by
+    run_alert_reduction and tests/test_detectors.py.
+    """
+    names = sorted(TrafficGenerator.SCENARIOS)
+    per_scenario = {name: {'captures': 0, 'detected': 0} for name in names}
+    misses = []
+
+    for seed in seeds:
+        for name in names:
+            gen = TrafficGenerator(seed)
+            background = gen.background(background_packets, start_ts=0.0)
+            span = (background[-1][0] - background[0][0]
+                    if len(background) > 1 else 60.0)
+            frames = background + gen.scenario(name, start_ts=span * 0.5)
+            frames.sort(key=lambda pair: pair[0])
+
+            engine = ThreatDetector(cfg=cfg)
+            analyzer = ProtocolAnalyzer()
+            fired = set()
+            for ts, frame in frames:
+                pkt = analyzer.safe_parse(frame, ts)
+                if pkt is not None:
+                    for finding in engine.analyze(pkt):
+                        fired.add(finding.threat_type)
+
+            expected = set(TrafficGenerator.expected_threats(name))
+            per_scenario[name]['captures'] += 1
+            if expected & fired:
+                per_scenario[name]['detected'] += 1
+            else:
+                misses.append({'scenario': name, 'seed': seed,
+                               'expected': sorted(expected),
+                               'fired': sorted(fired)})
+
+    captures = sum(s['captures'] for s in per_scenario.values())
+    detected = sum(s['detected'] for s in per_scenario.values())
+    return {
+        'seeds': list(seeds),
+        'scenarios': len(names),
+        'background_packets_per_capture': background_packets,
+        'captures': captures,
+        'detected': detected,
+        'detection_rate_pct': (round(100.0 * detected / captures, 1)
+                               if captures else 0.0),
+        'misses': misses,
+        'per_scenario': per_scenario,
+    }
+
+
 QUERIES = [
     ('health', lambda db, ctx: db.health()),
     ('overview', lambda db, ctx: db.get_overview()),
@@ -268,6 +334,12 @@ def main(argv=None):
     ap.add_argument('--reduction-packets', type=int, default=None,
                     help='benign packets per reduction corpus '
                          '(default: --packets)')
+    ap.add_argument('--skip-detection', action='store_true',
+                    help='skip the detection-rate measurement')
+    ap.add_argument('--detection-seeds', type=int, default=3,
+                    help='independent seeds per scenario (default: 3)')
+    ap.add_argument('--detection-background', type=int, default=2000,
+                    help='benign packets each capture is embedded in')
     ap.add_argument('--seed', type=int, default=1337)
     ap.add_argument('--db', default=None,
                     help='database path (default: a temporary file)')
@@ -326,6 +398,13 @@ def main(argv=None):
             build_workload(n, args.seed, base_ts),
             TrafficGenerator(args.seed + 1000).background(n, start_ts=base_ts),
             cfg)
+
+    detection = None
+    if not args.skip_detection:
+        detection = run_detection_rate(
+            config_module.load(),
+            [args.seed + i for i in range(args.detection_seeds)],
+            args.detection_background)
 
     throughput_summary = {
         'iterations': len(runs),
@@ -411,6 +490,25 @@ def main(argv=None):
         print('  no incident lost to suppression: %s'
               % ('MET' if not reduction['incidents_lost'] else 'NOT MET'))
 
+    if detection is not None:
+        print('\n── Detection rate ' + '─' * 49)
+        print('  captures            : %d (%d scenarios x %d seeds, each '
+              'embedded in %d benign packets)'
+              % (detection['captures'], detection['scenarios'],
+                 len(detection['seeds']),
+                 detection['background_packets_per_capture']))
+        print('  detected            : %d  (%.1f%%)'
+              % (detection['detected'], detection['detection_rate_pct']))
+        if detection['misses']:
+            print('  missed:')
+            for miss in detection['misses']:
+                print('    %-20s seed %-8d expected %s, fired %s'
+                      % (miss['scenario'], miss['seed'],
+                         ','.join(miss['expected']),
+                         ','.join(miss['fired']) or 'nothing'))
+        print('  every labelled attack detected: %s'
+              % ('MET' if not detection['misses'] else 'NOT MET'))
+
     db.record_performance({
         'source': 'benchmark',
         'window_s': sum(r['elapsed_s'] for r in runs),
@@ -435,6 +533,7 @@ def main(argv=None):
         'query_latency_overall': query_summary,
         'query_latency_by_query': per_query,
         'alert_reduction': reduction,
+        'detection': detection,
         'dataset': health['tables'],
         'index_count': health['index_count'],
         'targets': {
@@ -445,6 +544,8 @@ def main(argv=None):
             'query_latency_met': query_summary['p95_ms'] < 50,
             'no_incident_lost_to_suppression':
                 not reduction['incidents_lost'] if reduction else None,
+            'every_labelled_attack_detected':
+                not detection['misses'] if detection else None,
         },
     }
 
@@ -461,7 +562,8 @@ def main(argv=None):
 
     met = (results['targets']['throughput_met']
            and results['targets']['query_latency_met']
-           and results['targets']['no_incident_lost_to_suppression'] is not False)
+           and results['targets']['no_incident_lost_to_suppression'] is not False
+           and results['targets']['every_labelled_attack_detected'] is not False)
     return 0 if met else 1
 
 

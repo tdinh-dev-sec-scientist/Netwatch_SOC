@@ -18,8 +18,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python App.py                 # dashboard + live simulation → http://127.0.0.1:5001
-pytest                        # 260 tests
-python benchmark.py           # throughput, query latency, alert-volume reduction
+pytest                        # 264 tests
+python benchmark.py           # throughput, latency, alert volume, detection rate
 ```
 
 `NETWATCH_SIMULATE=0 python App.py` runs the API without generating traffic.
@@ -73,7 +73,7 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 | `config.py` | Every detection threshold, overridable via `NETWATCH_CONFIG` |
 | `PacketSimulator.py` | Traffic generation, attack scenarios, engine loop |
 | `App.py` | Flask app, 24 REST endpoints |
-| `benchmark.py` | Reproducible throughput, latency and alert-volume measurement |
+| `benchmark.py` | Reproducible throughput, latency, alert-volume and detection-rate measurement |
 
 ---
 
@@ -97,8 +97,9 @@ Dataset     : 106,690 packets, 120 alerts, 135 technique links
 | Indexes | — | **24**, usage asserted by `EXPLAIN QUERY PLAN` | ✅ |
 | REST endpoints | 14+ | **24** | ✅ |
 | Dashboard modules | 8+ | **9** | ✅ |
-| Throughput | 5,000 pkt/min | **315,115 pkt/min median = 5,252 pkt/s** (4,567–7,555 pkt/s) | ✅ |
-| Query latency | < 50 ms | **p50 0.08 ms · p95 0.64 ms · max 0.75 ms** | ✅ |
+| Throughput | 5,000 pkt/min | **222,212–315,115 pkt/min median = 3,704–5,252 pkt/s** across two runs | ✅ |
+| Query latency | < 50 ms | **p50 0.15 ms · p95 1.15 ms · max 1.61 ms** | ✅ |
+| Detection rate | — | **100%** — 54/54 labelled captures (18 scenarios × 3 seeds) | ✅ |
 | Alert-volume reduction | — | **96.1%** (621 → 24), **0 incidents lost** | ✅ |
 | False positives | — | **0** across 240,000 benign packets, 8 seeds | ✅ |
 
@@ -120,9 +121,23 @@ NETWATCH_CONFIG=lowcooldown.json python benchmark.py --iterations 6 --packets 40
 Throughput is measured end-to-end — parse **and** detect **and** batched
 SQLite persistence — over `--iterations` independent runs, reported as mean,
 median, min, max and standard deviation, in **both packets/minute and
-packets/second**. Prefer the median and quote the range with it: on a shared
-or throttled machine the spread between runs is wide (here 4,567–7,555 pkt/s
-across five runs), so a single figure without its range says little.
+packets/second**.
+
+**Do not quote a single throughput figure from this project.** Two runs of the
+identical command on the identical container, minutes apart under different
+load, measured:
+
+| Run | Median | Range across 5 iterations |
+|---|---|---|
+| A | 5,252 pkt/s | 4,567 – 7,555 pkt/s |
+| B | 3,704 pkt/s | 3,277 – 5,039 pkt/s |
+
+That is a 1.4× swing in the median and 2.3× between the extremes, on the same
+code and the same machine. The honest statement is the conservative one — this
+pipeline sustains **a few thousand packets/second single-threaded on a shared
+container** — and any tighter claim is measuring the machine's spare capacity,
+not the code. Run it on your own hardware and quote what you measure, with its
+range.
 
 Query latency covers all 22 queries that back the REST API, run against the
 dataset the throughput phase actually wrote, reported as p50/p95/p99.
@@ -158,9 +173,46 @@ MEDIUM 6) — it ranks the queue for an analyst; it is the per-rule cooldowns
 and thresholds that do the suppressing.
 
 ```bash
-python benchmark.py                    # all three phases
-python benchmark.py --skip-reduction   # throughput + latency only
+python benchmark.py                    # all four phases
+python benchmark.py --skip-reduction   # skip the alert-volume phase
 ```
+
+### Detection rate — 54 labelled captures
+
+The fourth phase scores the engine against ground truth. Every attack scenario
+is replayed at several seeds, **embedded in benign background traffic** rather
+than run in isolation, and a capture counts as detected only if the threat type
+the scenario is *labelled* with fires — an alert of some other type does not
+rescue it.
+
+```
+captures            : 54 (18 scenarios x 3 seeds, each embedded in 2000 benign packets)
+detected            : 54  (100.0%)
+every labelled attack detected: MET
+```
+
+```bash
+python benchmark.py --detection-seeds 5      # 18 scenarios x 5 seeds = 90 captures
+```
+
+Two things this number is **not**:
+
+- **It is not an accuracy or true-positive rate.** It is recall against
+  labelled scenarios: how many known attacks were caught. Precision would
+  require ground truth on the negative class too; what stands in for that here
+  is the false-positive count on benign traffic (0 alerts over 240,000
+  packets), reported separately and never combined into one headline figure.
+- **It is not a measure of coverage against real-world attacks.** The captures
+  are this project's own scenarios. 100% means the engine catches every attack
+  it was built to catch, at every seed tried — not that it catches every attack
+  that exists.
+
+The rate is only meaningful if it can fail, so two tests sabotage a detector's
+threshold and assert the phase reports the miss:
+`test_detection_rate_reports_a_scenario_it_cannot_catch` and
+`test_detection_counts_only_the_labelled_threat_type` — the latter pins the
+strictness, because the `brute_force` scenario also raises `credential_attack`,
+and that must not count as detecting brute force.
 
 Reproduce with a JSON record:
 
@@ -168,9 +220,9 @@ Reproduce with a JSON record:
 python benchmark.py --iterations 5 --packets 20000 --json results.json
 ```
 
-The benchmark exits non-zero if any of its three gates fails — throughput
-below target, p95 query latency above 50 ms, or an incident lost to alert
-suppression — so it can gate CI.
+The benchmark exits non-zero if any of its four gates fails — throughput below
+target, p95 query latency above 50 ms, an incident lost to alert suppression,
+or a labelled attack missed — so it can gate CI.
 
 ---
 
@@ -403,7 +455,7 @@ the ATT&CK mapping *with its rationale*, and the related packets.
 ## Testing
 
 ```bash
-pytest                                  # 260 tests
+pytest                                  # 264 tests
 pytest tests/test_detectors.py -v       # every detector + false-positive control
 pytest tests/test_database.py -v        # schema, indexes, query plans, latency
 pytest tests/test_benchmark.py -v       # targets met, alert reduction lossless
@@ -417,7 +469,7 @@ pytest tests/test_benchmark.py -v       # targets met, alert reduction lossless
 | `test_database.py` | 8 tables populated, rollup consistency, index usage, <50 ms, transactionality |
 | `test_api.py` | All endpoints, schemas, pagination, 400/404, SQL injection |
 | `test_dashboard.py` | Each module wired to a working endpoint, escaping, no mock data |
-| `test_benchmark.py` | Determinism, targets met, results persisted; alert-reduction baseline is threshold-identical and suppression loses no incident |
+| `test_benchmark.py` | Determinism, targets met, results persisted; alert-reduction baseline is threshold-identical and suppression loses no incident; detection rate scores every scenario and is proven able to report a miss |
 | `test_readme.py` | Every headline count in this README matches what the code produces |
 
 Fixtures are seeded (`TrafficGenerator(seed=…)` reproduces byte-identical
@@ -451,10 +503,13 @@ expected threat type, asserted end to end.
   reported separately as the false-positive count on benign traffic. The ratio
   also depends on the workload: a capture with longer sustained attacks would
   have more duplicates to collapse and a higher ratio.
-- **No prior "99.2% accuracy" claim is made.** Accuracy requires labelled ground
-  truth across both classes; what is measured here is detection of known
-  scenarios and a false-positive count on a benign corpus. Those two numbers are
-  reported, and nothing is extrapolated from them.
+- **No accuracy or true-positive rate is claimed.** Accuracy requires labelled
+  ground truth across both classes. What is measured here is a detection rate
+  over labelled scenarios (100% of 54 captures) and a false-positive count on a
+  benign corpus (0 over 240,000 packets). Both numbers are reported separately
+  and nothing is extrapolated from them — in particular they are never blended
+  into a single "accuracy" or "true-positive rate" figure, which would imply a
+  labelled negative class this project does not have.
 - **The dev server is for demonstration.** It binds to `127.0.0.1` by default;
   use a production WSGI server to expose it, and note there is no authentication
   on the API.
