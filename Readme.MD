@@ -5,7 +5,9 @@ A network security monitoring platform: deep packet inspection over 21 protocols
 store, a 24-endpoint REST API, and a 9-module analyst dashboard.
 
 Every number in this README is measured, and the commands to reproduce each one
-are given. Where a number falls short of a target, it says so.
+are given. Where a number falls short of a target, it says so. The headline
+counts are pinned by `tests/test_readme.py`, so the documentation cannot drift
+from the code without a test failing.
 
 ---
 
@@ -16,8 +18,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python App.py                 # dashboard + live simulation → http://127.0.0.1:5001
-pytest                        # 249 tests
-python benchmark.py           # reproducible throughput + query-latency benchmark
+pytest                        # 260 tests
+python benchmark.py           # throughput, query latency, alert-volume reduction
 ```
 
 `NETWATCH_SIMULATE=0 python App.py` runs the API without generating traffic.
@@ -28,7 +30,7 @@ python benchmark.py           # reproducible throughput + query-latency benchmar
 
 ```
  frames.py ──────► ProtocolAnalyzer ──────► ThreatDetector ──────► DB_Manager ──────► App.py ──────► Dashboard.html
- (or a live       parses raw bytes         17 detectors,           8 tables,          21 REST        9 modules
+ (or a live       parses raw bytes         17 detectors,           8 tables,          24 REST        9 modules
   capture)        into 21 protocols        bounded state           batched writes     endpoints
 ```
 
@@ -70,8 +72,8 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 | `geoip.py` | Coarse prefix→country enrichment (**not** a geolocation DB) |
 | `config.py` | Every detection threshold, overridable via `NETWATCH_CONFIG` |
 | `PacketSimulator.py` | Traffic generation, attack scenarios, engine loop |
-| `App.py` | Flask app, 21 REST endpoints |
-| `benchmark.py` | Reproducible performance measurement |
+| `App.py` | Flask app, 24 REST endpoints |
+| `benchmark.py` | Reproducible throughput, latency and alert-volume measurement |
 
 ---
 
@@ -81,7 +83,7 @@ Produced by `python benchmark.py` on the machine described below. Re-run it and
 you will get numbers of the same shape; absolute throughput is hardware-dependent.
 
 ```
-Environment : Python 3.11.15, Linux x86_64, single-threaded
+Environment : Python 3.11.15, Linux x86_64, single-threaded, shared container
 Command     : python benchmark.py --iterations 5 --packets 20000
 Dataset     : 106,690 packets, 120 alerts, 135 technique links
 ```
@@ -95,8 +97,9 @@ Dataset     : 106,690 packets, 120 alerts, 135 technique links
 | Indexes | — | **24**, usage asserted by `EXPLAIN QUERY PLAN` | ✅ |
 | REST endpoints | 14+ | **24** | ✅ |
 | Dashboard modules | 8+ | **9** | ✅ |
-| Throughput | 5,000 pkt/min | **286,603 pkt/min** mean (243,736–363,916) | ✅ |
-| Query latency | < 50 ms | **p50 0.11 ms · p95 0.84 ms · max 1.34 ms** | ✅ |
+| Throughput | 5,000 pkt/min | **315,115 pkt/min median = 5,252 pkt/s** (4,567–7,555 pkt/s) | ✅ |
+| Query latency | < 50 ms | **p50 0.08 ms · p95 0.64 ms · max 0.75 ms** | ✅ |
+| Alert-volume reduction | — | **96.1%** (621 → 24), **0 incidents lost** | ✅ |
 | False positives | — | **0** across 240,000 benign packets, 8 seeds | ✅ |
 
 At a larger scale — 248,028 packets and 3,776 alerts, produced by relaxing
@@ -116,9 +119,48 @@ NETWATCH_CONFIG=lowcooldown.json python benchmark.py --iterations 6 --packets 40
 
 Throughput is measured end-to-end — parse **and** detect **and** batched
 SQLite persistence — over `--iterations` independent runs, reported as mean,
-median, min, max and standard deviation. Query latency covers all 22 queries
-that back the REST API, run against the dataset the throughput phase actually
-wrote, reported as p50/p95/p99.
+median, min, max and standard deviation, in **both packets/minute and
+packets/second**. Prefer the median and quote the range with it: on a shared
+or throttled machine the spread between runs is wide (here 4,567–7,555 pkt/s
+across five runs), so a single figure without its range says little.
+
+Query latency covers all 22 queries that back the REST API, run against the
+dataset the throughput phase actually wrote, reported as p50/p95/p99.
+
+### Alert-volume reduction
+
+The third phase measures how much of the raw detector output the shipped
+tuning suppresses, against two explicit baselines on the same workload:
+
+| Baseline | What it is | Result |
+|---|---|---|
+| Same rules, dedup off | every `cooldown_s` set to 0, **every threshold unchanged** | 621 alerts |
+| Shipped tuning | `config.py` as it ships | **24 alerts — 96.1% fewer** |
+| Benign-only corpus | 20,000 benign frames through the shipped tuning | **0 alerts** |
+
+The baseline changes *only* the cooldowns, which is what makes the ratio
+meaningful: it cannot be inflated by also loosening detection, and
+`test_undeduplicated_baseline_only_disables_cooldowns` asserts that every
+other threshold is identical between the two configs.
+
+A reduction figure is worthless if it drops real detections, so the benchmark
+also checks that suppression is **lossless**. Each finding carries the key its
+detector deduplicates on — `Finding.incident_key`, the identity of the
+incident rather than of the packet that exposed it, which for a flood is the
+victim and not the spoofed source — and the two runs are compared on those
+keys. Both resolve to the **same 24 distinct incidents**; the 597 suppressed
+alerts are all repeat reports of an incident already raised. `benchmark.py`
+exits non-zero if a single incident present in the baseline is missing from
+the tuned run.
+
+Severity is triage metadata carried on every alert (here CRITICAL 9, HIGH 9,
+MEDIUM 6) — it ranks the queue for an analyst; it is the per-rule cooldowns
+and thresholds that do the suppressing.
+
+```bash
+python benchmark.py                    # all three phases
+python benchmark.py --skip-reduction   # throughput + latency only
+```
 
 Reproduce with a JSON record:
 
@@ -126,7 +168,9 @@ Reproduce with a JSON record:
 python benchmark.py --iterations 5 --packets 20000 --json results.json
 ```
 
-The benchmark exits non-zero if either target is missed, so it can gate CI.
+The benchmark exits non-zero if any of its three gates fails — throughput
+below target, p95 query latency above 50 ms, or an incident lost to alert
+suppression — so it can gate CI.
 
 ---
 
@@ -279,7 +323,7 @@ Every table is written by the live pipeline; this is asserted by
 | 7 | `protocol_stats` | Per-minute protocol rollup backing the charts | `bucket` |
 | 8 | `performance_metrics` | Measured throughput and query latency | `ts`, `(source,ts)` |
 
-**22 indexes.** WAL journal mode, one long-lived writer connection under a lock
+**24 indexes.** WAL journal mode, one long-lived writer connection under a lock
 plus thread-local reader connections, and foreign keys enforced.
 
 ### Design notes
@@ -359,9 +403,10 @@ the ATT&CK mapping *with its rationale*, and the related packets.
 ## Testing
 
 ```bash
-pytest                                  # 249 tests
+pytest                                  # 260 tests
 pytest tests/test_detectors.py -v       # every detector + false-positive control
 pytest tests/test_database.py -v        # schema, indexes, query plans, latency
+pytest tests/test_benchmark.py -v       # targets met, alert reduction lossless
 ```
 
 | File | Covers |
@@ -372,7 +417,8 @@ pytest tests/test_database.py -v        # schema, indexes, query plans, latency
 | `test_database.py` | 8 tables populated, rollup consistency, index usage, <50 ms, transactionality |
 | `test_api.py` | All endpoints, schemas, pagination, 400/404, SQL injection |
 | `test_dashboard.py` | Each module wired to a working endpoint, escaping, no mock data |
-| `test_benchmark.py` | Determinism, targets met, results persisted |
+| `test_benchmark.py` | Determinism, targets met, results persisted; alert-reduction baseline is threshold-identical and suppression loses no incident |
+| `test_readme.py` | Every headline count in this README matches what the code produces |
 
 Fixtures are seeded (`TrafficGenerator(seed=…)` reproduces byte-identical
 traffic), and the attack scenarios double as ground truth: each has a known
@@ -395,7 +441,16 @@ expected threat type, asserted end to end.
   the encrypted channel; the detector counts cleartext version banners, which is
   the standard network-side signal, and caps its confidence at 0.85 accordingly.
 - **Throughput is single-threaded and hardware-dependent.** The benchmark reports
-  what your machine measured, not a fixed figure.
+  what your machine measured, not a fixed figure. The run recorded above spans
+  4,567–7,555 pkt/s across five iterations on a shared container; quote the
+  median with its range rather than the best iteration.
+- **The alert-reduction figure is scoped to deduplication.** Its baseline is
+  the same rules with cooldowns disabled, so 96.1% is what per-rule dedup
+  contributes on this workload — not a comparison against some other tool's
+  alert volume, and not a claim about threshold tuning, whose effect is
+  reported separately as the false-positive count on benign traffic. The ratio
+  also depends on the workload: a capture with longer sustained attacks would
+  have more duplicates to collapse and a higher ratio.
 - **No prior "99.2% accuracy" claim is made.** Accuracy requires labelled ground
   truth across both classes; what is measured here is detection of known
   scenarios and a false-positive count on a benign corpus. Those two numbers are
