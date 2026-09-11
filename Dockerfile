@@ -100,8 +100,9 @@ EXPOSE 5001
 # Verifies the application answers *and* that its schema is intact — a process
 # that is listening but has lost its database is not healthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["python", "-c", "import json,sys,urllib.request;\
-d=json.load(urllib.request.urlopen('http://127.0.0.1:5001/api/health',timeout=4));\
+    CMD ["python", "-c", "import json,os,sys,urllib.request;\
+u='http://127.0.0.1:%s/api/health' % os.environ.get('PORT','5001');\
+d=json.load(urllib.request.urlopen(u,timeout=4));\
 sys.exit(0 if d.get('status')=='ok' and d.get('table_count')==8 else 1)"]
 
 # Exec form: gunicorn becomes PID 1 and receives SIGTERM directly, so

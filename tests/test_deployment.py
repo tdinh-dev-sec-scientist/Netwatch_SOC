@@ -118,3 +118,49 @@ def test_templates_are_in_the_image():
 def test_static_assets_are_in_the_image():
     if os.path.isdir(os.path.join(ROOT, 'static')):
         assert 'static' in runtime_copied_paths()
+
+
+GUNICORN_CONF = os.path.join(ROOT, 'gunicorn.conf.py')
+
+
+def load_gunicorn_conf(monkeypatch, **env):
+    import runpy
+    for name in ('NETWATCH_BIND', 'PORT'):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    return runpy.run_path(GUNICORN_CONF)
+
+
+def test_gunicorn_binds_the_documented_default(monkeypatch):
+    assert load_gunicorn_conf(monkeypatch)['bind'] == '0.0.0.0:5001'
+
+
+def test_gunicorn_honours_a_platform_port(monkeypatch):
+    assert load_gunicorn_conf(monkeypatch, PORT='10000')['bind'] == \
+        '0.0.0.0:10000'
+
+
+def test_explicit_bind_overrides_platform_port(monkeypatch):
+    conf = load_gunicorn_conf(monkeypatch, PORT='10000',
+                              NETWATCH_BIND='127.0.0.1:9000')
+    assert conf['bind'] == '127.0.0.1:9000'
+
+
+@pytest.mark.parametrize('port', ['http', '0', '70000'])
+def test_invalid_platform_port_is_rejected(monkeypatch, port):
+    with pytest.raises(SystemExit):
+        load_gunicorn_conf(monkeypatch, PORT=port)
+
+
+def test_render_blueprint_runs_a_hardened_demo():
+    path = os.path.join(ROOT, 'render.yaml')
+    text = open(path, encoding='utf-8').read()
+    assert re.search(r'runtime:\s*docker', text)
+    assert re.search(r'plan:\s*free', text)
+    assert re.search(r'healthCheckPath:\s*/api/health', text)
+    env = dict(re.findall(r'key:\s*(\w+)\s*\n\s*value:\s*"([^"]*)"', text))
+    assert env.get('NETWATCH_DEMO') == '1'
+    assert float(env.get('NETWATCH_RETENTION_S', 0)) > 0, \
+        'a public demo without retention grows until the disk fills'
+    assert env.get('NETWATCH_GLOBAL_RATE_LIMIT', '0') != '0'
