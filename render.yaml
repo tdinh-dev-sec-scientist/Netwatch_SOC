@@ -1,0 +1,48 @@
+# Render Blueprint for the public NetWatch SOC demo.
+#
+# Deploy: Render Dashboard -> New -> Blueprint -> pick this repository.
+# Full walkthrough, threat model and verification steps:
+#   docs/demo-deployment.md
+#
+# The Free plan (0.1 CPU, 512 MB) spins the service down after 15 minutes
+# without traffic and wipes the local filesystem when it does. That suits a
+# demo: every cold start begins from a fresh database, and the backfill below
+# gives it 15 minutes of history before the first visitor's page loads.
+
+services:
+  - type: web
+    name: netwatch-soc-demo
+    runtime: docker
+    plan: free
+    branch: main
+    # Build from the Dockerfile's final `runtime` stage.
+    dockerfilePath: ./Dockerfile
+    # Deploy a commit only after its GitHub Actions checks pass.
+    autoDeployTrigger: checksPass
+    healthCheckPath: /api/health
+    envVars:
+      # Read-only: every non-GET request is refused with 403.
+      - key: NETWATCH_DEMO
+        value: "1"
+      # Keep one hour of telemetry; older rows are deleted every minute.
+      - key: NETWATCH_RETENTION_S
+        value: "3600"
+      # Generate 15 minutes of history (all 17 threat types) at startup.
+      - key: NETWATCH_BACKFILL_MIN
+        value: "15"
+      # Live traffic rate. Lower than the 95 pkt/s default to leave headroom
+      # on a 0.1 CPU instance for serving requests.
+      - key: NETWATCH_RATE_PPS
+        value: "50"
+      # Behind Render's proxy the TCP peer is the proxy, not the visitor, so a
+      # per-client limit would put every visitor in one bucket. It stays off
+      # until the X-Forwarded-For chain has been checked (see the docs); the
+      # global limit protects the instance regardless of client addresses.
+      - key: NETWATCH_RATE_LIMIT
+        value: "0"
+      - key: NETWATCH_GLOBAL_RATE_LIMIT
+        value: "3000/60"
+      - key: NETWATCH_PROXY_HOPS
+        value: "0"
+      - key: GUNICORN_THREADS
+        value: "4"

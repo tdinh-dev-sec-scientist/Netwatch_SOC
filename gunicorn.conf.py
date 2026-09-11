@@ -44,7 +44,23 @@ def _simulation_enabled():
     return os.environ.get('NETWATCH_SIMULATE', '1') != '0'
 
 
-bind = os.environ.get('NETWATCH_BIND', '0.0.0.0:5001')
+def _bind():
+    """NETWATCH_BIND wins; otherwise honour a platform-assigned PORT.
+
+    Hosting platforms such as Render tell the container which port to listen on
+    through PORT. Locally and under docker compose neither is set, so the
+    documented default of 5001 is unchanged.
+    """
+    explicit = os.environ.get('NETWATCH_BIND')
+    if explicit:
+        return explicit
+    port = os.environ.get('PORT', '5001')
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        raise SystemExit('PORT must be a TCP port number, got %r' % port)
+    return '0.0.0.0:%s' % port
+
+
+bind = _bind()
 
 # Default to a single worker: correct for the all-in-one topology. Read-only
 # API containers override this (see the `web` service in docker-compose.yml).
@@ -55,7 +71,7 @@ worker_class = 'gthread'
 # Gunicorn's worker heartbeat file. On a read-only root filesystem this must
 # point at a writable mount; /dev/shm is memory-backed, so the heartbeat never
 # touches disk and cannot stall on I/O.
-worker_tmp_dir = '/dev/shm'
+worker_tmp_dir = '/dev/shm' if os.path.isdir('/dev/shm') else None
 
 # MUST stay False. With preload_app the app is built in the master before fork,
 # and threads do not survive fork() — the engine thread would be started in the
