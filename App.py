@@ -17,6 +17,7 @@ from flask import Flask, jsonify, render_template, request
 
 import config as config_module
 import detectors
+import hardening
 import mitre
 from DB_Manager import DatabaseManager
 from PacketSimulator import PacketSimulator, TrafficGenerator
@@ -68,10 +69,16 @@ def _bool_arg(name, default=None):
     raise ApiError("'%s' must be a boolean, got %r" % (name, raw))
 
 
-def create_app(db=None, engine=None, simulator=None, start_simulation=None):
-    """Build the Flask app. Tests inject their own db/engine and no simulator."""
+def create_app(db=None, engine=None, simulator=None, start_simulation=None,
+               security=None):
+    """Build the Flask app. Tests inject their own db/engine and no simulator.
+
+    `security` is a hardening.Settings; by default it is read from the
+    environment (NETWATCH_DEMO, NETWATCH_RATE_LIMIT, ...).
+    """
     app = Flask(__name__)
     cfg = config_module.load()
+    hardening.install(app, security or hardening.Settings.from_env())
 
     app.db = db or DatabaseManager()
     app.engine = engine or ThreatDetector(app.db, cfg=cfg)
@@ -127,6 +134,7 @@ def _register(app):
         }
         info['simulation_running'] = bool(
             app.simulator and app.simulator._running)
+        info['demo'] = app.config['NETWATCH_DEMO']
         return jsonify(info)
 
     # ── 2-6. aggregate statistics ────────────────────────────────────────────
