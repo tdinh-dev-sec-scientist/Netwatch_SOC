@@ -466,6 +466,35 @@ class TrafficGenerator:
     def expected_threats(cls, name):
         return cls.SCENARIOS[name][1]
 
+    def history(self, start_ts, end_ts, rate_pps=20.0):
+        """Benign traffic across [start_ts, end_ts] with every attack mixed in.
+
+        Each scenario is shifted so that it finishes by `end_ts`, and the
+        scenarios are spread evenly through the span. A scenario longer than
+        the whole span is left out rather than allowed to spill past `end_ts`,
+        which would put packets in the future. Returns (ts, frame) pairs sorted
+        by time.
+        """
+        span = end_ts - start_ts
+        if span <= 0:
+            return []
+        frames = [pair for pair in self.background(
+            int(span * rate_pps), start_ts=start_ts, rate_pps=rate_pps)
+            if pair[0] <= end_ts]
+        names = list(self.SCENARIOS)
+        for i, name in enumerate(names):
+            raw = self.scenario(name, start_ts=0.0)
+            if not raw:
+                continue
+            first, last = raw[0][0], raw[-1][0]
+            duration = last - first
+            if duration > span:
+                continue
+            offset = start_ts + (span - duration) * (i + 1) / (len(names) + 1)
+            frames.extend((offset + (t - first), fr) for t, fr in raw)
+        frames.sort(key=lambda pair: pair[0])
+        return frames
+
 
 class PacketSimulator:
     """Runs frames through parse -> detect -> persist with real measurement."""
@@ -576,6 +605,21 @@ class PacketSimulator:
                                 self.packets_processed - before_packets,
                                 self.alerts_generated - before_alerts)
         return found
+
+    def backfill(self, minutes, rate_pps=20.0):
+        """Process the last `minutes` of traffic before the live loop starts.
+
+        A fresh demo database is empty, and the live loop needs many minutes
+        of wall-clock time before every chart has something to show. This runs
+        one TrafficGenerator.history() window ending now through the normal
+        pipeline, so the history is detected and stored exactly like live
+        traffic. Returns the findings raised.
+        """
+        if minutes <= 0:
+            return []
+        end = time.time()
+        return self.run_frames(self.gen.history(end - minutes * 60, end,
+                                                rate_pps=rate_pps))
 
     # ── live loop ────────────────────────────────────────────────────────────
 
