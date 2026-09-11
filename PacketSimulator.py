@@ -470,6 +470,12 @@ class TrafficGenerator:
 class PacketSimulator:
     """Runs frames through parse -> detect -> persist with real measurement."""
 
+    # Length of one live throughput window written to performance_metrics,
+    # and how long the live loop waits before its first attack scenario.
+    # Class attributes so tests can shorten them without sleeping for minutes.
+    METRICS_WINDOW_S = 60.0
+    FIRST_SCENARIO_DELAY_S = 20.0
+
     def __init__(self, db, threat_detector, protocol_analyzer=None,
                  seed=None, cfg=None):
         self.db = db
@@ -563,7 +569,7 @@ class PacketSimulator:
         window_pkts = window_alerts = 0
         pending = []
         scenario_names = list(TrafficGenerator.SCENARIOS)
-        next_scenario = time.time() + 20
+        next_scenario = time.time() + self.FIRST_SCENARIO_DELAY_S
 
         while self._running:
             now = time.time()
@@ -581,16 +587,17 @@ class PacketSimulator:
 
                 if pending and pending[0][0] <= now:
                     ts, frame = pending.pop(0)
-                    self.process(frame, now)
+                    findings = self.process(frame, now)
                 else:
                     frame = self.gen.background_frame(now)
-                    self.process(frame, now)
+                    findings = self.process(frame, now)
                 window_pkts += 1
+                window_alerts += len(findings)
 
                 self.maybe_flush()
 
                 elapsed = now - window_start
-                if elapsed >= 60:
+                if elapsed >= self.METRICS_WINDOW_S:
                     self._record_window(elapsed, window_pkts, window_alerts)
                     window_start, window_pkts, window_alerts = now, 0, 0
 
