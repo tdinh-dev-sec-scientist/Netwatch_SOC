@@ -113,3 +113,8 @@ def test_every_script_compose_runs_is_in_the_image():
 
 def test_templates_are_in_the_image():
     assert 'templates' in runtime_copied_paths()
+
+
+def test_static_assets_are_in_the_image():
+    if os.path.isdir(os.path.join(ROOT, 'static')):
+        assert 'static' in runtime_copied_paths()

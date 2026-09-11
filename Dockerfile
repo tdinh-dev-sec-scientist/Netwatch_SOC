@@ -84,9 +84,10 @@ WORKDIR /app
 # which broke the split topology at `docker compose --profile split up`.
 COPY --chown=${APP_UID}:${APP_GID} App.py DB_Manager.py PacketSimulator.py \
      ProtocolAnalyzer.py ThreatDetector.py benchmark.py config.py engine.py \
-     frames.py geoip.py mitre.py gunicorn.conf.py ./
+     frames.py geoip.py hardening.py mitre.py gunicorn.conf.py ./
 COPY --chown=${APP_UID}:${APP_GID} detectors/ ./detectors/
 COPY --chown=${APP_UID}:${APP_GID} templates/ ./templates/
+COPY --chown=${APP_UID}:${APP_GID} static/ ./static/
 
 USER ${APP_UID}:${APP_GID}
 

@@ -6,8 +6,7 @@
 <title>NetWatch SOC — Network Security Monitoring</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Exo+2:wght@200;300;400;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<script src="/static/vendor/chart-4.4.0.umd.js"></script>
 <style>
 :root {
   --bg0:      #020810;
@@ -563,6 +562,22 @@ table.alerts-tbl {
   font-family: var(--mono); font-size: 11px; padding: 5px 9px; border-radius: 3px; width: 150px;
 }
 .search-input:focus { outline: none; border-color: var(--cyan); }
+
+/* Public demo: shown only when /api/health reports demo mode. */
+#demo-banner {
+  display: none;
+  position: relative; z-index: 10;
+  height: 32px; line-height: 31px; padding: 0 24px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: rgba(255,214,10,0.07);
+  border-bottom: 1px solid rgba(255,214,10,0.28);
+  font-size: 13px; color: var(--text);
+}
+#demo-banner a { color: var(--yellow); }
+#demo-banner a:focus-visible { outline: 1px solid var(--yellow); outline-offset: 2px; }
+body.demo #demo-banner { display: block; }
+body.demo #app { height: calc(100vh - 56px - 32px); }
+body.demo .ack-btn:not(.acked) { display: none; }
 </style>
 </head>
 <body>
@@ -588,6 +603,10 @@ table.alerts-tbl {
     <div id="clock">--:--:--</div>
   </div>
 </header>
+<div id="demo-banner" role="note">
+  Public demo on synthetic traffic from the built-in simulator. Read-only, so alerts can't be acknowledged.
+  <a href="https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC" rel="noopener">Source on GitHub</a>
+</div>
 
 <div id="app">
   <nav id="sidebar">
@@ -1026,7 +1045,12 @@ async function loadAlerts() {
 
 async function ackAlert(id, btn) {
   try {
-    await fetch(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
+    const res = await fetch(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).error || detail; } catch (e) { /* non-JSON body */ }
+      throw new Error('acknowledge → ' + res.status + ': ' + detail);
+    }
     btn.outerHTML = '<span class="ack-btn acked">ACKED</span>';
     loadOverview().catch(() => {});
   } catch (e) { showError(e); }
@@ -1565,6 +1589,7 @@ async function loadEngineBadges() {
     document.getElementById('side-tables').textContent = h.table_count;
     document.getElementById('engine-status').textContent =
       'ENGINE ' + (h.simulation_running ? 'LIVE' : 'IDLE');
+    document.body.classList.toggle('demo', Boolean(h.demo));
   } catch (e) { document.getElementById('engine-status').textContent = 'ENGINE OFFLINE'; }
 }
 
