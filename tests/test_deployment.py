@@ -164,3 +164,78 @@ def test_render_blueprint_runs_a_hardened_demo():
     assert float(env.get('NETWATCH_RETENTION_S', 0)) > 0, \
         'a public demo without retention grows until the disk fills'
     assert env.get('NETWATCH_GLOBAL_RATE_LIMIT', '0') != '0'
+
+
+def compose_services():
+    """{service name: its YAML block} for the top-level `services:` map.
+
+    A deliberately small parser: services are the two-space-indented keys
+    between `services:` and the next top-level key. Enough for the invariants
+    below without adding a YAML dependency to the test suite.
+    """
+    lines = open(COMPOSE, encoding='utf-8').read().splitlines()
+    services, current, inside = {}, None, False
+    for line in lines:
+        if re.match(r'^services:\s*$', line):
+            inside = True
+            continue
+        if inside and re.match(r'^\S', line) and not line.startswith('#'):
+            break
+        if not inside:
+            continue
+        match = re.match(r'^  ([A-Za-z0-9_-]+):\s*$', line)
+        if match:
+            current = match.group(1)
+            services[current] = []
+        elif current:
+            services[current].append(line)
+    return {name: '\n'.join(block) for name, block in services.items()}
+
+
+def test_every_compose_service_has_exactly_one_profile():
+    """Profiles keep the topologies apart.
+
+    The all-in-one service once had no profile, so `--profile split` started
+    it next to the dedicated engine: two engines writing one database.
+    """
+    services = compose_services()
+    assert {'netwatch', 'engine', 'web', 'tests'} <= set(services)
+    for name, block in services.items():
+        profiles = re.findall(r'^    profiles:\s*\[([^\]]*)\]', block, re.M)
+        assert len(profiles) == 1, '%s must declare one profile' % name
+        assert len([p for p in profiles[0].split(',') if p.strip()]) == 1, name
+
+
+def test_no_profile_runs_two_engines():
+    engines = {}
+    for name, block in compose_services().items():
+        profile = re.search(r'^    profiles:\s*\["([^"]+)"\]', block, re.M)
+        simulate = re.search(r'NETWATCH_SIMULATE:\s*"(\d)"', block)
+        runs_engine = 'engine.py' in block or (simulate and simulate.group(1) == '1')
+        if profile and runs_engine:
+            engines.setdefault(profile.group(1), []).append(name)
+    assert engines, 'expected at least one engine service'
+    for profile, names in engines.items():
+        assert len(names) == 1, 'profile %s runs %s' % (profile, names)
+
+
+def test_replicated_services_do_not_share_one_host_port():
+    for name, block in compose_services().items():
+        replicas = re.search(r'replicas:\s*(\d+)', block)
+        if not replicas or int(replicas.group(1)) < 2:
+            continue
+        for mapping in re.findall(r'-\s*"([^"]+:\d+(?:-\d+)?:\d+)"', block):
+            host = mapping.rsplit(':', 1)[0].rsplit(':', 1)[-1]
+            assert '-' in host, (
+                '%s has %s replicas but publishes a single host port (%s); '
+                'only one replica could bind it' % (name, replicas.group(1),
+                                                    mapping))
+            low, high = (int(x) for x in host.split('-'))
+            assert high - low + 1 >= int(replicas.group(1)), name
+
+
+def test_forwarded_allow_ips_are_addresses_not_ranges():
+    """gunicorn 23 refuses to start when given a CIDR range here."""
+    text = open(COMPOSE, encoding='utf-8').read()
+    for value in re.findall(r'GUNICORN_FORWARDED_ALLOW_IPS:\s*"([^"]*)"', text):
+        assert '/' not in value, value
