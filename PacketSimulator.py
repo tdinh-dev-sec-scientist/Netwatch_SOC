@@ -488,6 +488,8 @@ class PacketSimulator:
         self._batch = []
         self._findings = []
         self._last_flush = time.time()
+        self._last_prune = time.time()
+        self.rows_pruned = 0
         self.packets_processed = 0
         self.alerts_generated = 0
         self.parse_ns = 0
@@ -535,6 +537,23 @@ class PacketSimulator:
                     'flush_interval_s']):
             return self.flush()
         return 0.0
+
+    def maybe_prune(self, now=None):
+        """Apply time-based retention if it is configured and due.
+
+        Called from the live loop only. Replays and benchmarks process
+        historical timestamps on purpose, so they never prune.
+        """
+        retention = self.cfg.get('retention_s', 0)
+        if not retention:
+            return None
+        now = time.time() if now is None else now
+        if now - self._last_prune < self.cfg.get('prune_interval_s', 60):
+            return None
+        self._last_prune = now
+        deleted = self.db.prune(now - retention)
+        self.rows_pruned += sum(deleted.values())
+        return deleted
 
     def run_frames(self, frames, record_metrics=True):
         """Process an explicit list of (ts, frame) pairs.
@@ -595,6 +614,7 @@ class PacketSimulator:
                 window_alerts += len(findings)
 
                 self.maybe_flush()
+                self.maybe_prune(now)
 
                 elapsed = now - window_start
                 if elapsed >= self.METRICS_WINDOW_S:
@@ -645,4 +665,5 @@ class PacketSimulator:
             'detect_us_avg': round(
                 self.detect_ns / max(self.packets_processed, 1) / 1000.0, 3),
             'protocols_seen': dict(self.pa.stats),
+            'rows_pruned': self.rows_pruned,
         }
