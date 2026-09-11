@@ -27,6 +27,16 @@ filesystem when it does. The database is therefore disposable by design, and
 the backfill exists so that a visitor arriving after a cold start does not see
 an empty dashboard.
 
+## Try it locally first
+
+```bash
+docker build --target runtime -t netwatch-soc:latest .
+scripts/smoke_test.sh demo      # runs the image with render.yaml's exact settings
+```
+
+The smoke test reads the environment variables straight out of `render.yaml`,
+so what passes here is what Render will run. CI runs the same script.
+
 ## Deploy
 
 1. Merge this work into `main` and push. Wait for the GitHub Actions run to
