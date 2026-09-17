@@ -49,10 +49,54 @@ def test_security_headers_on_every_response(client, path):
 
 def test_csp_restricts_scripts_connections_and_framing():
     csp = hardening.CONTENT_SECURITY_POLICY
-    assert "script-src 'self' 'unsafe-inline'" in csp
+    assert "script-src 'self'" in csp
     assert "connect-src 'self'" in csp
     assert "frame-ancestors 'none'" in csp
     assert "object-src 'none'" in csp
+
+
+def script_src(csp):
+    for directive in csp.split(';'):
+        if directive.strip().startswith('script-src'):
+            return directive.strip()
+    pytest.fail('no script-src directive in %r' % csp)
+
+
+def test_csp_forbids_inline_and_eval_script():
+    """Inline script is the XSS payload the escaping is meant to stop."""
+    directive = script_src(hardening.CONTENT_SECURITY_POLICY)
+    assert "'unsafe-inline'" not in directive
+    assert "'unsafe-eval'" not in directive
+    assert '*' not in directive
+
+
+def test_csp_header_forbids_inline_script_on_the_dashboard(client):
+    directive = script_src(client.get('/').headers['Content-Security-Policy'])
+    assert "'unsafe-inline'" not in directive
+
+
+def test_dashboard_has_no_inline_script_to_run():
+    """The policy above only holds if the page stopped needing inline script."""
+    with open(os.path.join(ROOT, 'templates', 'Dashboard.html'),
+              encoding='utf-8') as fh:
+        markup = fh.read()
+    assert not re.search(r'<script(?![^>]*\ssrc=)', markup), \
+        'inline <script> block left in the template'
+    handlers = re.findall(r'\son(?:click|submit|change|input|load|error|focus'
+                          r'|blur|mouseover|mouseout)\s*=', markup)
+    assert not handlers, 'inline event handlers left in the template: %s' \
+        % handlers
+    assert "url_for('static', filename='js/dashboard.js')" in markup
+
+
+def test_dashboard_script_is_served(client):
+    response = client.get('/static/js/dashboard.js')
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    response.close()
+    assert 'addEventListener' in body
+    assert not re.search(r'\son(?:click|change|input)\s*=\s*"', body), \
+        'generated markup still carries inline handlers'
 
 
 def test_dashboard_loads_no_third_party_scripts(client):
@@ -132,6 +176,85 @@ def test_limiter_memory_is_bounded():
     clock.now += 61
     limiter.hit('late')
     assert len(limiter) <= 100
+
+
+# ── eviction ────────────────────────────────────────────────────────────────
+#
+# Eviction used to clear the whole table once it filled up, which let any
+# client reset every other client's counter — including its own — by making
+# max_keys requests under fresh keys. These pin the replacement down.
+
+def test_evict_drops_expired_windows():
+    clock = FakeClock()
+    limiter = hardening.RateLimiter(5, 60, max_keys=10, clock=clock)
+    for i in range(6):
+        limiter.hit('old-%d' % i)
+    clock.now += 61
+    limiter.hit('fresh')
+    limiter._evict(clock.now)
+    assert set(limiter._windows) == {'fresh'}
+
+
+def test_evict_keeps_active_keys_below_capacity():
+    clock = FakeClock()
+    limiter = hardening.RateLimiter(5, 60, max_keys=10, clock=clock)
+    for i in range(4):
+        limiter.hit('client-%d' % i)
+    limiter._evict(clock.now)
+    assert len(limiter) == 4
+
+
+def test_capacity_eviction_keeps_most_active_clients():
+    """A full table costs the oldest fifth, not everyone."""
+    clock = FakeClock()
+    limiter = hardening.RateLimiter(5, 600, max_keys=10, clock=clock)
+    for i in range(10):
+        limiter.hit('client-%d' % i)
+        clock.now += 1
+    limiter._evict(clock.now)
+    assert len(limiter) == 8
+    assert set(limiter._windows) == {'client-%d' % i for i in range(2, 10)}
+
+
+def test_capacity_eviction_removes_the_oldest_windows_first():
+    clock = FakeClock()
+    limiter = hardening.RateLimiter(5, 600, max_keys=5, clock=clock)
+    for key in ('newest', 'newer', 'middle', 'older', 'oldest'):
+        limiter.hit(key)
+    # Order the windows against insertion order, so dictionary order cannot
+    # pass for window_start order.
+    for age, key in enumerate(('newest', 'newer', 'middle', 'older', 'oldest')):
+        limiter._windows[key][0] = clock.now - age
+    limiter._evict(clock.now)
+    assert 'oldest' not in limiter._windows
+    assert {'newest', 'newer', 'middle', 'older'} <= set(limiter._windows)
+
+
+def test_capacity_eviction_removes_at_least_one_key():
+    """20% of a small table rounds to zero; eviction must still free a slot."""
+    clock = FakeClock()
+    limiter = hardening.RateLimiter(5, 600, max_keys=3, clock=clock)
+    for i in range(3):
+        limiter.hit('client-%d' % i)
+        clock.now += 1
+    limiter._evict(clock.now)
+    assert len(limiter) == 2
+    assert 'client-0' not in limiter._windows
+
+
+def test_overflow_does_not_reset_every_tracked_counter():
+    """The security property: one key too many used to wipe every count."""
+    clock = FakeClock()
+    limiter = hardening.RateLimiter(2, 600, max_keys=10, clock=clock)
+    for i in range(10):
+        limiter.hit('client-%d' % i)
+        limiter.hit('client-%d' % i)     # each client is now at its limit
+        clock.now += 1
+    limiter.hit('one-too-many')          # overflows the table
+    survivors = [key for key in limiter._windows if key.startswith('client-')]
+    assert len(survivors) == 8
+    for key in survivors:
+        assert not limiter.hit(key)[0], '%s was let through again' % key
 
 
 def test_app_returns_429_with_retry_after(populated_db):
