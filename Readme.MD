@@ -1,5 +1,11 @@
 # NetWatch SOC — Network Threat Detection Platform
 
+[![CI](https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC/actions/workflows/ci.yml/badge.svg)](https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC/actions/workflows/ci.yml)
+
+<!-- After the first Render deploy, add the demo link on the next line, e.g.
+**Live demo:** https://<service>.onrender.com (read-only, synthetic traffic; the
+first load after the service has idled takes about a minute) -->
+
 A network security monitoring platform: deep packet inspection over 21 protocols,
 17 modular threat detectors mapped to MITRE ATT&CK, an indexed 8-table SQLite
 store, a 24-endpoint REST API, and a 9-module analyst dashboard.
@@ -18,11 +24,14 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python App.py                 # dashboard + live simulation → http://127.0.0.1:5001
-pytest                        # 260 tests
+pytest                        # full suite
 python benchmark.py           # throughput, query latency, alert-volume reduction
 ```
 
 `NETWATCH_SIMULATE=0 python App.py` runs the API without generating traffic.
+`NETWATCH_DEMO=1 NETWATCH_BACKFILL_MIN=15 python App.py` runs it the way the
+public demo does: read-only, rate-limited, and pre-filled with history. See
+[Deployment](#deployment).
 
 ---
 
@@ -72,8 +81,13 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 | `geoip.py` | Coarse prefix→country enrichment (**not** a geolocation DB) |
 | `config.py` | Every detection threshold, overridable via `NETWATCH_CONFIG` |
 | `PacketSimulator.py` | Traffic generation, attack scenarios, engine loop |
-| `App.py` | Flask app, 24 REST endpoints |
+| `App.py` | Flask app and API endpoints |
+| `hardening.py` | Security headers, read-only demo mode, rate limiting |
+| `engine.py` | Headless engine for the split deployment topology |
 | `benchmark.py` | Reproducible throughput, latency and alert-volume measurement |
+| `static/vendor/` | Vendored Chart.js, checksum-pinned (no CDN scripts) |
+| `render.yaml` | Render Blueprint for the public demo |
+| `scripts/smoke_test.sh` | End-to-end checks of the image, compose topologies and demo |
 
 ---
 
@@ -403,7 +417,7 @@ the ATT&CK mapping *with its rationale*, and the related packets.
 ## Testing
 
 ```bash
-pytest                                  # 260 tests
+pytest                                  # full suite
 pytest tests/test_detectors.py -v       # every detector + false-positive control
 pytest tests/test_database.py -v        # schema, indexes, query plans, latency
 pytest tests/test_benchmark.py -v       # targets met, alert reduction lossless
@@ -419,10 +433,56 @@ pytest tests/test_benchmark.py -v       # targets met, alert reduction lossless
 | `test_dashboard.py` | Each module wired to a working endpoint, escaping, no mock data |
 | `test_benchmark.py` | Determinism, targets met, results persisted; alert-reduction baseline is threshold-identical and suppression loses no incident |
 | `test_readme.py` | Every headline count in this README matches what the code produces |
+| `test_hardening.py` | Security headers and CSP, read-only demo mode, rate limiter, proxy trust, vendored asset checksum |
+| `test_retention.py` | Expiry per table, no orphaned technique links, loop prunes only when configured |
+| `test_backfill.py` | History stays inside its window, all threat types present, no future timestamps |
+| `test_simulator_loop.py` | Live-window alert accounting, clean shutdown |
+| `test_deployment.py` | Image contains every imported module; compose profiles, ports and gunicorn settings are valid; Blueprint is hardened |
 
 Fixtures are seeded (`TrafficGenerator(seed=…)` reproduces byte-identical
 traffic), and the attack scenarios double as ground truth: each has a known
 expected threat type, asserted end to end.
+
+---
+
+## Deployment
+
+### Containers
+
+```bash
+docker compose --profile all-in-one up -d --build   # engine + API in one process
+docker compose --profile split up -d --build        # one engine, two read-only API replicas
+docker compose --profile test run --rm tests
+```
+
+Each compose service belongs to exactly one profile, so the two topologies can
+never both start an engine against the same database. The image runs as a
+non-root user; the compose file adds a read-only root filesystem and drops all
+Linux capabilities.
+
+### Public demo
+
+`render.yaml` deploys a read-only demo to Render's Free plan. It is configured
+entirely through environment variables:
+
+| Variable | Effect |
+|---|---|
+| `NETWATCH_DEMO=1` | Refuse every non-GET request with 403; show a banner that the traffic is synthetic |
+| `NETWATCH_RETENTION_S` | Delete telemetry older than this many seconds (0 keeps everything) |
+| `NETWATCH_BACKFILL_MIN` | Generate this many minutes of history, with every attack scenario, at startup |
+| `NETWATCH_RATE_PPS` | Live simulated packets per second |
+| `NETWATCH_RATE_LIMIT`, `NETWATCH_GLOBAL_RATE_LIMIT` | Requests per window per client and overall, e.g. `600/60`; `0` disables |
+| `NETWATCH_PROXY_HOPS` | How many reverse proxies to trust for `X-Forwarded-For` (default 0) |
+
+Deployment steps, the threat model, accepted risks and how to verify a live
+deployment are in [docs/demo-deployment.md](docs/demo-deployment.md).
+
+### Continuous integration
+
+Every push runs the test suite on Python 3.11 and 3.12, the benchmark gates,
+both Dockerfile stages, and `scripts/smoke_test.sh` against the built image for
+the demo configuration and both compose topologies. Render deploys `main` only
+after these checks pass.
 
 ---
 
@@ -456,5 +516,9 @@ expected threat type, asserted end to end.
   scenarios and a false-positive count on a benign corpus. Those two numbers are
   reported, and nothing is extrapolated from them.
 - **The dev server is for demonstration.** It binds to `127.0.0.1` by default;
-  use a production WSGI server to expose it, and note there is no authentication
-  on the API.
+  the container image serves through gunicorn instead.
+- **There is no authentication.** The public demo is safe to expose only because
+  demo mode makes it read-only and it holds no real data. The dashboard's inline
+  event handlers still require `'unsafe-inline'` in the Content-Security-Policy;
+  [docs/demo-deployment.md](docs/demo-deployment.md) lists this and the other
+  accepted risks.

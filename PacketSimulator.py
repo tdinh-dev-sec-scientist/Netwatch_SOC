@@ -466,9 +466,44 @@ class TrafficGenerator:
     def expected_threats(cls, name):
         return cls.SCENARIOS[name][1]
 
+    def history(self, start_ts, end_ts, rate_pps=20.0):
+        """Benign traffic across [start_ts, end_ts] with every attack mixed in.
+
+        Each scenario is shifted so that it finishes by `end_ts`, and the
+        scenarios are spread evenly through the span. A scenario longer than
+        the whole span is left out rather than allowed to spill past `end_ts`,
+        which would put packets in the future. Returns (ts, frame) pairs sorted
+        by time.
+        """
+        span = end_ts - start_ts
+        if span <= 0:
+            return []
+        frames = [pair for pair in self.background(
+            int(span * rate_pps), start_ts=start_ts, rate_pps=rate_pps)
+            if pair[0] <= end_ts]
+        names = list(self.SCENARIOS)
+        for i, name in enumerate(names):
+            raw = self.scenario(name, start_ts=0.0)
+            if not raw:
+                continue
+            first, last = raw[0][0], raw[-1][0]
+            duration = last - first
+            if duration > span:
+                continue
+            offset = start_ts + (span - duration) * (i + 1) / (len(names) + 1)
+            frames.extend((offset + (t - first), fr) for t, fr in raw)
+        frames.sort(key=lambda pair: pair[0])
+        return frames
+
 
 class PacketSimulator:
     """Runs frames through parse -> detect -> persist with real measurement."""
+
+    # Length of one live throughput window written to performance_metrics,
+    # and how long the live loop waits before its first attack scenario.
+    # Class attributes so tests can shorten them without sleeping for minutes.
+    METRICS_WINDOW_S = 60.0
+    FIRST_SCENARIO_DELAY_S = 20.0
 
     def __init__(self, db, threat_detector, protocol_analyzer=None,
                  seed=None, cfg=None):
@@ -482,6 +517,8 @@ class PacketSimulator:
         self._batch = []
         self._findings = []
         self._last_flush = time.time()
+        self._last_prune = time.time()
+        self.rows_pruned = 0
         self.packets_processed = 0
         self.alerts_generated = 0
         self.parse_ns = 0
@@ -530,6 +567,23 @@ class PacketSimulator:
             return self.flush()
         return 0.0
 
+    def maybe_prune(self, now=None):
+        """Apply time-based retention if it is configured and due.
+
+        Called from the live loop only. Replays and benchmarks process
+        historical timestamps on purpose, so they never prune.
+        """
+        retention = self.cfg.get('retention_s', 0)
+        if not retention:
+            return None
+        now = time.time() if now is None else now
+        if now - self._last_prune < self.cfg.get('prune_interval_s', 60):
+            return None
+        self._last_prune = now
+        deleted = self.db.prune(now - retention)
+        self.rows_pruned += sum(deleted.values())
+        return deleted
+
     def run_frames(self, frames, record_metrics=True):
         """Process an explicit list of (ts, frame) pairs.
 
@@ -552,6 +606,21 @@ class PacketSimulator:
                                 self.alerts_generated - before_alerts)
         return found
 
+    def backfill(self, minutes, rate_pps=20.0):
+        """Process the last `minutes` of traffic before the live loop starts.
+
+        A fresh demo database is empty, and the live loop needs many minutes
+        of wall-clock time before every chart has something to show. This runs
+        one TrafficGenerator.history() window ending now through the normal
+        pipeline, so the history is detected and stored exactly like live
+        traffic. Returns the findings raised.
+        """
+        if minutes <= 0:
+            return []
+        end = time.time()
+        return self.run_frames(self.gen.history(end - minutes * 60, end,
+                                                rate_pps=rate_pps))
+
     # ── live loop ────────────────────────────────────────────────────────────
 
     def run(self, rate_pps=95.0, duration_s=None):
@@ -563,7 +632,7 @@ class PacketSimulator:
         window_pkts = window_alerts = 0
         pending = []
         scenario_names = list(TrafficGenerator.SCENARIOS)
-        next_scenario = time.time() + 20
+        next_scenario = time.time() + self.FIRST_SCENARIO_DELAY_S
 
         while self._running:
             now = time.time()
@@ -581,16 +650,18 @@ class PacketSimulator:
 
                 if pending and pending[0][0] <= now:
                     ts, frame = pending.pop(0)
-                    self.process(frame, now)
+                    findings = self.process(frame, now)
                 else:
                     frame = self.gen.background_frame(now)
-                    self.process(frame, now)
+                    findings = self.process(frame, now)
                 window_pkts += 1
+                window_alerts += len(findings)
 
                 self.maybe_flush()
+                self.maybe_prune(now)
 
                 elapsed = now - window_start
-                if elapsed >= 60:
+                if elapsed >= self.METRICS_WINDOW_S:
                     self._record_window(elapsed, window_pkts, window_alerts)
                     window_start, window_pkts, window_alerts = now, 0, 0
 
@@ -638,4 +709,5 @@ class PacketSimulator:
             'detect_us_avg': round(
                 self.detect_ns / max(self.packets_processed, 1) / 1000.0, 3),
             'protocols_seen': dict(self.pa.stats),
+            'rows_pruned': self.rows_pruned,
         }

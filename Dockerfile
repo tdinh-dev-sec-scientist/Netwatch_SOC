@@ -8,7 +8,7 @@
 #   runtime  final image: venv + application source, non-root, no build tools
 #
 #   docker build -t netwatch-soc:latest .
-#   docker build --target test .            # run the 249-test suite in the build
+#   docker build --target test .            # run the full test suite in the build
 #
 # Pin the base by digest for reproducible, tamper-evident builds. Resolve the
 # current digest yourself rather than trusting one copied from a template:
@@ -78,11 +78,16 @@ WORKDIR /app
 # Copy source explicitly rather than `COPY . .` so nothing unlisted — a local
 # database, a .env, a stray credential file — can be pulled into the image even
 # if .dockerignore is edited later.
+#
+# tests/test_deployment.py fails if a module the app imports, or a script a
+# compose service runs, is missing from this list. engine.py was once left out,
+# which broke the split topology at `docker compose --profile split up`.
 COPY --chown=${APP_UID}:${APP_GID} App.py DB_Manager.py PacketSimulator.py \
-     ProtocolAnalyzer.py ThreatDetector.py benchmark.py config.py frames.py \
-     geoip.py mitre.py gunicorn.conf.py ./
+     ProtocolAnalyzer.py ThreatDetector.py benchmark.py config.py engine.py \
+     frames.py geoip.py hardening.py mitre.py gunicorn.conf.py ./
 COPY --chown=${APP_UID}:${APP_GID} detectors/ ./detectors/
 COPY --chown=${APP_UID}:${APP_GID} templates/ ./templates/
+COPY --chown=${APP_UID}:${APP_GID} static/ ./static/
 
 USER ${APP_UID}:${APP_GID}
 
@@ -95,8 +100,9 @@ EXPOSE 5001
 # Verifies the application answers *and* that its schema is intact — a process
 # that is listening but has lost its database is not healthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["python", "-c", "import json,sys,urllib.request;\
-d=json.load(urllib.request.urlopen('http://127.0.0.1:5001/api/health',timeout=4));\
+    CMD ["python", "-c", "import json,os,sys,urllib.request;\
+u='http://127.0.0.1:%s/api/health' % os.environ.get('PORT','5001');\
+d=json.load(urllib.request.urlopen(u,timeout=4));\
 sys.exit(0 if d.get('status')=='ok' and d.get('table_count')==8 else 1)"]
 
 # Exec form: gunicorn becomes PID 1 and receives SIGTERM directly, so
