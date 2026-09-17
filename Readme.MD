@@ -16,6 +16,8 @@ counts are pinned by `tests/test_readme.py`, so the documentation cannot drift
 from the code without a test failing.
 
 ---
+##🚀 Live Demo
+Application is running at: [https://netwatch-soc-demo.onrender.com](https://netwatch-soc-demo.onrender.com)
 
 ## Quick start
 
