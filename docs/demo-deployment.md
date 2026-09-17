@@ -68,22 +68,25 @@ HTTP requests at any rate and to link visitors to the demo.
 |---|---|---|---|
 | 1 | Tampering: acknowledging alerts or calling any future write endpoint | Demo mode rejects every method except GET, HEAD and OPTIONS with 403, before routing, so new write routes are covered automatically | `test_demo_mode_blocks_writes_and_changes_nothing`, `test_demo_mode_blocks_every_unsafe_method` |
 | 2 | Denial of service by request flood | Global fixed-window limit returns 429 with `Retry-After`; API parameters were already bounded (for example `limit` ≤ 1000) so no single request is unbounded | `test_global_limit_applies_across_clients`, `test_api.py` 400 cases |
-| 3 | Disk exhaustion from continuous simulation (~485 bytes per packet) | Time-based retention prunes every minute | `tests/test_retention.py` |
-| 4 | Cross-site scripting through data shown in the dashboard | Output escaping (existing), plus a CSP that only lets scripts load from this origin and only lets `fetch` reach this origin, which blocks exfiltration from an injected script | `test_output_is_escaped`, `test_csp_restricts_scripts_connections_and_framing` |
-| 5 | Clickjacking | `frame-ancestors 'none'` and `X-Frame-Options: DENY` | `test_security_headers_on_every_response` |
-| 6 | Compromised or altered third-party JavaScript | Chart.js is vendored byte-identical from the npm package and its SHA-256 is pinned; no script is loaded from a CDN | `test_vendored_chart_js_is_served_and_unmodified`, `test_dashboard_loads_no_third_party_scripts` |
-| 7 | Spoofed client address to dodge per-client limits | `X-Forwarded-For` is ignored unless `NETWATCH_PROXY_HOPS` says how many proxies to trust | `test_forwarded_for_is_ignored_without_trusted_proxies` |
-| 8 | Malicious code reaching the deployment | Render deploys only commits whose CI checks pass; the workflow runs with read-only repository permissions | `render.yaml`, `.github/workflows/ci.yml` |
-| 9 | Visitors mistaking synthetic data for a real network | Banner on every page in demo mode | `templates/Dashboard.html` |
-| 10 | Container privilege abuse | Image runs as a non-root user with no build tools | `Dockerfile` |
+| 3 | Clearing counters by flooding the limiter with fresh keys | A full key table drops expired windows first, then only its oldest fifth, so an overflow cannot reset the clients still inside their window | `test_overflow_does_not_reset_every_tracked_counter`, `test_capacity_eviction_removes_the_oldest_windows_first` |
+| 4 | Disk exhaustion from continuous simulation (~485 bytes per packet) | Time-based retention prunes every minute | `tests/test_retention.py` |
+| 5 | Cross-site scripting through data shown in the dashboard | Output escaping (existing), plus a CSP that runs no inline script at all, loads scripts only from this origin, and only lets `fetch` reach this origin, which blocks exfiltration from an injected script | `test_output_is_escaped`, `test_csp_forbids_inline_and_eval_script`, `test_dashboard_has_no_inline_script_to_run` |
+| 6 | Clickjacking | `frame-ancestors 'none'` and `X-Frame-Options: DENY` | `test_security_headers_on_every_response` |
+| 7 | Compromised or altered third-party JavaScript | Chart.js is vendored byte-identical from the npm package and its SHA-256 is pinned; no script is loaded from a CDN | `test_vendored_chart_js_is_served_and_unmodified`, `test_dashboard_loads_no_third_party_scripts` |
+| 8 | Spoofed client address to dodge per-client limits | `X-Forwarded-For` is ignored unless `NETWATCH_PROXY_HOPS` says how many proxies to trust | `test_forwarded_for_is_ignored_without_trusted_proxies` |
+| 9 | Malicious code reaching the deployment | Render deploys only commits whose CI checks pass; the workflow runs with read-only repository permissions | `render.yaml`, `.github/workflows/ci.yml` |
+| 10 | Visitors mistaking synthetic data for a real network | Banner on every page in demo mode | `templates/Dashboard.html` |
+| 11 | Container privilege abuse | Image runs as a non-root user with no build tools | `Dockerfile` |
 
 ### Accepted risks and known gaps
 
-- **`'unsafe-inline'` in the CSP.** The dashboard uses inline `onclick`
-  handlers and inline `<script>`, so the policy cannot yet forbid inline
-  script. Moving handlers to `addEventListener` and serving the script as a
-  file would allow `script-src 'self'` only. This is the most valuable
-  follow-up for the front end.
+- **`'unsafe-inline'` still applies to styles.** `script-src` is now `'self'`
+  alone: the dashboard's JavaScript is served from `static/js/dashboard.js` and
+  binds handlers with `addEventListener`, so no inline script runs. Styles are
+  the remaining gap — bar widths and colours are set through `style` attributes,
+  which needs `style-src 'unsafe-inline'`. An injected style can deface the page
+  but cannot execute code or read the API; moving those into CSS custom
+  properties is the next front-end follow-up.
 - **Per-client rate limiting is off on Render.** Behind the platform proxy the
   TCP peer is the proxy, so without trusting `X-Forwarded-For` every visitor
   would share one bucket. The global limit still protects the instance. See

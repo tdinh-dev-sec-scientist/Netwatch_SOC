@@ -37,15 +37,17 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
 
-# The dashboard still uses inline <script> blocks, onclick attributes and style
-# attributes, which is why 'unsafe-inline' remains for scripts and styles.
-# Removing it means moving those handlers into addEventListener calls — tracked
-# as follow-up work. What this policy does enforce: scripts load only from this
-# origin, fetch/XHR can only reach this origin (so injected script cannot send
-# data elsewhere), no plugins, no <base> hijacking, and no framing.
+# Scripts load only from this origin and nothing inline runs: the dashboard's
+# JavaScript lives in static/js/dashboard.js and binds its handlers with
+# addEventListener, so an injected <script> or onclick attribute is refused by
+# the browser rather than executed. Styles still need 'unsafe-inline' because
+# the dashboard sets bar widths and colours through style attributes; that is a
+# smaller exposure than script execution and is separate follow-up work.
+# The policy also keeps fetch/XHR on this origin (so injected script could not
+# send data elsewhere), and forbids plugins, <base> hijacking and framing.
 CONTENT_SECURITY_POLICY = '; '.join((
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    "script-src 'self'",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src https://fonts.gstatic.com",
     "img-src 'self' data:",
@@ -142,14 +144,25 @@ class RateLimiter:
             return entry[1] <= self.limit, reset
 
     def _evict(self, now):
+        """Free room for a new key without forgetting every active client.
+
+        Clearing the whole table would hand any client a way to reset the
+        counter of every other one: fill it with fresh keys and all counts,
+        including a hostile client's, go back to zero. So expired windows are
+        dropped first, and only if that frees nothing does a bounded slice go.
+        """
         expired = [k for k, (start, _c) in self._windows.items()
                    if now - start >= self.window_s]
         for key in expired:
             del self._windows[key]
-        if len(self._windows) >= self.max_keys:
-            # Every tracked key is inside its window. Forgetting them fails open
-            # for per-client limits; the global limiter still applies.
-            self._windows.clear()
+        if len(self._windows) < self.max_keys:
+            return
+        # Every tracked key is still inside its window. Drop the oldest fifth,
+        # by window start: those windows expire soonest, so they are the ones
+        # whose counters were going to be reset anyway.
+        oldest = sorted(self._windows, key=lambda key: self._windows[key][0])
+        for key in oldest[:max(1, len(self._windows) // 5)]:
+            del self._windows[key]
 
     def __len__(self):
         return len(self._windows)
