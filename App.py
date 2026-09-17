@@ -17,6 +17,7 @@ from flask import Flask, jsonify, render_template, request
 
 import config as config_module
 import detectors
+import hardening
 import mitre
 from DB_Manager import DatabaseManager
 from PacketSimulator import PacketSimulator, TrafficGenerator
@@ -68,10 +69,41 @@ def _bool_arg(name, default=None):
     raise ApiError("'%s' must be a boolean, got %r" % (name, raw))
 
 
-def create_app(db=None, engine=None, simulator=None, start_simulation=None):
-    """Build the Flask app. Tests inject their own db/engine and no simulator."""
+def _float_env(name, default):
+    raw = os.environ.get(name)
+    if raw is None or raw == '':
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError('%s must be numeric, got %r' % (name, raw))
+    if value < 0:
+        raise ValueError('%s must not be negative, got %r' % (name, raw))
+    return value
+
+
+def _simulate(simulator):
+    """Background engine thread: optional history backfill, then live traffic.
+
+    NETWATCH_BACKFILL_MIN  minutes of history to generate at startup (0 = none)
+    NETWATCH_RATE_PPS      live packets per second (default 95)
+    """
+    backfill = _float_env('NETWATCH_BACKFILL_MIN', 0.0)
+    if backfill:
+        simulator.backfill(backfill)
+    simulator.run(rate_pps=_float_env('NETWATCH_RATE_PPS', 95.0) or 95.0)
+
+
+def create_app(db=None, engine=None, simulator=None, start_simulation=None,
+               security=None):
+    """Build the Flask app. Tests inject their own db/engine and no simulator.
+
+    `security` is a hardening.Settings; by default it is read from the
+    environment (NETWATCH_DEMO, NETWATCH_RATE_LIMIT, ...).
+    """
     app = Flask(__name__)
     cfg = config_module.load()
+    hardening.install(app, security or hardening.Settings.from_env())
 
     app.db = db or DatabaseManager()
     app.engine = engine or ThreatDetector(app.db, cfg=cfg)
@@ -83,7 +115,8 @@ def create_app(db=None, engine=None, simulator=None, start_simulation=None):
         start_simulation = os.environ.get('NETWATCH_SIMULATE', '1') != '0'
     if start_simulation and app.simulator is None:
         app.simulator = PacketSimulator(app.db, app.engine, app.analyzer)
-        threading.Thread(target=app.simulator.run, daemon=True).start()
+        threading.Thread(target=_simulate, args=(app.simulator,),
+                         daemon=True).start()
 
     _register(app)
     return app
@@ -127,6 +160,7 @@ def _register(app):
         }
         info['simulation_running'] = bool(
             app.simulator and app.simulator._running)
+        info['demo'] = app.config['NETWATCH_DEMO']
         return jsonify(info)
 
     # ── 2-6. aggregate statistics ────────────────────────────────────────────

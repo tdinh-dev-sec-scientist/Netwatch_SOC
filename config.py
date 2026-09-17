@@ -24,6 +24,11 @@ DEFAULTS = {
         'state_ttl_s': 900,         # drop per-key detector state after idle
         'gc_interval_s': 60,        # how often to sweep expired state
         'store_packets': True,      # persist every packet row
+        # Telemetry older than this many seconds is deleted by the live loop.
+        # 0 keeps everything. Without a limit the database grows by roughly
+        # 485 bytes per packet — about 4 GB a day at the default 95 pkt/s.
+        'retention_s': 0,
+        'prune_interval_s': 60,     # how often the live loop prunes
     },
 
     # ── reconnaissance / discovery ───────────────────────────────────────────
@@ -172,10 +177,33 @@ def _deep_merge(base, override):
     return out
 
 
+# Single settings that deployments commonly need, exposed as plain environment
+# variables so a hosting platform can set them without mounting a JSON file.
+# Applied after NETWATCH_CONFIG, so an explicit environment variable wins.
+ENV_OVERRIDES = {
+    'NETWATCH_RETENTION_S': ('engine', 'retention_s'),
+}
+
+
+def _apply_env(cfg):
+    for var, (section, key) in ENV_OVERRIDES.items():
+        raw = os.environ.get(var)
+        if raw is None or raw == '':
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            raise ValueError('%s must be numeric, got %r' % (var, raw))
+        if value < 0:
+            raise ValueError('%s must not be negative, got %r' % (var, raw))
+        cfg[section][key] = value
+    return cfg
+
+
 def load(path=None):
-    """Return the effective threshold config (defaults + optional overrides)."""
+    """Return the effective config: defaults, then NETWATCH_CONFIG, then env."""
     path = path or os.environ.get('NETWATCH_CONFIG')
     if not path:
-        return copy.deepcopy(DEFAULTS)
+        return _apply_env(copy.deepcopy(DEFAULTS))
     with open(path, 'r', encoding='utf-8') as fh:
-        return _deep_merge(DEFAULTS, json.load(fh))
+        return _apply_env(_deep_merge(DEFAULTS, json.load(fh)))

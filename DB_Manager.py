@@ -452,6 +452,47 @@ class DatabaseManager:
                  'query_p95_ms': 0, **metrics})
             self._write_conn.commit()
 
+    # Delete order matters only for readability: alert_techniques rows go with
+    # their alert through ON DELETE CASCADE (foreign_keys is on for the writer).
+    _PRUNE = (
+        ('alerts', 'DELETE FROM alerts WHERE ts < ?'),
+        ('packets', 'DELETE FROM packets WHERE ts < ?'),
+        ('connections', 'DELETE FROM connections WHERE last_seen < ?'),
+        ('hosts', 'DELETE FROM hosts WHERE last_seen < ?'),
+        ('protocol_stats', 'DELETE FROM protocol_stats WHERE bucket < ?'),
+        ('performance_metrics', 'DELETE FROM performance_metrics WHERE ts < ?'),
+    )
+
+    def prune(self, before_ts):
+        """Delete telemetry older than `before_ts`. Returns rows deleted per table.
+
+        Time-based retention keeps a long-running deployment's database bounded.
+        Rows are judged by when they were last relevant: packets and alerts by
+        their own timestamp, flows and hosts by `last_seen`. A flow or host that
+        is still active keeps its cumulative counters, so those describe its
+        whole lifetime rather than only the retained window. A protocol_stats
+        bucket is removed only once its entire minute is older than the cutoff.
+
+        SQLite reuses the freed pages for new rows, so the file stops growing
+        at steady state instead of shrinking; run VACUUM offline to reclaim it.
+        The mitre_techniques catalog is reference data and is never pruned.
+        """
+        bucket_cutoff = int(before_ts // 60) * 60
+        deleted = {}
+        with self._write_lock:
+            conn = self._write_conn
+            try:
+                conn.execute('BEGIN')
+                for table, sql in self._PRUNE:
+                    param = bucket_cutoff if table == 'protocol_stats' \
+                        else before_ts
+                    deleted[table] = conn.execute(sql, (param,)).rowcount
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return deleted
+
     def acknowledge_alert(self, alert_id):
         with self._write_lock:
             cur = self._write_conn.execute(

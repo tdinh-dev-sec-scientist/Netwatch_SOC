@@ -1,8 +1,14 @@
 # NetWatch SOC — container topology.
 #
-#   docker compose up -d --build          all-in-one (engine + API in one process)
-#   docker compose --profile split up -d  dedicated engine + scalable API workers
+#   docker compose --profile all-in-one up -d --build   engine + API in one process
+#   docker compose --profile split up -d --build        dedicated engine + API replicas
 #   docker compose --profile test run --rm tests
+#
+# Every service belongs to exactly one profile, and the profiles are mutually
+# exclusive by design. The all-in-one service used to have no profile, which
+# made it start alongside `--profile split` as well: two engines writing to one
+# SQLite volume, the duplication gunicorn.conf.py exists to prevent. CI checks
+# that each profile runs exactly one engine.
 #
 # The `version:` key is deliberately absent — it is obsolete in Compose v2+ and
 # emits a warning.
@@ -45,6 +51,7 @@ services:
   # One process owns both the detection engine and the API, so there is exactly
   # one writer. gunicorn.conf.py refuses to start this with >1 worker.
   netwatch:
+    profiles: ["all-in-one"]
     build:
       context: .
       target: runtime
@@ -142,10 +149,17 @@ services:
       NETWATCH_SIMULATE: "0"
       GUNICORN_WORKERS: "4"
       GUNICORN_THREADS: "4"
-      # Trust X-Forwarded-* only from the proxy network in front of this.
-      GUNICORN_FORWARDED_ALLOW_IPS: "172.16.0.0/12"
+      # GUNICORN_FORWARDED_ALLOW_IPS is deliberately unset, so no
+      # X-Forwarded-* header is trusted. It previously held a CIDR range,
+      # which gunicorn 23 rejects at startup ("does not appear to be an IPv4
+      # or IPv6 address"), so these replicas crash-looped and never served.
+      # No reverse proxy is defined in this file anyway; when you add one,
+      # list its exact address(es) here, not a range.
     ports:
-      - "127.0.0.1:5001:5001"
+      # One host port per replica. A single fixed port cannot be published
+      # by two containers, so the second replica used to fail to start with
+      # "port is already allocated". Keep the range as wide as `replicas`.
+      - "127.0.0.1:5001-5002:5001"
     volumes:
       # Readers still need write access to the -wal and -shm sidecar files;
       # SQLite cannot open a WAL database read-only without them.
