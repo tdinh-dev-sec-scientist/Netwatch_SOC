@@ -23,7 +23,7 @@ mean. Here is what was measured, not assumed:
 the 17 detectors calls `Detector._cooled_down()` *before* emitting a finding
 (`detectors/base.py:212`, called from 25 sites across `detectors/*.py`), and
 `ThreatDetector.analyze()` does no further aggregation. The raw pre-cooldown
-volume never reaches SQLite. So forwarding alert rows 1:1 *is* forwarding the
+volume never reaches the database. So forwarding alert rows 1:1 *is* forwarding
 deduplicated output — no second dedup step is needed or possible.
 
 Measured on a deterministic 90-minute corpus (seed 1337, 113,624 frames):
@@ -31,7 +31,7 @@ Measured on a deterministic 90-minute corpus (seed 1337, 113,624 frames):
 ```
 RAW (every cooldown_s = 0)  alerts    : 613
 RAW                         incidents :  25
-TUNED (shipped config)      alerts    :  25   <- what is written to SQLite
+TUNED (shipped config)      alerts    :  25   <- what is written to the db
 TUNED                       incidents :  25
 reduction                             : 95.9%
 incidents lost to suppression         :   0
@@ -70,7 +70,7 @@ That caveat is exactly what the `incident_key` field is for.
 The engine stamps `Finding.incident_key` — the identity of the incident
 rather than of the packet that exposed it (for a spoofed flood, the victim,
 not the source). **It is not persisted.** `DB_Manager._write_alerts()` has no
-column for it, so it cannot be read back out of SQLite.
+column for it, so it cannot be read back out of the database.
 
 The forwarder therefore *reconstructs* a correlation key from stored columns
 only. It is a Splunk-side correlation field, not the engine's key, and not
@@ -150,9 +150,9 @@ frames -> ProtocolAnalyzer -> ThreatDetector (17 detectors)
                                    |
                           DB_Manager._write_alerts()
                                    |
-                       SQLite: alerts + alert_techniques
+              PostgreSQL (or SQLite): alerts + alert_techniques
                                    |
-              netwatch_hec.py  (read-only, mode=ro, WAL-safe)
+                 netwatch_hec.py  (read-only, either backend)
                  - joins alert_techniques -> mitre_techniques
                  - derives incident_key
                  - HEC "time" := alerts.ts
@@ -164,9 +164,37 @@ frames -> ProtocolAnalyzer -> ThreatDetector (17 detectors)
                    dashboard + 5 scheduled alerts
 ```
 
-The forwarder opens the database with `mode=ro`, so it is safe to run against
-the live engine's file — SQLite WAL lets it read during writes, and the
-connection physically cannot write (asserted by `test_connection_cannot_write`).
+### Backends
+
+The forwarder reads through the project's own `db_backends` layer, so it runs
+against **PostgreSQL — the deployed default — as well as the SQLite dev path**,
+using the same `DB_BACKEND` / `DATABASE_URL` / `NETWATCH_DB` configuration as
+the engine and the API. `--db` overrides it with a URL or a path:
+
+```bash
+DATABASE_URL=postgresql://netwatch:...@localhost:5432/netwatch \
+    python integrations/splunk/netwatch_hec.py --dry-run
+
+DB_BACKEND=sqlite NETWATCH_DB=netwatch.db \
+    python integrations/splunk/netwatch_hec.py --dry-run
+```
+
+The two backends disagree about two stored columns — `evidence` is TEXT on
+SQLite and JSONB on PostgreSQL, and `acknowledged` is an int on one and a bool
+on the other — so the backend could easily leak into what lands in Splunk.
+`test_postgres_events_match_sqlite_exactly` writes the same corpus to both and
+asserts the generated envelopes are equal, field for field.
+
+Unlike the engine, the forwarder needs no connection pool: one short-lived
+read-only connection per run, so `psycopg[binary]` is enough.
+
+### Read-only
+
+The connection physically cannot write on either backend — SQLite is opened
+`mode=ro`, PostgreSQL with `default_transaction_read_only=on` — so it is safe
+to run against the live engine's database. Both are enforced by the driver and
+the server respectively rather than by convention, and both are asserted
+(`test_connection_cannot_write`, `test_postgres_connection_cannot_write`).
 
 ---
 
@@ -175,7 +203,7 @@ connection physically cannot write (asserted by `test_connection_cannot_write`).
 | file | what it is |
 |---|---|
 | `netwatch_hec.py` | the forwarder |
-| `test_netwatch_hec.py` | 22 tests, incl. the key-fidelity and timestamp checks |
+| `test_netwatch_hec.py` | 27 tests, incl. key-fidelity, timestamp and cross-backend checks |
 | `netwatch_dashboard.xml` | Classic Simple XML, 5 panels |
 | `savedsearches.conf` | 5 scheduled alerts, each with its false-positive note |
 | `props.conf` | sourcetype config, zone/severity EVALs, CIM aliases |
@@ -184,7 +212,7 @@ connection physically cannot write (asserted by `test_connection_cannot_write`).
 
 ## Running it
 
-### 1. Produce data (if `netwatch.db` is empty)
+### 1. Produce data (if the alerts table is empty)
 
 ```bash
 python -c "
@@ -322,7 +350,7 @@ own signal.
 ## Tests
 
 ```bash
-pytest integrations/splunk -q      # 22 tests
+pytest integrations/splunk -q      # 27 tests (5 skip without PostgreSQL)
 ```
 
 Not picked up by a bare `pytest` — `pytest.ini` sets `testpaths = tests`, and
@@ -335,7 +363,10 @@ Worth knowing what they cover, because several are claims this README makes:
 - `test_hec_time_is_the_detection_time_not_now` — timestamp mapping
 - `test_backfilled_alerts_keep_their_past_timestamps` — events do not collapse onto one time
 - `test_token_never_appears_in_dry_run_output` — secret handling
-- `test_connection_cannot_write` — read-only safety against the live engine
+- `test_connection_cannot_write` / `test_postgres_connection_cannot_write` —
+  read-only safety against the live engine, on both backends
+- `test_postgres_events_match_sqlite_exactly` — the backend is not observable
+  in what lands in Splunk, despite TEXT vs JSONB evidence
 - `test_spl_only_references_fields_the_forwarder_actually_sends` — a typo'd
   field in SPL is not an error in Splunk, it just renders an empty panel that
   looks like "no detections"

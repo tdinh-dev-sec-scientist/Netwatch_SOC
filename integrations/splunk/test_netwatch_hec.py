@@ -32,8 +32,17 @@ SEED = 1337
 # ── fixtures ────────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope='module')
-def findings_and_db(tmp_path_factory):
-    """Run the real engine over a deterministic corpus; return findings + db."""
+def corpus_end():
+    """One end timestamp for every corpus in this module.
+
+    The backends are compared row for row, so they have to be generated over
+    the same span -- calling time.time() twice would shift every `ts`.
+    """
+    return time.time()
+
+
+def _write_corpus(target, end):
+    """Run the real engine over the deterministic corpus into `target`."""
     import config
     from DB_Manager import DatabaseManager
     from PacketSimulator import PacketSimulator, TrafficGenerator
@@ -41,24 +50,29 @@ def findings_and_db(tmp_path_factory):
     from ThreatDetector import ThreatDetector
 
     cfg = config.load()
-    path = str(tmp_path_factory.mktemp('hec') / 'netwatch.db')
-    db = DatabaseManager(path)
+    db = DatabaseManager(target)
     sim = PacketSimulator(db, ThreatDetector(db, cfg=cfg),
                           ProtocolAnalyzer(), seed=SEED, cfg=cfg)
     gen = TrafficGenerator(seed=SEED)
-    end = time.time()
     findings = sim.run_frames(gen.history(end - 90 * 60, end, rate_pps=20.0))
     sim.flush()
     db.close()
-    return findings, path
+    return findings
+
+
+@pytest.fixture(scope='module')
+def findings_and_db(tmp_path_factory, corpus_end):
+    """Run the real engine over a deterministic corpus; return findings + db."""
+    path = str(tmp_path_factory.mktemp('hec') / 'netwatch.db')
+    return _write_corpus(path, corpus_end), path
 
 
 @pytest.fixture(scope='module')
 def rows(findings_and_db):
     _findings, path = findings_and_db
-    conn = hec.open_db(path)
-    out = conn.execute('SELECT * FROM alerts ORDER BY id').fetchall()
-    conn.close()
+    reader = hec.open_db(path)
+    out = reader.execute('SELECT * FROM alerts ORDER BY id')
+    reader.close()
     return out
 
 
@@ -208,10 +222,10 @@ def test_corrupt_state_file_resets_rather_than_crashing(tmp_path):
 
 def test_fetch_alerts_resumes_after_an_id(findings_and_db):
     _findings, path = findings_and_db
-    conn = hec.open_db(path)
-    everything = hec.fetch_alerts(conn)
-    tail = hec.fetch_alerts(conn, since_id=everything[0]['id'])
-    conn.close()
+    reader = hec.open_db(path)
+    everything = hec.fetch_alerts(reader)
+    tail = hec.fetch_alerts(reader, since_id=everything[0]['id'])
+    reader.close()
     assert len(tail) == len(everything) - 1
     assert all(r['id'] > everything[0]['id'] for r in tail)
 
@@ -220,11 +234,11 @@ def test_fetch_alerts_resumes_after_an_id(findings_and_db):
 
 def test_connection_cannot_write(findings_and_db):
     _findings, path = findings_and_db
-    conn = hec.open_db(path)
+    reader = hec.open_db(path)
     with pytest.raises(sqlite3.OperationalError):
-        conn.execute("INSERT INTO alerts (ts,severity,threat_type,detector,"
-                     "confidence,description) VALUES (1,'LOW','x','y',0.1,'z')")
-    conn.close()
+        reader.execute("INSERT INTO alerts (ts,severity,threat_type,detector,"
+                       "confidence,description) VALUES (1,'LOW','x','y',0.1,'z')")
+    reader.close()
 
 
 def test_missing_database_is_a_clean_error(tmp_path):
@@ -332,3 +346,118 @@ def test_every_saved_search_is_scheduled_and_suppressed():
         assert stanza.get('alert.suppress.fields'), name
         assert 'index=netwatch' in stanza['search'], name
         assert 'sourcetype=netwatch:incident' in stanza['search'], name
+
+
+# ── PostgreSQL, the deployed backend ────────────────────────────────────────
+#
+# These skip unless a server is reachable. Point them at one with
+# TEST_DATABASE_URL (or DATABASE_URL), or `docker compose up -d postgres`,
+# whose defaults tests/conftest.py already matches.
+
+DEFAULT_PG_URL = 'postgresql://netwatch:netwatch@localhost:5432/netwatch'
+
+
+def _pg_url():
+    return (os.environ.get('TEST_DATABASE_URL')
+            or os.environ.get('DATABASE_URL')
+            or DEFAULT_PG_URL)
+
+
+@pytest.fixture(scope='module')
+def pg_db(corpus_end):
+    """The same corpus, written to a scratch PostgreSQL database."""
+    import db_backends
+
+    try:
+        import psycopg                                 # noqa: F401
+    except ImportError:
+        pytest.skip('psycopg is not installed')
+
+    dsn = db_backends.with_database(_pg_url(), 'netwatch_hec_test')
+    try:
+        db_backends.create_database(dsn)
+    except Exception as exc:
+        pytest.skip('no PostgreSQL available: %s' % exc)
+
+    try:
+        _write_corpus(dsn, corpus_end)
+        yield dsn
+    finally:
+        db_backends.drop_database(dsn)
+
+
+def test_postgres_events_match_sqlite_exactly(pg_db, findings_and_db):
+    """The backend must not be observable in what lands in Splunk.
+
+    This is the whole point of reading through `db_backends`: `evidence` is
+    TEXT on SQLite and JSONB on PostgreSQL, and `acknowledged` is an int on
+    one and a bool on the other. If either leaked through, these envelopes
+    would differ.
+    """
+    _findings, sqlite_path = findings_and_db
+    args = _Args()
+
+    def envelopes(target):
+        reader = hec.open_db(target)
+        try:
+            rows = hec.fetch_alerts(reader)
+            techs = hec.fetch_techniques(reader, [r['id'] for r in rows])
+            return [hec.build_event(r, techs.get(r['id'], []), args)
+                    for r in rows]
+        finally:
+            reader.close()
+
+    from_pg, from_sqlite = envelopes(pg_db), envelopes(sqlite_path)
+    assert from_pg, 'no alerts written to PostgreSQL'
+    assert len(from_pg) == len(from_sqlite)
+    assert from_pg == from_sqlite
+
+
+def test_postgres_evidence_arrives_parsed(pg_db):
+    """jsonb comes back from psycopg as an object, not a string to re-parse."""
+    reader = hec.open_db(pg_db)
+    try:
+        rows = hec.fetch_alerts(reader, limit=1)
+        event = hec.build_event(rows[0], [], _Args())['event']
+    finally:
+        reader.close()
+    assert isinstance(event['evidence'], dict)
+    assert '_unparsed' not in event['evidence']
+
+
+def test_postgres_connection_cannot_write(pg_db):
+    """Read-only is enforced by the server, not by this script's good manners."""
+    import psycopg
+    reader = hec.open_db(pg_db)
+    try:
+        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+            reader.execute(
+                "INSERT INTO alerts (ts,severity,threat_type,detector,"
+                "confidence,description) VALUES (1,'LOW','x','y',0.1,'z')")
+    finally:
+        reader.close()
+
+
+def test_postgres_resumes_after_an_id(pg_db):
+    reader = hec.open_db(pg_db)
+    try:
+        everything = hec.fetch_alerts(reader)
+        tail = hec.fetch_alerts(reader, since_id=everything[0]['id'])
+    finally:
+        reader.close()
+    assert len(tail) == len(everything) - 1
+    assert all(r['id'] > everything[0]['id'] for r in tail)
+
+
+def test_technique_chunking_is_backend_independent(pg_db):
+    """A backlog larger than one parameter chunk must join identically."""
+    reader = hec.open_db(pg_db)
+    try:
+        ids = [r['id'] for r in hec.fetch_alerts(reader)]
+        whole = hec.fetch_techniques(reader, ids)
+        reader.max_params = 2          # force many chunks
+        chunked = hec.fetch_techniques(reader, ids)
+    finally:
+        reader.close()
+    assert whole == chunked
+    assert whole, 'no technique links found'
