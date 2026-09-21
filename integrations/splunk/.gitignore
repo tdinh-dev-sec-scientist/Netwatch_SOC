@@ -1,0 +1,3 @@
+# Forwarder checkpoint. Local runtime state, and it changes on every run.
+.hec_state.json
+.hec_state.json.tmp
