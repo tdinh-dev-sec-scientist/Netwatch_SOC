@@ -2,7 +2,7 @@
    NetWatch SOC dashboard.
 
    Every module below is driven by a REST call to the Flask API, which
-   reads from SQLite. There is no seeded, mocked or placeholder data in
+   reads from PostgreSQL. There is no seeded, mocked or placeholder data in
    this file: if an endpoint returns nothing, the module renders an
    explicit empty state so a missing pipeline is visible rather than
    disguised.
@@ -525,7 +525,8 @@ async function loadPerformance() {
 
   document.getElementById('db-health').innerHTML = `
     <dl class="kv">
-      <dt>Journal mode</dt><dd>${esc(health.journal_mode)}</dd>
+      <dt>Backend</dt><dd>${esc(health.backend)} ${esc(health.server_version)}</dd>
+      <dt>Write-ahead log</dt><dd>${esc(health.journal_mode)}</dd>
       <dt>Tables</dt><dd>${health.table_count}</dd>
       <dt>Indexes</dt><dd>${health.index_count}</dd>
       <dt>Database size</dt><dd>${fmtBytes(health.db_size_bytes)}</dd>

@@ -79,9 +79,9 @@ def test_readme_table_count_matches_the_schema(populated_db):
     actual = populated_db.health()['table_count']
     assert_all_agree(
         claimed(text,
-                r'(\d+)-table SQLite',
+                r'(\d+)-table PostgreSQL',
                 r'## Database — (\d+) tables',
-                r'\| SQLite tables \| [^|]*\| \*\*(\d+)\*\*'),
+                r'\| Tables \| [^|]*\| \*\*(\d+)\*\*'),
         actual, 'the table count')
 
 

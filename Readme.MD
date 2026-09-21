@@ -7,7 +7,7 @@
 first load after the service has idled takes about a minute) -->
 
 A network security monitoring platform: deep packet inspection over 21 protocols,
-17 modular threat detectors mapped to MITRE ATT&CK, an indexed 8-table SQLite
+17 modular threat detectors mapped to MITRE ATT&CK, an indexed 8-table PostgreSQL
 store, a 24-endpoint REST API, and a 9-module analyst dashboard.
 
 Every number in this README is measured, and the commands to reproduce each one
@@ -21,19 +21,50 @@ Application is running at: [https://netwatch-soc-demo.onrender.com](https://netw
 
 ## Quick start
 
+PostgreSQL is the production database and the default. The quickest way to get
+one is the compose service that ships with the project:
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-python App.py                 # dashboard + live simulation → http://127.0.0.1:5001
-pytest                        # full suite
-python benchmark.py           # throughput, query latency, alert-volume reduction
+cp .env.example .env               # development credentials; edit if you like
+docker compose up -d postgres      # PostgreSQL 16 on 127.0.0.1:5432
+
+export DATABASE_URL=postgresql://netwatch:netwatch@localhost:5432/netwatch
+python migrate.py up               # create the schema (App.py also does this)
+python App.py                      # dashboard + live simulation → http://127.0.0.1:5001
+
+pytest                             # full suite, against that same server
+python benchmark.py                # throughput, query latency, alert reduction
 ```
+
+No PostgreSQL to hand? `DB_BACKEND=sqlite python App.py` runs the whole thing
+against a local file with no server and no configuration. It is a development
+convenience, not a supported deployment — see
+[SQLite fallback](#sqlite-fallback-development-only).
 
 `NETWATCH_SIMULATE=0 python App.py` runs the API without generating traffic.
 `NETWATCH_DEMO=1 NETWATCH_BACKFILL_MIN=15 python App.py` runs it the way the
 public demo does: read-only, rate-limited, and pre-filled with history. See
 [Deployment](#deployment).
+
+### Environment variables
+
+Every database setting is environmental; `.env.example` is the annotated list.
+The ones that matter:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `DATABASE_URL` | — | The preferred form. `postgresql://user:pass@host:5432/netwatch?sslmode=require` |
+| `PG_HOST`, `PG_PORT`, `PG_USER`, `PG_PASSWORD`, `PG_DB`, `PG_SSLMODE` | `localhost`, `5432`, `netwatch`, —, **required**, — | Discrete fallback, used only when `DATABASE_URL` is unset |
+| `DB_BACKEND` | `postgresql` | `sqlite` selects the development fallback |
+| `NETWATCH_DB` | `./netwatch.db` | SQLite file path; ignored unless `DB_BACKEND=sqlite` |
+| `PG_POOL_MIN`, `PG_POOL_MAX` | `1`, `10` | Reader pool bounds. Keep `PG_POOL_MAX` ≥ `GUNICORN_THREADS` |
+| `PG_CONNECT_TIMEOUT` | `10` | Seconds to wait for a connection |
+| `PG_STATEMENT_TIMEOUT_MS` | `30000` | Ceiling on any single statement |
+| `NETWATCH_AUTO_MIGRATE` | `1` | Apply pending migrations on startup. Set to `0` to make migrations an explicit release step |
+| `TEST_DATABASE_URL` | falls back to `DATABASE_URL` | Server the test suite creates its scratch databases on |
 
 ---
 
@@ -68,7 +99,8 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
    `DatabaseManager.persist_batch()` writes them in one transaction: the packet
    row, the flow upsert, the host upsert, the protocol rollup, the alert, and
    the alert↔technique links.
-4. **Serve** — Flask endpoints query SQLite; the dashboard renders the result.
+4. **Serve** — Flask endpoints query PostgreSQL over a pooled connection; the
+   dashboard renders the result.
 
 ### Files
 
@@ -79,7 +111,11 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 | `detectors/` | 17 detectors, one module per threat family |
 | `ThreatDetector.py` | Engine: registry, dispatch, state expiry, introspection |
 | `mitre.py` | ATT&CK catalog with a written rationale per technique |
-| `DB_Manager.py` | 8-table schema, batched writes, all read queries |
+| `DB_Manager.py` | Every SQL statement: batched writes and all read queries |
+| `db_backends.py` | Driver layer: connection pooling, dialect translation, PostgreSQL and the SQLite fallback |
+| `migrate.py` | Versioned SQL migration runner (`status`, `up`) |
+| `migrations/` | The schema itself, one numbered file per change per backend |
+| `migrate_sqlite_to_postgres.py` | One-off copy of an existing `netwatch.db` into PostgreSQL |
 | `geoip.py` | Coarse prefix→country enrichment (**not** a geolocation DB) |
 | `config.py` | Every detection threshold, overridable via `NETWATCH_CONFIG` |
 | `PacketSimulator.py` | Traffic generation, attack scenarios, engine loop |
@@ -99,7 +135,8 @@ Produced by `python benchmark.py` on the machine described below. Re-run it and
 you will get numbers of the same shape; absolute throughput is hardware-dependent.
 
 ```
-Environment : Python 3.11.15, Linux x86_64, single-threaded, shared container
+Environment : Python 3.11.15, PostgreSQL 16.13, Linux x86_64, single-threaded,
+              shared container, database on the same host
 Command     : python benchmark.py --iterations 5 --packets 20000
 Dataset     : 106,690 packets, 120 alerts, 135 technique links
 ```
@@ -109,19 +146,19 @@ Dataset     : 106,690 packets, 120 alerts, 135 technique links
 | Threat types | 15+ | **17** (all 17 proven by a scenario) | ✅ |
 | Protocols inspected | 15+ | **21** | ✅ |
 | ATT&CK techniques | 12 | **15** across 9 tactics | ✅ |
-| SQLite tables | 8 | **8**, all written by the pipeline | ✅ |
-| Indexes | — | **25**, usage asserted by `EXPLAIN QUERY PLAN` | ✅ |
+| Tables | 8 | **8**, all written by the pipeline | ✅ |
+| Indexes | — | **25**, usage asserted by `EXPLAIN` on a 40k-row dataset | ✅ |
 | REST endpoints | 14+ | **24** | ✅ |
 | Dashboard modules | 8+ | **9** | ✅ |
-| Throughput | 5,000 pkt/min | **315,115 pkt/min median = 5,252 pkt/s** (4,567–7,555 pkt/s) | ✅ |
-| Query latency | < 50 ms | **p50 0.08 ms · p95 0.64 ms · max 0.75 ms** | ✅ |
+| Throughput | 5,000 pkt/min | **377,498 pkt/min median = 6,292 pkt/s** (5,875–7,080 pkt/s) | ✅ |
+| Query latency | < 50 ms | **p50 0.33 ms · p95 10.69 ms · max 16.78 ms** | ✅ |
 | Alert-volume reduction | — | **96.1%** (621 → 24), **0 incidents lost** | ✅ |
 | False positives | — | **0** across 240,000 benign packets, 8 seeds | ✅ |
 
 At a larger scale — 248,028 packets and 3,776 alerts, produced by relaxing
 detector cooldowns so more real detections are retained — latency stays within
-target: **p50 0.45 ms, p95 3.63 ms, p99 4.00 ms, max 5.60 ms**, throughput
-278,919 pkt/min.
+target: **p50 1.27 ms, p95 14.51 ms, p99 17.26 ms, max 19.12 ms**, throughput
+338,563 pkt/min median.
 
 ```bash
 # reproduce the scale run
@@ -133,8 +170,46 @@ EOF
 NETWATCH_CONFIG=lowcooldown.json python benchmark.py --iterations 6 --packets 40000
 ```
 
+### What moving from SQLite to PostgreSQL cost
+
+Both columns are the same command on the same machine, five iterations of 20,000
+packets, ending at 106,690 packets:
+
+| | SQLite (file) | PostgreSQL 16 (same host) | Change |
+|---|---|---|---|
+| Throughput, median | 383,876 pkt/min (6,398 pkt/s) | 377,498 pkt/min (6,292 pkt/s) | **−1.7%** |
+| Query latency p50 | 0.124 ms | 0.328 ms | +0.20 ms |
+| Query latency p95 | 0.677 ms | 10.692 ms | **+10.0 ms** |
+| `/api/stats/overview` p50 | 0.27 ms | 16.10 ms | +15.8 ms |
+| `/api/health` p50 | 0.29 ms | 9.32 ms | +9.0 ms |
+| Alert reduction | 96.1%, 0 incidents lost | 96.1%, 0 incidents lost | unchanged |
+
+**Write throughput is essentially unchanged.** Batched inserts through psycopg's
+pipeline mode cost about as much as SQLite's, because parse and detect dominate:
+27.9 µs and 15.6 µs per packet against a few µs of amortised write.
+
+**Read latency is an order of magnitude worse in the tail, and two endpoints
+account for almost all of it** — `/api/stats/overview` and `/api/health`, both of
+which count rows. PostgreSQL has no O(1) `COUNT(*)`: it scans. SQLite, on a small
+local file with the whole thing in page cache, effectively did not. Collapsing
+each endpoint from a dozen separate statements into one statement of scalar
+subqueries cut the overall p95 by 25% and is why the numbers are 10 ms rather
+than 20 ms, but the scan remains.
+
+This is a real regression and it grows with row count: at 248,028 packets
+`/api/stats/overview` is 16.3 ms. It is still **3–5× inside the 50 ms target**,
+every other endpoint is at or below 2 ms, and retention bounds the tables — so it
+is accepted rather than worked around. The available fix, `pg_class.reltuples`,
+returns an estimate, and both the container healthcheck and the test suite read
+exact counts from `/api/health`. Worth revisiting for a deployment that keeps
+enough history to push it past a few hundred thousand packets.
+
+In exchange: concurrent writers, real type enforcement, queryable `JSONB`,
+counters that do not overflow at 2.1 GB, a database that is not tied to a
+filesystem, and an API tier that can span hosts.
+
 Throughput is measured end-to-end — parse **and** detect **and** batched
-SQLite persistence — over `--iterations` independent runs, reported as mean,
+PostgreSQL persistence — over `--iterations` independent runs, reported as mean,
 median, min, max and standard deviation, in **both packets/minute and
 packets/second**. Prefer the median and quote the range with it: on a shared
 or throttled machine the spread between runs is wide (here 4,567–7,555 pkt/s
@@ -325,22 +400,47 @@ Two invariants are enforced by tests:
 
 ## Database — 8 tables
 
-Every table is written by the live pipeline; this is asserted by
+PostgreSQL 16. Every table is written by the live pipeline; this is asserted by
 `test_all_eight_tables_are_actually_populated`.
 
 | # | Table | Purpose | Key indexes |
 |---|---|---|---|
-| 1 | `packets` | Every processed packet with decoded L7 summary | `ts`, `(src_ip,ts)`, `(dst_ip,ts)`, `(protocol,ts)`, `(is_malicious,ts)` |
-| 2 | `connections` | Flow records keyed on the 5-tuple, upserted per batch | `last_seen`, `(src_ip,last_seen)`, `bytes` |
+| 1 | `packets` | Every processed packet with decoded L7 summary (`JSONB`) | `ts`, `(src_ip,ts)`, `(dst_ip,ts)`, `(protocol,ts)`, `(is_malicious,ts)` partial, `(src_ip,protocol) INCLUDE (frame_len)` |
+| 2 | `connections` | Flow records keyed on the 5-tuple, upserted per batch | `last_seen`, `(src_ip,last_seen)`, `bytes`, `(src_ip,dst_ip) INCLUDE (packets,bytes)` |
 | 3 | `hosts` | Host inventory, geo enrichment, rollup counters, threat score | `country`, `packets_sent`, `threat_score` |
-| 4 | `alerts` | Detector findings with JSON evidence | `ts`, `(severity,ts)`, `(threat_type,ts)`, `(src_ip,ts)`, `(acknowledged,ts)` |
+| 4 | `alerts` | Detector findings with `JSONB` evidence | `ts`, `(severity,ts)`, `(threat_type,ts)`, `(src_ip,ts)`, `(acknowledged,ts)` partial, GIN on `evidence` |
 | 5 | `mitre_techniques` | ATT&CK catalog (reference table) | `tactic` |
 | 6 | `alert_techniques` | Many-to-many alert↔technique with confidence | `(technique_id,ts)`, `ts` |
 | 7 | `protocol_stats` | Per-minute protocol rollup backing the charts | `bucket` |
 | 8 | `performance_metrics` | Measured throughput and query latency | `ts`, `(source,ts)` |
 
-**25 indexes.** WAL journal mode, one long-lived writer connection under a lock
-plus thread-local reader connections, and foreign keys enforced.
+**25 indexes.** PostgreSQL is unconditionally write-ahead logged; foreign keys
+are enforced without being asked. Reads come from a pooled connection per
+caller, so the Flask worker's threads query in parallel; writes go through one
+connection, because the pipeline writes one transaction per batch and — by
+design, enforced by `gunicorn.conf.py` — there is exactly one engine process.
+
+### Type choices
+
+| Column kind | Type | Why |
+|---|---|---|
+| Surrogate keys | `BIGINT GENERATED ALWAYS AS IDENTITY` | `packets` reaches 2³¹ rows at a few thousand packets a second |
+| Byte and packet counters | `BIGINT` | **SQLite's `INTEGER` is 64-bit; PostgreSQL's is 32-bit.** `hosts.bytes_sent` and `connections.bytes` are cumulative and would have overflowed at 2.1 GB |
+| `is_malicious`, `is_internal`, `acknowledged` | `BOOLEAN` | Were 0/1 integers under SQLite's dynamic typing |
+| `evidence`, `l7_summary` | `JSONB` | Were `TEXT` holding `json.dumps()` output. Queryable and indexable, and the driver parses them for free |
+| Timestamps | `DOUBLE PRECISION` epoch seconds, plus a generated `ts_utc TIMESTAMPTZ` | See below |
+| Severity | `TEXT` + `CHECK` | Five known values; an enum type would need a migration to extend |
+
+**On timestamps.** Every detector's sliding-window arithmetic, every API
+`?since=` parameter and every dashboard chart computes on epoch seconds, and
+epoch seconds are UTC by definition — there is no timezone to get wrong, which
+is the usual reason to reach for `TIMESTAMPTZ`. So they stay `DOUBLE PRECISION`,
+and `alerts` and `performance_metrics` carry a generated
+`ts_utc TIMESTAMPTZ GENERATED ALWAYS AS (to_timestamp(ts)) STORED` alongside, so
+ad-hoc SQL and reporting tools get a real timestamp type without the ingest path
+paying a conversion on every packet. `test_timestamps_are_available_as_timestamptz`
+asserts the two agree. On the high-volume tables, `to_timestamp(ts)` in a query
+is enough.
 
 ### Design notes
 
@@ -354,14 +454,117 @@ plus thread-local reader connections, and foreign keys enforced.
   asserts the rollup agrees with the raw rows.
 - **Batched writes.** One transaction per batch rather than per packet; this is
   the single largest throughput factor.
-- **Index usage is tested, not assumed** — `test_hot_queries_use_an_index` runs
-  `EXPLAIN QUERY PLAN` over the hot queries and fails on a full table scan.
+- **Partial indexes where the query only wants the minority.** The dashboard
+  asks for open alerts and malicious packets, never their complements, so
+  `idx_alerts_ack` and `idx_packets_malicious` index only those rows and stay
+  small on a write path that sees every packet.
+- **The GIN index on `alerts.evidence`** is for analyst SQL such as
+  `WHERE evidence @> '{"dst_port": 445}'`; no shipped query uses it. There is
+  deliberately none on `packets.l7_summary` — that table takes every packet, and
+  a GIN index on it would cost far more in write throughput than ad-hoc queries
+  are worth.
+- **Foreign keys say what happens on delete.** `alert_techniques.alert_id`
+  cascades from `alerts`, so retention takes technique links with it;
+  `technique_id` is `RESTRICT`, so removing a technique the alerts still cite is
+  an error rather than a silent orphan or a silent cascade of real findings.
+- **Index usage is tested, not assumed** — `test_hot_queries_use_their_index`
+  runs `EXPLAIN` over the hot queries and fails on a table scan. It uses a
+  bulk-loaded 40k-packet, 12k-alert dataset rather than the pipeline fixture:
+  PostgreSQL's planner is cost-based, and on a few thousand rows a sequential
+  scan genuinely is cheaper, so a smaller dataset would only prove the planner
+  had too little information to decide.
+
+### Migrations
+
+The schema lives in numbered SQL files, not in application code:
+
+```
+migrations/postgresql/0001_initial_schema.sql
+migrations/sqlite/0001_initial_schema.sql
+```
+
+```bash
+python migrate.py status          # what is applied and what is pending
+python migrate.py up              # apply everything pending
+python migrate.py up --backend sqlite
+```
+
+`DatabaseManager` applies pending migrations on startup, which keeps local
+development and the test suite frictionless. Set `NETWATCH_AUTO_MIGRATE=0` where
+migrations should be an explicit release step — in particular with more than one
+instance, or concurrent boots race each other.
+
+**To change the schema:**
+
+1. Add `migrations/postgresql/000N_what_it_does.sql`, and the matching
+   `migrations/sqlite/000N_*.sql`. Both must exist with the same version number
+   — `test_every_migration_exists_for_both_backends` fails otherwise. Where a
+   change genuinely cannot be expressed in SQLite, write the file anyway and let
+   it document why it is a no-op there.
+2. Update the queries in `DB_Manager.py`, in the shared dialect documented at
+   the top of `db_backends.py`.
+3. Run `pytest` against PostgreSQL and again with `DB_BACKEND=sqlite`.
+
+**Never edit an applied migration.** Each file's checksum is recorded, and a
+later run reports any that has changed rather than silently diverging from the
+database it created. There are no down-migrations: reversing a schema change on
+a live database is a decision to make deliberately, as a new forward migration,
+not a script to run under pressure.
+
+### SQLite fallback (development only)
+
+`DB_BACKEND=sqlite` runs everything against a local file with no server:
+
+```bash
+DB_BACKEND=sqlite python App.py
+DB_BACKEND=sqlite pytest
+```
+
+It exists for fast local work and for `docker build`, which has no database to
+reach. **It is not supported for production**, and the differences are real:
+
+- **No `JSONB`.** `evidence` and `l7_summary` are `TEXT`, so they cannot be
+  queried or indexed by key, and there is no counterpart to the GIN index —
+  hence 24 indexes there against PostgreSQL's 25.
+- **No type enforcement.** SQLite types are affinities, so a wrong value lands
+  in a column silently where PostgreSQL would reject it. This is the single
+  best reason the test suite defaults to PostgreSQL.
+- **32-bit vs 64-bit is the other way round.** SQLite's `INTEGER` holds 64 bits,
+  so an overflow that PostgreSQL forced into the open was invisible here.
+- **One writer at a time**, with the whole database locked behind it.
+- **The planner differs.** It is far more index-eager, and picks different
+  indexes for the same query; the plan tests accommodate both.
+
+Tests that assert PostgreSQL-specific behaviour skip themselves under this
+backend, so a green SQLite run is a weaker signal than a green PostgreSQL one.
+CI runs both.
+
+### Migrating an existing SQLite database
+
+All of this project's data is synthetic — `PacketSimulator` generates it, the
+demo starts empty on every cold start — so **there is nothing in the repository
+that needs migrating**, and most people can skip this. For an instance that has
+been running long enough for its `netwatch.db` to be worth keeping:
+
+```bash
+python migrate_sqlite_to_postgres.py --sqlite ./netwatch.db --dry-run
+python migrate_sqlite_to_postgres.py --sqlite ./netwatch.db
+```
+
+It reads in batches, converts 0/1 to `BOOLEAN` and JSON text to `jsonb`, inserts
+with `ON CONFLICT DO NOTHING` so a re-run copies only what is missing, verifies
+every table's row count against the source, and advances the identity sequences
+past the copied ids so later writes cannot collide. The SQLite file is opened
+read-only and is never modified, so it stays a fallback. Migrate into an empty
+database: rows keep their original ids, so a destination already holding
+different rows at those ids reports the shortfall rather than merging two
+histories.
 
 ---
 
 ## REST API — 24 endpoints
 
-All read from SQLite. Empty database returns empty collections, never filler.
+All read from PostgreSQL. Empty database returns empty collections, never filler.
 Invalid parameters return `400` with a message; unknown resources return `404`.
 
 | Method | Route | Notes |
@@ -418,19 +621,39 @@ the ATT&CK mapping *with its rationale*, and the related packets.
 
 ## Testing
 
+The suite runs against a **real PostgreSQL server**, because the differences
+that matter — strict typing, `JSONB`, boolean columns, the planner's choices —
+are invisible to a test that only ever sees SQLite.
+
 ```bash
+docker compose up -d postgres           # or point at any server you like
+export TEST_DATABASE_URL=postgresql://netwatch:netwatch@localhost:5432/netwatch
+
 pytest                                  # full suite
 pytest tests/test_detectors.py -v       # every detector + false-positive control
-pytest tests/test_database.py -v        # schema, indexes, query plans, latency
+pytest tests/test_database.py -v        # schema, types, indexes, query plans, latency
 pytest tests/test_benchmark.py -v       # targets met, alert reduction lossless
+
+DB_BACKEND=sqlite pytest                # the fallback; PostgreSQL-only tests skip
 ```
+
+`TEST_DATABASE_URL` falls back to `DATABASE_URL`, and to
+`postgresql://netwatch:netwatch@localhost:5432/netwatch` — the compose service's
+own credentials — if neither is set.
+
+**The suite never writes to the database you name.** It creates
+`netwatch_test_*` databases alongside it and drops them at the end, so pointing
+it at a development database cannot destroy its contents. Two are used: one
+truncated before every test that wants an empty database, and one filled once by
+the pipeline for the many tests that only read. `TRUNCATE` costs far less than
+`CREATE DATABASE`, and the suite asks for an empty database a few hundred times.
 
 | File | Covers |
 |---|---|
 | `test_protocol_analyzer.py` | Every protocol, entropy, malformed/truncated input |
 | `test_detectors.py` | Each detector fires on its scenario; negative cases; thresholds; state bounding; detector isolation |
 | `test_mitre.py` | Catalog integrity, no orphans, no invented IDs, DB linkage |
-| `test_database.py` | 8 tables populated, rollup consistency, index usage, <50 ms, transactionality |
+| `test_database.py` | 8 tables populated, column types and constraints enforced, JSONB queryable, 64-bit counters, `ts_utc` correctness, rollup consistency, index usage at scale, <50 ms, transactionality |
 | `test_api.py` | All endpoints, schemas, pagination, 400/404, SQL injection |
 | `test_dashboard.py` | Each module wired to a working endpoint, escaping, no mock data |
 | `test_benchmark.py` | Determinism, targets met, results persisted; alert-reduction baseline is threshold-identical and suppression loses no incident |
@@ -439,7 +662,7 @@ pytest tests/test_benchmark.py -v       # targets met, alert reduction lossless
 | `test_retention.py` | Expiry per table, no orphaned technique links, loop prunes only when configured |
 | `test_backfill.py` | History stays inside its window, all threat types present, no future timestamps |
 | `test_simulator_loop.py` | Live-window alert accounting, clean shutdown |
-| `test_deployment.py` | Image contains every imported module; compose profiles, ports and gunicorn settings are valid; Blueprint is hardened |
+| `test_deployment.py` | Image contains every imported module and the migrations; every migration exists for both backends; database service pinned with a healthcheck and waited on; compose profiles, ports and gunicorn settings are valid; Blueprint is hardened |
 
 Fixtures are seeded (`TrafficGenerator(seed=…)` reproduces byte-identical
 traffic), and the attack scenarios double as ground truth: each has a known
@@ -452,15 +675,34 @@ expected threat type, asserted end to end.
 ### Containers
 
 ```bash
+docker compose up -d postgres                       # just the database, for local dev
 docker compose --profile all-in-one up -d --build   # engine + API in one process
-docker compose --profile split up -d --build        # one engine, two read-only API replicas
-docker compose --profile test run --rm tests
+docker compose --profile split up -d --build        # one engine, two API replicas
+docker compose --profile test run --rm tests        # the suite, against that database
 ```
 
-Each compose service belongs to exactly one profile, so the two topologies can
-never both start an engine against the same database. The image runs as a
-non-root user; the compose file adds a read-only root filesystem and drops all
-Linux capabilities.
+Every application service belongs to exactly one profile, so the two topologies
+can never both start an engine against the same database; `postgres` is in all of
+them, because a shared database is infrastructure rather than a topology. The
+image runs as a non-root user and writes nothing to disk — the database is
+outside the container, so `DATABASE_URL` is all it needs — and the compose file
+adds a read-only root filesystem and drops all Linux capabilities.
+
+The bundled `postgres` service is **for development**. In a real deployment point
+`DATABASE_URL` at a managed instance and do not start it: you want someone else
+running backups, failover and minor-version upgrades. Use `PG_SSLMODE=require`
+(`verify-full` if you can pin the CA) whenever the connection leaves the host.
+
+**Connection budget.** PostgreSQL's default `max_connections` is 100 and each
+connection costs real memory. The split topology can hold
+`replicas × GUNICORN_WORKERS × PG_POOL_MAX` (2 × 4 × 4 = 32) plus the engine's 2.
+Raise `max_connections`, or put pgbouncer in front, before scaling much past
+that.
+
+**The database is no longer tied to a filesystem**, which is what the split
+topology could not previously escape: under SQLite the engine and the API
+replicas had to share a volume that supported POSIX advisory locks, so they
+could not span hosts. Now they share only a connection string.
 
 ### Public demo
 
@@ -469,6 +711,9 @@ entirely through environment variables:
 
 | Variable | Effect |
 |---|---|
+| `DATABASE_URL` | PostgreSQL connection string, injected by Render from the managed database in the Blueprint |
+| `NETWATCH_AUTO_MIGRATE` | Apply pending migrations on startup (`1`); set `0` and run `python migrate.py up` as a release step with more than one instance |
+| `PG_POOL_MAX` | Reader pool ceiling per process; keep the tier's total inside the server's `max_connections` |
 | `NETWATCH_DEMO=1` | Refuse every non-GET request with 403; show a banner that the traffic is synthetic |
 | `NETWATCH_RETENTION_S` | Delete telemetry older than this many seconds (0 keeps everything) |
 | `NETWATCH_BACKFILL_MIN` | Generate this many minutes of history, with every attack scenario, at startup |
@@ -481,10 +726,12 @@ deployment are in [docs/demo-deployment.md](docs/demo-deployment.md).
 
 ### Continuous integration
 
-Every push runs the test suite on Python 3.11 and 3.12, the benchmark gates,
-both Dockerfile stages, and `scripts/smoke_test.sh` against the built image for
-the demo configuration and both compose topologies. Render deploys `main` only
-after these checks pass.
+Every push runs, on Python 3.11 and 3.12: the migrations from an empty database
+(and again, to prove they are idempotent), the test suite against a PostgreSQL
+service container, the suite a second time against the SQLite fallback, and the
+benchmark gates. Then both Dockerfile stages and `scripts/smoke_test.sh` against
+the built image, for the demo configuration and both compose topologies. Render
+deploys `main` only after these checks pass.
 
 ---
 
@@ -519,6 +766,14 @@ after these checks pass.
   reported, and nothing is extrapolated from them.
 - **The dev server is for demonstration.** It binds to `127.0.0.1` by default;
   the container image serves through gunicorn instead.
+- **Exact row counts get slower as the database grows.** PostgreSQL has no
+  O(1) `COUNT(*)`, so `/api/health` and `/api/stats/overview` scan to count. Both
+  are one statement of scalar subqueries rather than a dozen round trips, which
+  keeps them at roughly 5 ms p95 on the benchmark's dataset — well inside the
+  50 ms target, but growing with row count where SQLite's were flat. The obvious
+  fix, `pg_class.reltuples`, returns an estimate, and the container healthcheck
+  and the tests read exact counts from `/api/health`; retention bounds the tables
+  in the meantime. Revisit if a deployment keeps enough history for it to matter.
 - **There is no authentication.** The public demo is safe to expose only because
   demo mode makes it read-only and it holds no real data. The dashboard's inline
   event handlers still require `'unsafe-inline'` in the Content-Security-Policy;
