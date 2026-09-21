@@ -1,0 +1,161 @@
+<form theme="dark" version="1.1">
+  <label>NetWatch SOC - Detection Overview</label>
+  <description>
+    Network detections from the NetWatch engine. One event per deduplicated
+    detection; incident_key is a correlation field derived by the forwarder,
+    not a stored column. src_ip is the address the detector recorded, which is
+    not always the attacker - see the README before reading it that way.
+  </description>
+
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="tr">
+      <label>Time range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="multiselect" token="sev_tok" searchWhenChanged="true">
+      <label>Severity</label>
+      <choice value="*">All</choice>
+      <choice value="CRITICAL">CRITICAL</choice>
+      <choice value="HIGH">HIGH</choice>
+      <choice value="MEDIUM">MEDIUM</choice>
+      <choice value="LOW">LOW</choice>
+      <choice value="INFO">INFO</choice>
+      <default>*</default>
+      <prefix>(</prefix>
+      <suffix>)</suffix>
+      <valuePrefix>severity="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+    </input>
+  </fieldset>
+
+  <!-- Row 1: trend + severity -->
+  <row>
+    <panel>
+      <title>ATT&amp;CK tactic trend</title>
+      <chart>
+        <search>
+          <query>
+index=netwatch sourcetype=netwatch:incident $sev_tok$
+| spath output=tactic path=tactics{}
+| mvexpand tactic
+| timechart span=1h count AS detections by tactic
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Detections</option>
+        <option name="charting.legend.placement">right</option>
+      </chart>
+    </panel>
+
+    <panel>
+      <title>Severity breakdown</title>
+      <chart>
+        <search>
+          <query>
+index=netwatch sourcetype=netwatch:incident $sev_tok$
+| stats count AS detections dc(incident_key) AS incidents by severity severity_rank
+| sort severity_rank
+| fields - severity_rank
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.axisTitleX.text">Severity</option>
+        <option name="charting.axisTitleY.text">Count</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- Row 2: hosts + coverage -->
+  <row>
+    <panel>
+      <title>Top source hosts (address the detector recorded, not an attacker verdict)</title>
+      <table>
+        <search>
+          <query>
+index=netwatch sourcetype=netwatch:incident $sev_tok$
+| stats dc(incident_key) AS incidents count AS detections
+        values(threat_type) AS threat_types min(severity_rank) AS worst
+        latest(_time) AS last_seen
+        by src_ip src_zone
+| eval worst_severity=case(worst==1,"CRITICAL",worst==2,"HIGH",worst==3,"MEDIUM",worst==4,"LOW",worst==5,"INFO")
+| eval last_seen=strftime(last_seen,"%F %T")
+| fields src_ip src_zone worst_severity incidents detections threat_types last_seen
+| sort - incidents - detections
+| head 10
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="drilldown">cell</option>
+        <option name="count">10</option>
+        <format type="color" field="worst_severity">
+          <colorPalette type="map">{"CRITICAL":#DC4E41,"HIGH":#F1813F,"MEDIUM":#F8BE34,"LOW":#6DB7C6,"INFO":#708794}</colorPalette>
+        </format>
+        <format type="color" field="src_zone">
+          <colorPalette type="map">{"internal":#F8BE34,"external":#708794}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Tactic x technique coverage</title>
+      <table>
+        <search>
+          <query>
+index=netwatch sourcetype=netwatch:incident $sev_tok$
+| spath output=pair path=tactic_technique{}
+| mvexpand pair
+| eval tactic=mvindex(split(pair,"|"),0), technique_id=mvindex(split(pair,"|"),1)
+| stats dc(incident_key) AS incidents count AS detections
+        values(threat_type) AS detectors
+        by tactic technique_id
+| sort tactic technique_id
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="drilldown">cell</option>
+        <option name="count">20</option>
+      </table>
+    </panel>
+  </row>
+
+  <!-- Row 3: the queue -->
+  <row>
+    <panel>
+      <title>Recent incidents</title>
+      <table>
+        <search>
+          <query>
+index=netwatch sourcetype=netwatch:incident $sev_tok$
+| sort - _time
+| head 50
+| eval endpoints=src_ip." -> ".dst_ip
+| table _time severity threat_type detector endpoints src_zone dst_zone protocol confidence description incident_key alert_id
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="drilldown">cell</option>
+        <option name="count">25</option>
+        <option name="wrap">true</option>
+        <format type="color" field="severity">
+          <colorPalette type="map">{"CRITICAL":#DC4E41,"HIGH":#F1813F,"MEDIUM":#F8BE34,"LOW":#6DB7C6,"INFO":#708794}</colorPalette>
+        </format>
+      </table>
+    </panel>
+  </row>
+</form>
