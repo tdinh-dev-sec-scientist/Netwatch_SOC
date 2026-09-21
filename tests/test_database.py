@@ -550,3 +550,111 @@ def test_separate_manager_sees_committed_rows(db, simulator, second_manager):
         (BASE_TS, F.tcp_frame(b'hello', '10.0.1.9', '10.0.2.9', 40000, 80))])
     other = second_manager(db)
     assert other.health()['tables']['packets'] >= 1
+
+
+# ── migrations ───────────────────────────────────────────────────────────────
+
+def test_migrations_are_recorded_and_idempotent(db):
+    """A second run must be a no-op, which is what makes applying them on every
+    process start safe."""
+    import migrate
+    recorded = migrate.applied(db._backend, db._backend.writer())
+    assert recorded, 'no migration was recorded'
+    assert '0001' in recorded
+    assert db.migrate() == [], 'a second run applied something'
+
+
+def test_editing_an_applied_migration_is_refused(db, monkeypatch):
+    """The checksum guard: a migration that changed after being applied is
+    reported rather than silently diverging from the database it created."""
+    import migrate
+    real = migrate.discover
+
+    def tampered(directory):
+        migrations = real(directory)
+        migrations[0].checksum = 'deadbeefdeadbeef'
+        return migrations
+
+    monkeypatch.setattr(migrate, 'discover', tampered)
+    with pytest.raises(migrate.MigrationError, match='never be edited'):
+        db.migrate()
+
+
+@requires_postgres
+def test_concurrent_startups_do_not_race_to_migrate(scratch):
+    """Two processes booting together must not both try to create the schema.
+
+    Before the advisory lock one of them failed on a relation that already
+    existed, which turned a routine restart into a crash loop.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from DB_Manager import DatabaseManager
+
+    target = scratch.target('race')
+    managers = []
+    try:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(DatabaseManager, target) for _ in range(4)]
+            managers = [f.result() for f in futures]        # raises on a race
+        assert set(managers[0].table_names()) == EXPECTED_TABLES
+        # Exactly one of them did the work; the rest found nothing to do.
+        assert sum(1 for m in managers if m.migrate() != []) == 0
+    finally:
+        for manager in managers:
+            manager.close()
+
+
+# ── boolean filters ──────────────────────────────────────────────────────────
+
+def test_malicious_only_filter_selects_flagged_packets(db, simulator, gen):
+    """is_malicious is a real BOOLEAN now, and the filter is a bare column
+    reference rather than a comparison against 1."""
+    frames = gen.background(400, start_ts=BASE_TS)
+    frames.extend(gen.scenario('port_scan', start_ts=BASE_TS + 5))
+    frames.sort(key=lambda pair: pair[0])
+    simulator.run_frames(frames)
+
+    flagged = db.get_packets(limit=500, malicious_only=True)
+    assert flagged, 'the scan produced no packets flagged malicious'
+    # Truthiness rather than `is True`: SQLite has no boolean type and hands
+    # back 1/0. test_boolean_columns_read_back_as_python_bools covers the type.
+    assert all(p['is_malicious'] for p in flagged)
+
+    everything = db.get_packets(limit=1000)
+    assert len(everything) > len(flagged), \
+        'malicious_only did not narrow the result'
+    assert any(not p['is_malicious'] for p in everything)
+
+
+def test_acknowledged_filter_round_trips_as_a_boolean(db, simulator, gen):
+    frames = gen.scenario('port_scan', start_ts=BASE_TS)
+    simulator.run_frames(frames)
+    alert_id = db.get_alerts(limit=1)['alerts'][0]['id']
+
+    assert db.get_alerts(limit=50, acknowledged=True)['total'] == 0
+    open_before = db.get_alerts(limit=50, acknowledged=False)['total']
+    assert open_before > 0
+
+    assert db.acknowledge_alert(alert_id) == 1
+    assert db.get_alerts(limit=50, acknowledged=True)['total'] == 1
+    assert db.get_alerts(limit=50, acknowledged=False)['total'] == \
+        open_before - 1
+    assert db.get_alert(alert_id)['acknowledged']
+    assert db.get_alert(alert_id)['ack_ts'] is not None
+
+
+@requires_postgres
+def test_boolean_columns_read_back_as_python_bools(db, simulator, gen):
+    """Native BOOLEAN columns, so the API emits JSON true/false rather than
+    the 1/0 SQLite's dynamic typing produced."""
+    frames = gen.background(300, start_ts=BASE_TS)
+    frames.extend(gen.scenario('port_scan', start_ts=BASE_TS + 5))
+    frames.sort(key=lambda pair: pair[0])
+    simulator.run_frames(frames)
+
+    packet = db.get_packets(limit=1)[0]
+    assert isinstance(packet['is_malicious'], bool)
+    alert = db.get_alerts(limit=1)['alerts'][0]
+    assert isinstance(alert['acknowledged'], bool)
+    host = db.get_top_hosts(limit=1)[0]
+    assert isinstance(host['is_internal'], bool)

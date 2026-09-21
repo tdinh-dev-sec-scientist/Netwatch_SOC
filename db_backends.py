@@ -38,6 +38,7 @@ otherwise be silently wrong:
     TRUE/FALSE        boolean literals, not 0/1
 """
 
+import contextlib
 import json
 import os
 import re
@@ -335,6 +336,17 @@ class Backend:
         benchmark against a database they own.
         """
         raise NotImplementedError
+
+    @contextlib.contextmanager
+    def migration_lock(self, conn):
+        """Hold an exclusive lock for the duration of applying migrations.
+
+        Two processes starting at once would otherwise both find the same
+        migration pending and both try to apply it, and one would fail on a
+        relation that already exists. Serialising them makes the loser see an
+        up-to-date database and do nothing.
+        """
+        yield
 
     @property
     def migrations_dir(self):
@@ -648,6 +660,35 @@ class PostgresBackend(Backend):
         quoted = ', '.join('"%s"' % t for t in tables)
         self.execute(conn, 'TRUNCATE %s RESTART IDENTITY CASCADE' % quoted)
         self.commit(conn)
+
+    # An arbitrary but fixed pair of 32-bit integers identifying this
+    # application's migration lock. Advisory locks are just numbers to
+    # PostgreSQL; the only requirement is that everyone agrees on which.
+    _MIGRATION_LOCK = (0x4E57_5443, 0x4D49_4752)     # 'NWTC', 'MIGR'
+
+    @contextlib.contextmanager
+    def migration_lock(self, conn):
+        # pg_advisory_lock, not pg_advisory_xact_lock: each migration is its own
+        # transaction and the lock has to span all of them. A session-level
+        # advisory lock survives the commit below, which is what allows that.
+        #
+        # SET LOCAL, so the allowance applies to the lock wait alone and is
+        # reverted by that same commit. PG_STATEMENT_TIMEOUT_MS is sized for
+        # queries, and waiting behind another instance's migration is not one.
+        self.execute(conn, 'SET LOCAL statement_timeout = 120000')
+        self.execute(conn, 'SELECT pg_advisory_lock(?, ?)',
+                     self._MIGRATION_LOCK)
+        self.commit(conn)
+        try:
+            yield
+        finally:
+            # Unlock on the way out however we got here, or the next process to
+            # start would wait behind a lock nobody holds a reason for.
+            try:
+                self.execute(conn, 'SELECT pg_advisory_unlock(?, ?)',
+                             self._MIGRATION_LOCK)
+            finally:
+                self.commit(conn)
 
     def analyze(self, conn):
         previous = conn.autocommit
