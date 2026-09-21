@@ -58,7 +58,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONHASHSEED=random \
     PATH="/opt/venv/bin:${PATH}" \
-    NETWATCH_DB=/data/netwatch.db
+    DB_BACKEND=postgresql
 
 # Patch the base OS, then drop apt state. No compilers or package managers are
 # needed at runtime — the application is pure Python and the venv is prebuilt.
@@ -83,22 +83,27 @@ WORKDIR /app
 # compose service runs, is missing from this list. engine.py was once left out,
 # which broke the split topology at `docker compose --profile split up`.
 COPY --chown=${APP_UID}:${APP_GID} App.py DB_Manager.py PacketSimulator.py \
-     ProtocolAnalyzer.py ThreatDetector.py benchmark.py config.py engine.py \
-     frames.py geoip.py hardening.py mitre.py gunicorn.conf.py ./
+     ProtocolAnalyzer.py ThreatDetector.py benchmark.py config.py \
+     db_backends.py engine.py frames.py geoip.py hardening.py migrate.py \
+     mitre.py gunicorn.conf.py ./
 COPY --chown=${APP_UID}:${APP_GID} detectors/ ./detectors/
+# The schema lives in versioned SQL, not in the application, so the image
+# cannot create its database without these.
+COPY --chown=${APP_UID}:${APP_GID} migrations/ ./migrations/
 COPY --chown=${APP_UID}:${APP_GID} templates/ ./templates/
 COPY --chown=${APP_UID}:${APP_GID} static/ ./static/
 
 USER ${APP_UID}:${APP_GID}
 
-# The SQLite database, its WAL and its shared-memory file all live here. Must
-# be a writable mount; everything else can be a read-only filesystem.
-VOLUME ["/data"]
+# The database is PostgreSQL and lives outside the container, so this image
+# stores nothing and needs no volume: DATABASE_URL is all it wants. The
+# read-only root filesystem the compose file applies is therefore enough.
 
 EXPOSE 5001
 
 # Verifies the application answers *and* that its schema is intact — a process
-# that is listening but has lost its database is not healthy.
+# that is listening but cannot reach its database is not healthy. table_count
+# comes from the live connection, so this fails if PostgreSQL is unreachable.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import json,os,sys,urllib.request;\
 u='http://127.0.0.1:%s/api/health' % os.environ.get('PORT','5001');\

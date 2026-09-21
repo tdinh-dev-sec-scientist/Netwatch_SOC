@@ -6,21 +6,26 @@ The important thing this file does is protect a real architectural constraint.
 `App.create_app()` starts the packet-capture/detection engine on a background
 thread *inside the process that calls it*. Gunicorn calls it once per worker.
 So with N workers you get N independent engines, each generating its own
-traffic and writing to the same SQLite file: duplicated packet rows, duplicated
-alerts, and N processes contending for the writer lock.
+traffic and writing it: N times the packet rows and N times the alerts, from
+what is meant to be one view of one network.
 
-That is silent corruption, not a crash, so `on_starting` refuses to boot the
-combination rather than letting it run. Two supported topologies:
+PostgreSQL would accept those concurrent writers without complaint — this is no
+longer a database limitation, as it was under SQLite's single writer — which is
+exactly why it has to be caught here. Duplicated telemetry is silently wrong
+data, not a crash, so `on_starting` refuses to boot the combination. Two
+supported topologies:
 
   1. All-in-one (default) — one worker, many threads. The engine and the API
-     share a process; SQLite has exactly one writer. Threads are the right
-     concurrency primitive here because every request is a short, GIL-releasing
-     SQLite read (p95 well under a millisecond).
+     share a process. Threads are the right concurrency primitive because every
+     request is a short, GIL-releasing database read (p95 around a millisecond).
+     Keep PG_POOL_MAX at or above GUNICORN_THREADS so concurrent requests are
+     not queueing for a connection.
 
   2. Split — a dedicated engine container (NETWATCH_SIMULATE=1, no HTTP) plus
-     read-only API workers (NETWATCH_SIMULATE=0, workers > 1) over a shared
-     volume. SQLite WAL supports one writer with many concurrent readers, so
-     this scales the API without touching the write path.
+     API workers (NETWATCH_SIMULATE=0, workers > 1). Under PostgreSQL these no
+     longer need to share a filesystem, only DATABASE_URL, so they can run on
+     separate hosts. Size the pool for the whole tier: workers x threads
+     connections at most, against the server's max_connections.
 
 Overridable via environment: GUNICORN_WORKERS, GUNICORN_THREADS,
 GUNICORN_TIMEOUT, GUNICORN_LOGLEVEL, NETWATCH_BIND.
@@ -38,6 +43,19 @@ def _int_env(name, default):
         return int(raw)
     except ValueError:
         raise SystemExit('%s must be an integer, got %r' % (name, raw))
+
+
+def _redacted_target():
+    """The configured database, with any password removed, for the log line."""
+    url = os.environ.get('DATABASE_URL')
+    if url:
+        # Imported lazily so this config file stays loadable without the app's
+        # dependencies present (tests exec it with runpy).
+        import db_backends
+        return db_backends.redact(url)
+    if os.environ.get('DB_BACKEND') == 'sqlite':
+        return os.environ.get('NETWATCH_DB', '<default sqlite file>')
+    return os.environ.get('PG_DB', '<unset>')
 
 
 def _simulation_enabled():
@@ -111,13 +129,15 @@ def on_starting(server):
         server.log.error(
             'Refusing to start: NETWATCH_SIMULATE is on with %d workers.\n'
             '  Each worker would start its own capture/detection engine and '
-            'write to the same SQLite database,\n'
-            '  producing duplicated packets and alerts plus writer-lock '
-            'contention.\n'
+            'write to the same database,\n'
+            '  so every packet and alert would be recorded %d times. '
+            'PostgreSQL accepts the concurrent\n'
+            '  writes happily, which is why this has to be refused here '
+            'rather than by the database.\n'
             '  Either set GUNICORN_WORKERS=1 (all-in-one), or run a dedicated '
             'engine container and set\n'
             '  NETWATCH_SIMULATE=0 on these API workers (split topology).',
-            workers)
+            workers, workers)
         raise SystemExit(1)
 
     if workers > 1 and workers > multiprocessing.cpu_count() * 2 + 1:
@@ -125,10 +145,19 @@ def on_starting(server):
             'GUNICORN_WORKERS=%d exceeds the usual 2*CPU+1 ceiling (%d CPUs)',
             workers, multiprocessing.cpu_count())
 
+    pool_max = _int_env('PG_POOL_MAX', 10)
+    if os.environ.get('DB_BACKEND', 'postgresql') != 'sqlite' \
+            and pool_max < threads:
+        server.log.warning(
+            'PG_POOL_MAX=%d is below GUNICORN_THREADS=%d, so requests will '
+            'queue waiting for a database connection', pool_max, threads)
+
     server.log.info(
-        'NetWatch SOC starting: workers=%d threads=%d simulation=%s db=%s',
+        'NetWatch SOC starting: workers=%d threads=%d simulation=%s '
+        'backend=%s db=%s',
         workers, threads, 'on' if _simulation_enabled() else 'off',
-        os.environ.get('NETWATCH_DB', '<default>'))
+        os.environ.get('DB_BACKEND', 'postgresql'),
+        _redacted_target())
 
 
 def worker_exit(server, worker):
