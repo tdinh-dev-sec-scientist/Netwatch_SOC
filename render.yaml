@@ -5,9 +5,23 @@
 #   docs/demo-deployment.md
 #
 # The Free plan (0.1 CPU, 512 MB) spins the service down after 15 minutes
-# without traffic and wipes the local filesystem when it does. That suits a
-# demo: every cold start begins from a fresh database, and the backfill below
-# gives it 15 minutes of history before the first visitor's page loads.
+# without traffic. The database is now a managed PostgreSQL instance rather
+# than a file on that ephemeral disk, so it survives the spin-down — but
+# NETWATCH_RETENTION_S keeps only the last hour, and the backfill below gives a
+# cold start 15 minutes of history before the first visitor's page loads.
+#
+# Render's free PostgreSQL plan expires after 30 days and is then deleted. For
+# a demo meant to stay up, either move to a paid instance or treat losing the
+# database as a non-event: the app recreates its schema from migrations/ on the
+# next start and the traffic is synthetic anyway.
+
+databases:
+  - name: netwatch-db
+    databaseName: netwatch
+    user: netwatch
+    plan: free
+    # Only the demo service may connect; no public ingress to the database.
+    ipAllowList: []
 
 services:
   - type: web
@@ -21,6 +35,24 @@ services:
     autoDeployTrigger: checksPass
     healthCheckPath: /api/health
     envVars:
+      # Render injects the connection string, including sslmode, from the
+      # database above. It is never written into this file or the image.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: netwatch-db
+          property: connectionString
+      - key: DB_BACKEND
+        value: "postgresql"
+      # Migrations run on startup. On a single-instance free service that is
+      # the simplest correct thing; with more than one instance, move this to
+      # an explicit release step (`python migrate.py up`) and set this to 0, or
+      # concurrent boots race each other.
+      - key: NETWATCH_AUTO_MIGRATE
+        value: "1"
+      # Four gunicorn threads plus the engine's writer, and comfortably inside
+      # the free plan's connection limit.
+      - key: PG_POOL_MAX
+        value: "5"
       # Read-only: every non-GET request is refused with 403.
       - key: NETWATCH_DEMO
         value: "1"

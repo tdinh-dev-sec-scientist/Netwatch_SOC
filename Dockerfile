@@ -42,7 +42,16 @@ ENV PATH="/opt/venv/bin:${PATH}"
 # ──────────────────────────────────────────────────────────────── test ───────
 # Optional CI target. Runs the suite inside the image being built, so a
 # regression fails the build rather than reaching a registry.
+#
+# `docker build` has no database to reach, so this pass uses the SQLite
+# fallback; the PostgreSQL-specific tests skip themselves. It is a smoke gate on
+# the image's contents, not the authoritative run — CI runs the full suite
+# against a real PostgreSQL service, and `docker compose --profile test run
+# --rm tests` runs this image's suite against the compose database.
 FROM builder AS test
+
+ENV DB_BACKEND=sqlite \
+    NETWATCH_DB=/tmp/netwatch-build-test.db
 
 WORKDIR /app
 COPY . .

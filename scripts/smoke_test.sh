@@ -9,6 +9,10 @@
 # Unit tests exercise the code; these exercise the deployment: the image, the
 # compose topologies and the demo configuration, which is where the engine.py,
 # port and gunicorn bugs lived while every unit test passed.
+#
+# The demo check needs a PostgreSQL server for the container to talk to, and
+# starts a throwaway one itself. The compose checks use the compose file's own
+# postgres service.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -54,8 +58,16 @@ engines_running() {             # containers whose environment turns the engine 
 }
 
 # ── demo: the exact environment render.yaml sets ──────────────────────────────
+# Render supplies DATABASE_URL from the managed database in the Blueprint, which
+# has no `value:` in the file to read, so this starts a throwaway PostgreSQL on
+# a private network and points the container at that instead. Everything else
+# comes verbatim from render.yaml.
+PG_IMAGE="${PG_IMAGE:-postgres:16.13-alpine}"
+
 smoke_demo() {
   local port=10000 url="http://127.0.0.1:10000" name=netwatch-smoke-demo
+  local pg=netwatch-smoke-pg net=netwatch-smoke-net
+  local pg_password=smoke-only-not-a-secret
   local env_args=()
   while IFS= read -r pair; do env_args+=(-e "$pair"); done < <(python3 - <<'PY'
 import re
@@ -66,10 +78,25 @@ PY
 )
   [ "${#env_args[@]}" -gt 0 ] || fail "no environment variables parsed from render.yaml"
 
-  docker rm -f "$name" >/dev/null 2>&1 || true
-  trap 'docker logs --tail 40 '"$name"' 2>&1 || true; docker rm -f '"$name"' >/dev/null 2>&1 || true' EXIT
+  docker rm -f "$name" "$pg" >/dev/null 2>&1 || true
+  docker network rm "$net" >/dev/null 2>&1 || true
+  trap 'docker logs --tail 40 '"$name"' 2>&1 || true; docker rm -f '"$name $pg"' >/dev/null 2>&1 || true; docker network rm '"$net"' >/dev/null 2>&1 || true' EXIT
+
+  docker network create "$net" >/dev/null
+  docker run -d --name "$pg" --network "$net" \
+    -e POSTGRES_DB=netwatch -e POSTGRES_USER=netwatch \
+    -e "POSTGRES_PASSWORD=$pg_password" "$PG_IMAGE" >/dev/null
+  local pg_deadline=$(( $(date +%s) + 90 ))
+  until docker exec "$pg" pg_isready -U netwatch -d netwatch >/dev/null 2>&1; do
+    [ "$(date +%s)" -lt "$pg_deadline" ] || fail "throwaway postgres never became ready"
+    sleep 2
+  done
+  pass "throwaway postgres ready"
+
   # PORT is what Render injects; the image must listen on it.
-  docker run -d --name "$name" -p "127.0.0.1:$port:$port" -e PORT=$port \
+  docker run -d --name "$name" --network "$net" \
+    -p "127.0.0.1:$port:$port" -e PORT=$port \
+    -e "DATABASE_URL=postgresql://netwatch:$pg_password@$pg:5432/netwatch" \
     "${env_args[@]}" "$IMAGE" >/dev/null
 
   wait_for_health "$url" 90
@@ -104,8 +131,18 @@ PY
   [ "$firing" -ge 17 ] || fail "only $firing of 17 threat types fired after backfill"
   pass "backfill: all $firing threat types have alerts"
 
+  [ "$(json "$url/api/health" "d['backend']")" = "postgresql" ] \
+    || fail "the image is not running against PostgreSQL"
+  pass "backend is postgresql"
+
+  # Migrations ran on startup and built the whole schema.
+  [ "$(json "$url/api/health" "d['table_count']")" = 8 ] \
+    || fail "schema incomplete: migrations did not run"
+  pass "migrations applied on startup (8 tables)"
+
   assert_packets_advance "$url"
-  docker rm -f "$name" >/dev/null
+  docker rm -f "$name" "$pg" >/dev/null
+  docker network rm "$net" >/dev/null
   trap - EXIT
 }
 
@@ -119,8 +156,9 @@ compose_up() {                  # profile
 }
 
 smoke_all_in_one() {
-  [ "$("${COMPOSE[@]}" --profile all-in-one config --services | xargs)" = "netwatch" ] \
-    || fail "all-in-one profile should contain only the netwatch service"
+  [ "$("${COMPOSE[@]}" --profile all-in-one config --services | sort | xargs)" \
+    = "netwatch postgres" ] \
+    || fail "all-in-one profile should contain the netwatch and postgres services"
   compose_up all-in-one
   wait_for_health http://127.0.0.1:5001 90
   pass "all-in-one healthy (read-only rootfs, capabilities dropped)"
@@ -134,8 +172,9 @@ smoke_all_in_one() {
 }
 
 smoke_split() {
-  [ "$("${COMPOSE[@]}" --profile split config --services | sort | xargs)" = "engine web" ] \
-    || fail "split profile should contain only engine and web"
+  [ "$("${COMPOSE[@]}" --profile split config --services | sort | xargs)" \
+    = "engine postgres web" ] \
+    || fail "split profile should contain engine, web and postgres"
   compose_up split
   for port in 5001 5002; do
     wait_for_health "http://127.0.0.1:$port" 120

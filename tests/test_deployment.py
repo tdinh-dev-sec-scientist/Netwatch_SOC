@@ -111,6 +111,30 @@ def test_every_script_compose_runs_is_in_the_image():
         % ', '.join(missing))
 
 
+def test_migrations_are_in_the_image():
+    """The schema lives in versioned SQL, not in the application, so without
+    these the container cannot create or upgrade its database."""
+    assert 'migrations' in runtime_copied_paths()
+
+
+def test_every_migration_exists_for_both_backends():
+    """A schema change has to be written for PostgreSQL and for the SQLite
+    fallback, or the fallback silently drifts out of step."""
+    root = os.path.join(ROOT, 'migrations')
+    versions = {}
+    for backend in ('postgresql', 'sqlite'):
+        directory = os.path.join(root, backend)
+        assert os.path.isdir(directory), 'no migrations for %s' % backend
+        versions[backend] = {name.split('_')[0]
+                             for name in os.listdir(directory)
+                             if name.endswith('.sql')}
+        assert versions[backend], 'no migration files for %s' % backend
+    assert versions['postgresql'] == versions['sqlite'], (
+        'migration versions differ between backends: postgresql has %s, '
+        'sqlite has %s' % (sorted(versions['postgresql']),
+                           sorted(versions['sqlite'])))
+
+
 def test_templates_are_in_the_image():
     assert 'templates' in runtime_copied_paths()
 
@@ -192,18 +216,67 @@ def compose_services():
     return {name: '\n'.join(block) for name, block in services.items()}
 
 
-def test_every_compose_service_has_exactly_one_profile():
+# The database is shared infrastructure rather than a topology, so it belongs
+# to every profile that needs one. Everything else is topology-specific.
+SHARED_SERVICES = {'postgres'}
+
+
+def test_every_application_service_has_exactly_one_profile():
     """Profiles keep the topologies apart.
 
     The all-in-one service once had no profile, so `--profile split` started
-    it next to the dedicated engine: two engines writing one database.
+    it next to the dedicated engine: two engines recording one network twice.
     """
     services = compose_services()
     assert {'netwatch', 'engine', 'web', 'tests'} <= set(services)
     for name, block in services.items():
         profiles = re.findall(r'^    profiles:\s*\[([^\]]*)\]', block, re.M)
-        assert len(profiles) == 1, '%s must declare one profile' % name
-        assert len([p for p in profiles[0].split(',') if p.strip()]) == 1, name
+        assert len(profiles) == 1, '%s must declare its profiles' % name
+        named = [p for p in profiles[0].split(',') if p.strip()]
+        if name in SHARED_SERVICES:
+            assert len(named) > 1, (
+                '%s is shared infrastructure and should be available to more '
+                'than one profile' % name)
+        else:
+            assert len(named) == 1, '%s must declare exactly one profile' % name
+
+
+def test_a_database_service_is_defined_and_pinned():
+    """An unpinned postgres tag would let a rebuild cross a major version,
+    which the server refuses to start against an existing data directory."""
+    block = compose_services()['postgres']
+    image = re.search(r'^    image:\s*postgres:(\S+)', block, re.M)
+    assert image, 'the postgres service must name a pinned image'
+    tag = image.group(1)
+    assert re.match(r'^\d+\.\d+', tag), \
+        'postgres image tag %r is not pinned to a patch release' % tag
+    assert re.search(r'^    healthcheck:', block, re.M), \
+        'the database needs a healthcheck for depends_on to wait on'
+    assert 'pg_isready' in block
+    assert re.search(r'volumes:\s*\n\s*-\s*netwatch-pgdata:', block), \
+        'the database needs a persistent volume'
+
+
+def test_every_service_that_uses_the_database_waits_for_it():
+    """The application applies migrations on startup, so it must not race
+    initdb. Anything less than service_healthy does."""
+    for name, block in compose_services().items():
+        if name in SHARED_SERVICES or 'DATABASE_URL' not in block:
+            continue
+        assert 'depends_on' in block, '%s has no depends_on' % name
+        assert ('needs-postgres' in block
+                or re.search(r'postgres:\s*\n\s*condition:\s*service_healthy',
+                             block)), \
+            '%s must wait for postgres to be healthy' % name
+
+
+def test_no_sqlite_assumptions_remain_in_compose():
+    """The sqlite3 healthcheck, the NETWATCH_DB path and the shared data volume
+    all belonged to the single-writer file database."""
+    text = open(COMPOSE, encoding='utf-8').read()
+    for leftover in ('import sqlite3', 'NETWATCH_DB:', 'netwatch-data:'):
+        assert leftover not in text, \
+            'docker-compose.yml still references %r' % leftover
 
 
 def test_no_profile_runs_two_engines():
