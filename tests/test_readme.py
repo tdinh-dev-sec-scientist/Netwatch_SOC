@@ -18,6 +18,8 @@ import detectors
 import mitre
 from ProtocolAnalyzer import SUPPORTED_PROTOCOLS
 
+from conftest import requires_postgres
+
 README = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Readme.MD')
 
@@ -59,7 +61,10 @@ def test_readme_endpoint_count_matches_the_app(client):
         actual, 'the endpoint count')
 
 
+@requires_postgres
 def test_readme_index_count_matches_the_schema(populated_db):
+    """The README documents the PostgreSQL schema, which has one index the
+    SQLite fallback cannot have (the JSONB GIN index on alerts.evidence)."""
     text = open(README, 'r', encoding='utf-8').read()
     actual = populated_db.health()['index_count']
     assert_all_agree(
