@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """
-Forward NetWatch detections from SQLite to Splunk HTTP Event Collector.
+Forward NetWatch detections to Splunk HTTP Event Collector.
+
+BACKENDS
+    Reads through the project's own backend layer (`db_backends`), so it runs
+    against PostgreSQL -- the deployed default -- as well as the SQLite dev
+    path. Configuration is the same DB_BACKEND / DATABASE_URL / NETWATCH_DB
+    set the engine and the API use; --db overrides it with a URL or a path.
 
 WHAT IT FORWARDS
     One event per row of the `alerts` table. That table already holds the
     engine's *post-deduplication* output: every detector gates emission on
     `Detector._cooled_down()` before a finding is ever written, so the raw
-    pre-cooldown volume never reaches SQLite. On the benchmark corpus the
-    shipped tuning writes 25 rows for 25 distinct incidents (ratio 1.00).
+    pre-cooldown volume never reaches the database. On the benchmark corpus
+    the shipped tuning writes 25 rows for 25 distinct incidents (1.00).
     See README.md for the measurement and its caveat.
 
 TIMESTAMPS
@@ -20,8 +26,11 @@ SECURITY
     never logged, never echoed, and never written to the state file. --dry-run
     does not require it.
 
-Standard library + requests. Read-only on the database: opened with
-`mode=ro`, so it is safe to run against the live engine's file.
+READ-ONLY
+    The connection cannot write on either backend: SQLite is opened `mode=ro`,
+    PostgreSQL with `default_transaction_read_only=on`. Both are enforced by
+    the driver and the server respectively, not by convention, so this is safe
+    to run against the live engine's database.
 """
 
 import argparse
@@ -30,6 +39,13 @@ import os
 import sqlite3
 import sys
 import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+# This script lives two directories down from the modules it reuses.
+sys.path.insert(0, REPO)
+
+import db_backends                                     # noqa: E402
 
 try:
     import requests
@@ -42,9 +58,6 @@ DEFAULT_URL = 'https://localhost:8088'
 DEFAULT_SOURCE = 'netwatch:engine'
 HEC_PATH = '/services/collector/event'
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(HERE))
-DEFAULT_DB = os.environ.get('NETWATCH_DB', os.path.join(REPO, 'netwatch.db'))
 DEFAULT_STATE = os.path.join(HERE, '.hec_state.json')
 
 # Evidence keys that distinguish two incidents the stored columns alone would
@@ -88,17 +101,95 @@ def incident_key(row, evidence):
     ])
 
 
-# ── database (read-only) ────────────────────────────────────────────────────
+# ── database (read-only, either backend) ────────────────────────────────────
 
-def open_db(path):
-    if not os.path.exists(path):
-        raise SystemExit('database not found: %s' % path)
-    conn = sqlite3.connect('file:%s?mode=ro' % path, uri=True, timeout=30)
-    conn.row_factory = sqlite3.Row
-    return conn
+# Queries below are written in the same shared dialect DB_Manager uses -- `?`
+# placeholders, rewritten per driver by the reader. They contain no literal
+# `%`, which is the only other thing the two dialects disagree about here.
+
+class Reader:
+    """A read-only handle on the alerts tables.
+
+    Exists so the rest of the script never branches on backend: both readers
+    return plain dict rows and take `?` placeholders. Only the two subclasses
+    below know which driver is underneath.
+    """
+
+    def __init__(self, conn, display):
+        self.conn = conn
+        self.display = display
+
+    def execute(self, sql, params=()):
+        raise NotImplementedError
+
+    def close(self):
+        self.conn.close()
 
 
-def fetch_alerts(conn, since_id=0, since_ts=None, limit=None):
+class SQLiteReader(Reader):
+    """`mode=ro`: the driver refuses writes and will not create the file."""
+
+    max_params = 500          # SQLite's variable limit is 999
+
+    def execute(self, sql, params=()):
+        cur = self.conn.execute(sql, tuple(params))
+        try:
+            return [dict(r) for r in cur.fetchall()] if cur.description else []
+        finally:
+            cur.close()
+
+
+class PostgresReader(Reader):
+    """`default_transaction_read_only=on`: the server refuses writes."""
+
+    max_params = 5000         # PostgreSQL's limit is 65535
+
+    def execute(self, sql, params=()):
+        with self.conn.cursor() as cur:
+            cur.execute(sql.replace('?', '%s'), tuple(params) or None)
+            return cur.fetchall() if cur.description else []
+
+
+def open_db(target=None):
+    """Open a read-only reader on the configured backend.
+
+    `target` overrides the environment the same way `benchmark.py --db` does:
+    a PostgreSQL URL, or a filesystem path for SQLite.
+    """
+    try:
+        settings = db_backends.resolve_settings(target)
+    except db_backends.ConfigError as exc:
+        raise SystemExit('database configuration error: %s' % exc)
+
+    if settings.backend == db_backends.SQLITE:
+        if not os.path.exists(settings.dsn):
+            raise SystemExit('database not found: %s' % settings.dsn)
+        conn = sqlite3.connect('file:%s?mode=ro' % settings.dsn,
+                               uri=True, timeout=30)
+        conn.row_factory = sqlite3.Row
+        return SQLiteReader(conn, settings.display)
+
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except ImportError as exc:                         # pragma: no cover
+        raise SystemExit('PostgreSQL support needs psycopg 3: pip install '
+                         '"psycopg[binary]"  (%s)' % exc)
+    try:
+        conn = psycopg.connect(
+            settings.dsn, autocommit=True, row_factory=dict_row,
+            connect_timeout=settings.connect_timeout,
+            # Read-only is set on the server side so it covers every statement
+            # this connection can issue, not just the ones written below.
+            options='-c statement_timeout=%d -c default_transaction_read_only=on'
+                    % settings.statement_timeout_ms)
+    except Exception as exc:                           # pragma: no cover
+        raise SystemExit('cannot connect to PostgreSQL at %s: %s'
+                         % (settings.display, exc))
+    return PostgresReader(conn, settings.display)
+
+
+def fetch_alerts(reader, since_id=0, since_ts=None, limit=None):
     sql = ['SELECT * FROM alerts WHERE id > ?']
     params = [since_id]
     if since_ts is not None:
@@ -108,24 +199,25 @@ def fetch_alerts(conn, since_id=0, since_ts=None, limit=None):
     if limit:
         sql.append('LIMIT ?')
         params.append(limit)
-    return conn.execute(' '.join(sql), params).fetchall()
+    return reader.execute(' '.join(sql), params)
 
 
-def fetch_techniques(conn, alert_ids):
+def fetch_techniques(reader, alert_ids):
     """{alert_id: [{technique_id, name, tactic, url}, ...]} for these alerts."""
     out = {}
     if not alert_ids:
         return out
-    # Chunked so a large backlog cannot exceed SQLite's variable limit.
-    for start in range(0, len(alert_ids), 500):
-        chunk = alert_ids[start:start + 500]
-        rows = conn.execute(
+    # Chunked so a large backlog cannot exceed the driver's parameter limit.
+    chunk_size = reader.max_params
+    for start in range(0, len(alert_ids), chunk_size):
+        chunk = alert_ids[start:start + chunk_size]
+        rows = reader.execute(
             """SELECT at.alert_id, t.technique_id, t.name, t.tactic, t.url
                FROM alert_techniques at
                JOIN mitre_techniques t ON t.technique_id = at.technique_id
                WHERE at.alert_id IN (%s)
                ORDER BY at.alert_id, t.technique_id"""
-            % ','.join('?' * len(chunk)), chunk).fetchall()
+            % ','.join('?' * len(chunk)), chunk)
         for r in rows:
             out.setdefault(r['alert_id'], []).append(
                 {'technique_id': r['technique_id'], 'name': r['name'],
@@ -147,8 +239,10 @@ def build_event(row, techniques, args):
     the engine recorded it, which for some detectors is the responder rather
     than the initiator. Classify in SPL.
     """
+    # SQLite stores evidence as JSON text, PostgreSQL as jsonb that psycopg
+    # has already parsed; json_load() accepts either and returns the object.
     try:
-        evidence = json.loads(row['evidence']) if row['evidence'] else {}
+        evidence = db_backends.json_load(row['evidence']) or {}
     except (ValueError, TypeError):
         evidence = {'_unparsed': row['evidence']}
     if not isinstance(evidence, dict):
@@ -235,7 +329,9 @@ def parse_args(argv=None):
         description='Forward NetWatch detections to Splunk HEC.',
         epilog='Token is read from $SPLUNK_HEC_TOKEN only; never pass it on '
                'the command line, where it would land in your shell history.')
-    p.add_argument('--db', default=DEFAULT_DB, help='SQLite path (read-only)')
+    p.add_argument('--db', default=None,
+                   help='PostgreSQL URL, or a path under DB_BACKEND=sqlite '
+                        '(default: the configured backend, read-only)')
     p.add_argument('--url', default=DEFAULT_URL, help='HEC base URL')
     p.add_argument('--index', default=DEFAULT_INDEX)
     p.add_argument('--sourcetype', default=DEFAULT_SOURCETYPE)
@@ -276,12 +372,12 @@ def main(argv=None):
              if (args.no_state or args.dry_run) else read_state(args.state_file))
     since_id = state['last_alert_id']
 
-    conn = open_db(args.db)
+    reader = open_db(args.db)
     try:
-        rows = fetch_alerts(conn, since_id, args.since_ts, args.limit)
-        techniques = fetch_techniques(conn, [r['id'] for r in rows])
+        rows = fetch_alerts(reader, since_id, args.since_ts, args.limit)
+        techniques = fetch_techniques(reader, [r['id'] for r in rows])
     finally:
-        conn.close()
+        reader.close()
 
     if not rows:
         sys.stderr.write('nothing to forward (last_alert_id=%d)\n' % since_id)
