@@ -1,5 +1,5 @@
 """
-DatabaseManager — SQLite persistence for NetWatch SOC.
+DatabaseManager — PostgreSQL persistence for NetWatch SOC.
 
 Eight tables, every one written by the live pipeline:
 
@@ -17,250 +17,155 @@ alerts grouped by (src_ip, threat_type), which `get_threat_summary()` derives
 with an indexed query. Materialising it would be a denormalised copy of data
 `alerts` already holds.
 
-Concurrency: one long-lived writer connection guarded by a lock, plus
-thread-local reader connections. WAL lets readers proceed during writes.
+Backends. PostgreSQL is the production database and the default. SQLite is
+available for fast local work via DB_BACKEND=sqlite and is not supported for
+production — see db_backends.py for the configuration variables and for the
+shared SQL dialect the statements below are written in. This module contains
+every query and no driver code; db_backends.py contains every driver
+difference and no queries.
+
+Schema. Owned by the versioned migrations under migrations/, applied by
+migrate.py. There is no DDL in this file.
+
+Concurrency. Reads come from a pooled connection per caller, so the Flask
+worker's threads query in parallel. Writes go through one connection under a
+lock: the packet pipeline writes one transaction per batch, and it is the only
+writer by design (gunicorn.conf.py enforces a single engine process). This is
+a choice now rather than a constraint — PostgreSQL would take concurrent
+writers happily — and it avoids batches deadlocking against each other on the
+same host and flow rows.
 """
 
-import json
+import contextlib
 import os
-import sqlite3
-import threading
 import time
+import threading
 
+import db_backends
 import geoip
+import migrate
 import mitre
-
-DB_PATH = os.environ.get(
-    'NETWATCH_DB',
-    os.path.join(os.path.abspath(os.path.dirname(__file__)), 'netwatch.db'))
-
-SCHEMA = """
--- 1. Raw packet log -----------------------------------------------------
-CREATE TABLE IF NOT EXISTS packets (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts           REAL    NOT NULL,
-    src_ip       TEXT    NOT NULL,
-    dst_ip       TEXT    NOT NULL,
-    src_port     INTEGER,
-    dst_port     INTEGER,
-    protocol     TEXT    NOT NULL,
-    frame_len    INTEGER NOT NULL,
-    payload_len  INTEGER DEFAULT 0,
-    flags        TEXT,
-    entropy      REAL    DEFAULT 0,
-    is_malicious INTEGER DEFAULT 0,
-    l7_summary   TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_packets_ts        ON packets(ts DESC);
-CREATE INDEX IF NOT EXISTS idx_packets_src_ts    ON packets(src_ip, ts DESC);
-CREATE INDEX IF NOT EXISTS idx_packets_dst_ts    ON packets(dst_ip, ts DESC);
-CREATE INDEX IF NOT EXISTS idx_packets_proto_ts  ON packets(protocol, ts DESC);
-CREATE INDEX IF NOT EXISTS idx_packets_malicious ON packets(is_malicious, ts DESC);
--- Covering index for the per-host protocol breakdown on the host detail page.
--- Without it that GROUP BY builds a temp b-tree over every packet the host
--- sent, which is the single slowest query in the API at scale.
-CREATE INDEX IF NOT EXISTS idx_packets_src_proto ON packets(src_ip, protocol, frame_len);
-
--- 2. Flow / connection tracking -----------------------------------------
-CREATE TABLE IF NOT EXISTS connections (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    src_ip      TEXT    NOT NULL,
-    dst_ip      TEXT    NOT NULL,
-    src_port    INTEGER NOT NULL DEFAULT 0,
-    dst_port    INTEGER NOT NULL DEFAULT 0,
-    protocol    TEXT    NOT NULL,
-    first_seen  REAL    NOT NULL,
-    last_seen   REAL    NOT NULL,
-    packets     INTEGER DEFAULT 0,
-    bytes       INTEGER DEFAULT 0,
-    flags_seen  TEXT    DEFAULT '',
-    state       TEXT    DEFAULT 'ACTIVE',
-    UNIQUE(src_ip, dst_ip, src_port, dst_port, protocol)
-);
-CREATE INDEX IF NOT EXISTS idx_conn_last  ON connections(last_seen DESC);
-CREATE INDEX IF NOT EXISTS idx_conn_src   ON connections(src_ip, last_seen DESC);
-CREATE INDEX IF NOT EXISTS idx_conn_bytes ON connections(bytes DESC);
--- Covering index for the per-host peer rollup, for the same reason.
-CREATE INDEX IF NOT EXISTS idx_conn_src_dst ON connections(src_ip, dst_ip, packets, bytes);
-
--- 3. Host inventory ------------------------------------------------------
-CREATE TABLE IF NOT EXISTS hosts (
-    ip            TEXT    PRIMARY KEY,
-    first_seen    REAL    NOT NULL,
-    last_seen     REAL    NOT NULL,
-    is_internal   INTEGER DEFAULT 0,
-    country       TEXT    DEFAULT 'UNKNOWN',
-    latitude      REAL,
-    longitude     REAL,
-    packets_sent  INTEGER DEFAULT 0,
-    packets_recv  INTEGER DEFAULT 0,
-    bytes_sent    INTEGER DEFAULT 0,
-    bytes_recv    INTEGER DEFAULT 0,
-    alert_count   INTEGER DEFAULT 0,
-    threat_score  REAL    DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_hosts_country ON hosts(country);
-CREATE INDEX IF NOT EXISTS idx_hosts_sent    ON hosts(packets_sent DESC);
-CREATE INDEX IF NOT EXISTS idx_hosts_threat  ON hosts(threat_score DESC);
-
--- 4. Alerts --------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS alerts (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts           REAL    NOT NULL,
-    severity     TEXT    NOT NULL
-                 CHECK(severity IN ('CRITICAL','HIGH','MEDIUM','LOW','INFO')),
-    threat_type  TEXT    NOT NULL,
-    detector     TEXT    NOT NULL,
-    src_ip       TEXT,
-    dst_ip       TEXT,
-    src_port     INTEGER,
-    dst_port     INTEGER,
-    protocol     TEXT,
-    confidence   REAL    NOT NULL,
-    description  TEXT    NOT NULL,
-    evidence     TEXT,
-    acknowledged INTEGER DEFAULT 0,
-    ack_ts       REAL
-);
-CREATE INDEX IF NOT EXISTS idx_alerts_ts       ON alerts(ts DESC);
-CREATE INDEX IF NOT EXISTS idx_alerts_sev_ts   ON alerts(severity, ts DESC);
-CREATE INDEX IF NOT EXISTS idx_alerts_type_ts  ON alerts(threat_type, ts DESC);
-CREATE INDEX IF NOT EXISTS idx_alerts_src_ts   ON alerts(src_ip, ts DESC);
-CREATE INDEX IF NOT EXISTS idx_alerts_ack      ON alerts(acknowledged, ts DESC);
-
--- 5. ATT&CK catalog ------------------------------------------------------
-CREATE TABLE IF NOT EXISTS mitre_techniques (
-    technique_id TEXT PRIMARY KEY,
-    name         TEXT NOT NULL,
-    tactic       TEXT NOT NULL,
-    url          TEXT,
-    rationale    TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_mitre_tactic ON mitre_techniques(tactic);
-
--- 6. Alert <-> technique mapping ----------------------------------------
-CREATE TABLE IF NOT EXISTS alert_techniques (
-    alert_id     INTEGER NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
-    technique_id TEXT    NOT NULL REFERENCES mitre_techniques(technique_id),
-    confidence   REAL    NOT NULL,
-    ts           REAL    NOT NULL,
-    PRIMARY KEY (alert_id, technique_id)
-);
-CREATE INDEX IF NOT EXISTS idx_at_technique ON alert_techniques(technique_id, ts DESC);
-CREATE INDEX IF NOT EXISTS idx_at_ts        ON alert_techniques(ts DESC);
-
--- 7. Per-minute protocol rollup -----------------------------------------
-CREATE TABLE IF NOT EXISTS protocol_stats (
-    bucket   INTEGER NOT NULL,          -- unix time floored to the minute
-    protocol TEXT    NOT NULL,
-    packets  INTEGER DEFAULT 0,
-    bytes    INTEGER DEFAULT 0,
-    alerts   INTEGER DEFAULT 0,
-    PRIMARY KEY (bucket, protocol)
-);
-CREATE INDEX IF NOT EXISTS idx_pstat_bucket ON protocol_stats(bucket DESC);
-
--- 8. Measured performance ------------------------------------------------
-CREATE TABLE IF NOT EXISTS performance_metrics (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts                REAL    NOT NULL,
-    source            TEXT    NOT NULL DEFAULT 'engine',
-    window_s          REAL    NOT NULL,
-    packets_processed INTEGER NOT NULL,
-    packets_per_min   REAL    NOT NULL,
-    alerts_generated  INTEGER DEFAULT 0,
-    parse_errors      INTEGER DEFAULT 0,
-    parse_us_avg      REAL    DEFAULT 0,
-    detect_us_avg     REAL    DEFAULT 0,
-    db_write_ms       REAL    DEFAULT 0,
-    query_p50_ms      REAL    DEFAULT 0,
-    query_p95_ms      REAL    DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_perf_ts     ON performance_metrics(ts DESC);
-CREATE INDEX IF NOT EXISTS idx_perf_source ON performance_metrics(source, ts DESC);
-"""
+from db_backends import Json, json_load
 
 TABLES = ('packets', 'connections', 'hosts', 'alerts', 'mitre_techniques',
           'alert_techniques', 'protocol_stats', 'performance_metrics')
 
+# Explicit column lists where the table carries a generated ts_utc column.
+# `SELECT *` would put a datetime into the JSON API for no caller's benefit;
+# naming the columns also pins the response shape against future migrations.
+ALERT_COLUMNS = (
+    'id, ts, severity, threat_type, detector, src_ip, dst_ip, src_port, '
+    'dst_port, protocol, confidence, description, evidence, acknowledged, '
+    'ack_ts')
+PERF_COLUMNS = (
+    'id, ts, source, window_s, packets_processed, packets_per_min, '
+    'alerts_generated, parse_errors, parse_us_avg, detect_us_avg, '
+    'db_write_ms, query_p50_ms, query_p95_ms')
 
-def _tune(conn):
-    conn.execute('PRAGMA journal_mode=WAL')
-    conn.execute('PRAGMA synchronous=NORMAL')
-    conn.execute('PRAGMA cache_size=-32000')      # ~32 MB page cache
-    conn.execute('PRAGMA temp_store=MEMORY')
-    conn.execute('PRAGMA busy_timeout=10000')
-    conn.execute('PRAGMA foreign_keys=ON')
-    return conn
+SEVERITY_WEIGHT = {'CRITICAL': 10, 'HIGH': 6, 'MEDIUM': 3, 'LOW': 1, 'INFO': 0}
 
 
 class DatabaseManager:
-    def __init__(self, db_path=None):
-        self.db_path = db_path or DB_PATH
+    """All persistence and every read query the API issues.
+
+    `target` overrides the environment: a PostgreSQL URL, or a file path when
+    the backend is SQLite. Passing nothing uses DATABASE_URL / PG_* (or
+    NETWATCH_DB under DB_BACKEND=sqlite).
+    """
+
+    def __init__(self, target=None, backend=None, auto_migrate=None):
+        self.settings = db_backends.resolve_settings(target=target,
+                                                     backend=backend)
+        self._backend = db_backends.make_backend(self.settings)
         self._write_lock = threading.Lock()
-        self._local = threading.local()
-        self._write_conn = _tune(
-            sqlite3.connect(self.db_path, timeout=30, check_same_thread=False))
-        self._write_conn.row_factory = sqlite3.Row
-        self.init_schema()
+        if auto_migrate is None:
+            auto_migrate = os.environ.get('NETWATCH_AUTO_MIGRATE', '1') != '0'
+        if auto_migrate:
+            self.migrate()
         self.seed_technique_catalog()
+
+    # ── identity ─────────────────────────────────────────────────────────────
+
+    @property
+    def dsn(self):
+        """The connection target, as given. May contain a password."""
+        return self.settings.dsn
+
+    @property
+    def display(self):
+        """The connection target with any password redacted. Safe to log."""
+        return self.settings.display
+
+    @property
+    def backend_name(self):
+        return self._backend.name
 
     # ── connections ──────────────────────────────────────────────────────────
 
-    def reader(self):
-        """Thread-local read connection. Reused so query latency is honest."""
-        conn = getattr(self._local, 'conn', None)
-        if conn is None:
-            conn = _tune(sqlite3.connect(self.db_path, timeout=30))
-            conn.row_factory = sqlite3.Row
-            self._local.conn = conn
-        return conn
+    @contextlib.contextmanager
+    def _read_conn(self):
+        """Borrow a reader connection and always hand it back.
+
+        Under PostgreSQL these come from a pool and must be returned or the
+        pool starves; under SQLite it is a thread-local connection and the
+        release is a no-op.
+        """
+        conn = self._backend.reader()
+        try:
+            yield conn
+        finally:
+            self._backend.release_reader(conn)
 
     def close(self):
         with self._write_lock:
-            self._write_conn.close()
-        conn = getattr(self._local, 'conn', None)
-        if conn is not None:
-            conn.close()
-            self._local.conn = None
+            self._backend.close()
 
     # ── schema ───────────────────────────────────────────────────────────────
 
-    def init_schema(self):
+    def migrate(self):
+        """Apply any pending migrations. Idempotent."""
         with self._write_lock:
-            self._write_conn.executescript(SCHEMA)
-            self._write_conn.commit()
+            return migrate.apply_pending(self._backend, self._backend.writer())
 
     def seed_technique_catalog(self):
         """Load the ATT&CK catalog from mitre.py into the reference table."""
         rows = [(t.id, t.name, t.tactic, t.url, t.rationale)
                 for t in mitre.all_techniques()]
         with self._write_lock:
-            self._write_conn.executemany(
-                """INSERT INTO mitre_techniques
-                   (technique_id, name, tactic, url, rationale)
-                   VALUES (?,?,?,?,?)
-                   ON CONFLICT(technique_id) DO UPDATE SET
-                     name=excluded.name, tactic=excluded.tactic,
-                     url=excluded.url, rationale=excluded.rationale""", rows)
-            self._write_conn.commit()
+            conn = self._backend.writer()
+            self._backend.begin(conn)
+            try:
+                self._backend.executemany(
+                    conn,
+                    """INSERT INTO mitre_techniques
+                       (technique_id, name, tactic, url, rationale)
+                       VALUES (?,?,?,?,?)
+                       ON CONFLICT (technique_id) DO UPDATE SET
+                         name=excluded.name, tactic=excluded.tactic,
+                         url=excluded.url, rationale=excluded.rationale""",
+                    rows)
+                self._backend.commit(conn)
+            except Exception:
+                self._backend.rollback(conn)
+                raise
 
     def table_names(self):
-        rows = self.reader().execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name NOT LIKE 'sqlite_%' ORDER BY name").fetchall()
-        return [r['name'] for r in rows]
+        with self._read_conn() as conn:
+            return self._backend.table_names(conn)
 
     def index_names(self):
-        rows = self.reader().execute(
-            "SELECT name, tbl_name FROM sqlite_master WHERE type='index' "
-            "AND sql IS NOT NULL ORDER BY tbl_name, name").fetchall()
-        return [(r['tbl_name'], r['name']) for r in rows]
+        with self._read_conn() as conn:
+            return self._backend.index_names(conn)
+
+    def analyze(self):
+        """Refresh planner statistics. Worth calling after a bulk load."""
+        with self._write_lock:
+            self._backend.analyze(self._backend.writer())
 
     # ── writes ───────────────────────────────────────────────────────────────
 
     def persist_batch(self, packets, findings):
-        """Write one batch atomically. Returns (packet_rows, alert_rows).
+        """Write one batch atomically. Returns (packet_rows, alert_rows, ms).
 
         `packets` are parsed packet dicts; `findings` are Finding objects. The
         whole batch shares one transaction, which is what makes sustained
@@ -271,24 +176,24 @@ class DatabaseManager:
         malicious_ips = {f.src_ip for f in findings if f.src_ip}
 
         with self._write_lock:
-            conn = self._write_conn
+            conn = self._backend.writer()
+            self._backend.begin(conn)
             try:
-                conn.execute('BEGIN')
                 if packets:
                     self._write_packets(conn, packets, malicious_ips)
                     self._write_connections(conn, packets)
                     self._write_hosts(conn, packets)
                     self._write_protocol_stats(conn, packets, findings)
                 alert_ids = self._write_alerts(conn, findings)
-                conn.commit()
+                self._backend.commit(conn)
             except Exception:
-                conn.rollback()
+                self._backend.rollback(conn)
                 raise
         return len(packets), len(alert_ids), (time.perf_counter() - t0) * 1000
 
     @staticmethod
     def _l7_summary(pkt):
-        """Compact JSON of the decoded application-layer fields."""
+        """The decoded application-layer fields, for the JSON column."""
         interesting = {}
         for key, value in pkt.items():
             if key.count('_') and any(key.startswith(p + '_') for p in (
@@ -297,8 +202,7 @@ class DatabaseManager:
                     'arp', 'telnet', 'icmp')):
                 if isinstance(value, (str, int, float, bool)) or value is None:
                     interesting[key] = value
-        return json.dumps(interesting, separators=(',', ':')) if interesting \
-            else None
+        return Json(interesting) if interesting else Json(None)
 
     def _write_packets(self, conn, packets, malicious_ips):
         rows = [
@@ -306,18 +210,18 @@ class DatabaseManager:
              p.get('src_port'), p.get('dst_port'), p.get('protocol', 'UNKNOWN'),
              p.get('frame_len', 0), p.get('payload_len', 0),
              p.get('flags', ''), p.get('entropy', 0.0),
-             1 if p.get('src_ip') in malicious_ips else 0,
+             p.get('src_ip') in malicious_ips,
              self._l7_summary(p))
             for p in packets
         ]
-        conn.executemany(
+        self._backend.executemany(
+            conn,
             """INSERT INTO packets
                (ts,src_ip,dst_ip,src_port,dst_port,protocol,frame_len,
                 payload_len,flags,entropy,is_malicious,l7_summary)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", rows)
 
-    @staticmethod
-    def _write_connections(conn, packets):
+    def _write_connections(self, conn, packets):
         flows = {}
         for p in packets:
             key = (p.get('src_ip') or '', p.get('dst_ip') or '',
@@ -337,20 +241,23 @@ class DatabaseManager:
                     f[4].add(p['flags'])
         rows = [(k[0], k[1], k[2], k[3], k[4], v[0], v[1], v[2], v[3],
                  ','.join(sorted(v[4]))[:64]) for k, v in flows.items()]
-        conn.executemany(
+        # GREATEST/LEAST rather than SQLite's two-argument MAX/MIN, whose names
+        # are aggregates in PostgreSQL. See db_backends.py.
+        self._backend.executemany(
+            conn,
             """INSERT INTO connections
                (src_ip,dst_ip,src_port,dst_port,protocol,first_seen,last_seen,
                 packets,bytes,flags_seen)
                VALUES (?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(src_ip,dst_ip,src_port,dst_port,protocol) DO UPDATE SET
-                 last_seen = MAX(last_seen, excluded.last_seen),
-                 first_seen= MIN(first_seen, excluded.first_seen),
-                 packets   = packets + excluded.packets,
-                 bytes     = bytes + excluded.bytes,
+               ON CONFLICT (src_ip,dst_ip,src_port,dst_port,protocol)
+               DO UPDATE SET
+                 last_seen = GREATEST(connections.last_seen, excluded.last_seen),
+                 first_seen= LEAST(connections.first_seen, excluded.first_seen),
+                 packets   = connections.packets + excluded.packets,
+                 bytes     = connections.bytes + excluded.bytes,
                  flags_seen= excluded.flags_seen""", rows)
 
-    @staticmethod
-    def _write_hosts(conn, packets):
+    def _write_hosts(self, conn, packets):
         agg = {}
         for p in packets:
             length = p.get('frame_len', 0)
@@ -371,23 +278,23 @@ class DatabaseManager:
         rows = []
         for ip, h in agg.items():
             country, lat, lon = geoip.lookup(ip)
-            rows.append((ip, h[0], h[1], 1 if country == 'PRIVATE' else 0,
+            rows.append((ip, h[0], h[1], country == 'PRIVATE',
                          country, lat, lon, h[2], h[3], h[4], h[5]))
-        conn.executemany(
+        self._backend.executemany(
+            conn,
             """INSERT INTO hosts
                (ip,first_seen,last_seen,is_internal,country,latitude,longitude,
                 packets_sent,packets_recv,bytes_sent,bytes_recv)
                VALUES (?,?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(ip) DO UPDATE SET
-                 last_seen   = MAX(last_seen, excluded.last_seen),
-                 first_seen  = MIN(first_seen, excluded.first_seen),
-                 packets_sent= packets_sent + excluded.packets_sent,
-                 packets_recv= packets_recv + excluded.packets_recv,
-                 bytes_sent  = bytes_sent + excluded.bytes_sent,
-                 bytes_recv  = bytes_recv + excluded.bytes_recv""", rows)
+               ON CONFLICT (ip) DO UPDATE SET
+                 last_seen   = GREATEST(hosts.last_seen, excluded.last_seen),
+                 first_seen  = LEAST(hosts.first_seen, excluded.first_seen),
+                 packets_sent= hosts.packets_sent + excluded.packets_sent,
+                 packets_recv= hosts.packets_recv + excluded.packets_recv,
+                 bytes_sent  = hosts.bytes_sent + excluded.bytes_sent,
+                 bytes_recv  = hosts.bytes_recv + excluded.bytes_recv""", rows)
 
-    @staticmethod
-    def _write_protocol_stats(conn, packets, findings):
+    def _write_protocol_stats(self, conn, packets, findings):
         buckets = {}
         for p in packets:
             key = (int(p['ts'] // 60) * 60, p.get('protocol', 'UNKNOWN'))
@@ -398,62 +305,74 @@ class DatabaseManager:
             key = (int(f.ts // 60) * 60, f.protocol or 'UNKNOWN')
             buckets.setdefault(key, [0, 0, 0])[2] += 1
         rows = [(k[0], k[1], v[0], v[1], v[2]) for k, v in buckets.items()]
-        conn.executemany(
+        self._backend.executemany(
+            conn,
             """INSERT INTO protocol_stats (bucket,protocol,packets,bytes,alerts)
                VALUES (?,?,?,?,?)
-               ON CONFLICT(bucket,protocol) DO UPDATE SET
-                 packets = packets + excluded.packets,
-                 bytes   = bytes + excluded.bytes,
-                 alerts  = alerts + excluded.alerts""", rows)
+               ON CONFLICT (bucket,protocol) DO UPDATE SET
+                 packets = protocol_stats.packets + excluded.packets,
+                 bytes   = protocol_stats.bytes + excluded.bytes,
+                 alerts  = protocol_stats.alerts + excluded.alerts""", rows)
 
-    @staticmethod
-    def _write_alerts(conn, findings):
+    def _write_alerts(self, conn, findings):
         alert_ids = []
         for f in findings:
-            cur = conn.execute(
+            # RETURNING rather than cursor.lastrowid, which is SQLite-only.
+            alert_id = self._backend.execute(
+                conn,
                 """INSERT INTO alerts
                    (ts,severity,threat_type,detector,src_ip,dst_ip,src_port,
                     dst_port,protocol,confidence,description,evidence)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                   RETURNING id""",
                 (f.ts, f.severity, f.threat_type, f.detector, f.src_ip,
                  f.dst_ip, f.src_port, f.dst_port, f.protocol, f.confidence,
-                 f.reason, json.dumps(f.evidence, default=str,
-                                      separators=(',', ':'))))
-            alert_id = cur.lastrowid
+                 f.reason, Json(f.evidence))).scalar()
             alert_ids.append(alert_id)
-            conn.executemany(
-                """INSERT OR IGNORE INTO alert_techniques
-                   (alert_id,technique_id,confidence,ts) VALUES (?,?,?,?)""",
+            self._backend.executemany(
+                conn,
+                """INSERT INTO alert_techniques
+                   (alert_id,technique_id,confidence,ts) VALUES (?,?,?,?)
+                   ON CONFLICT DO NOTHING""",
                 [(alert_id, tid, f.confidence, f.ts) for tid in f.techniques])
             if f.src_ip:
-                conn.execute(
+                self._backend.execute(
+                    conn,
                     """UPDATE hosts SET alert_count = alert_count + 1,
-                       threat_score = MIN(100, threat_score + ?)
+                       threat_score = LEAST(100, threat_score + ?)
                        WHERE ip = ?""",
-                    ({'CRITICAL': 10, 'HIGH': 6, 'MEDIUM': 3,
-                      'LOW': 1, 'INFO': 0}[f.severity], f.src_ip))
+                    (SEVERITY_WEIGHT[f.severity], f.src_ip))
         return alert_ids
 
     def record_performance(self, metrics):
+        values = {'ts': time.time(), 'source': 'engine', 'window_s': 0,
+                  'packets_processed': 0, 'packets_per_min': 0,
+                  'alerts_generated': 0, 'parse_errors': 0, 'parse_us_avg': 0,
+                  'detect_us_avg': 0, 'db_write_ms': 0, 'query_p50_ms': 0,
+                  'query_p95_ms': 0, **metrics}
+        order = ('ts', 'source', 'window_s', 'packets_processed',
+                 'packets_per_min', 'alerts_generated', 'parse_errors',
+                 'parse_us_avg', 'detect_us_avg', 'db_write_ms',
+                 'query_p50_ms', 'query_p95_ms')
         with self._write_lock:
-            self._write_conn.execute(
-                """INSERT INTO performance_metrics
-                   (ts,source,window_s,packets_processed,packets_per_min,
-                    alerts_generated,parse_errors,parse_us_avg,detect_us_avg,
-                    db_write_ms,query_p50_ms,query_p95_ms)
-                   VALUES (:ts,:source,:window_s,:packets_processed,
-                           :packets_per_min,:alerts_generated,:parse_errors,
-                           :parse_us_avg,:detect_us_avg,:db_write_ms,
-                           :query_p50_ms,:query_p95_ms)""",
-                {'ts': time.time(), 'source': 'engine', 'window_s': 0,
-                 'packets_processed': 0, 'packets_per_min': 0,
-                 'alerts_generated': 0, 'parse_errors': 0, 'parse_us_avg': 0,
-                 'detect_us_avg': 0, 'db_write_ms': 0, 'query_p50_ms': 0,
-                 'query_p95_ms': 0, **metrics})
-            self._write_conn.commit()
+            conn = self._backend.writer()
+            self._backend.begin(conn)
+            try:
+                self._backend.execute(
+                    conn,
+                    """INSERT INTO performance_metrics
+                       (ts,source,window_s,packets_processed,packets_per_min,
+                        alerts_generated,parse_errors,parse_us_avg,
+                        detect_us_avg,db_write_ms,query_p50_ms,query_p95_ms)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    tuple(values[k] for k in order))
+                self._backend.commit(conn)
+            except Exception:
+                self._backend.rollback(conn)
+                raise
 
     # Delete order matters only for readability: alert_techniques rows go with
-    # their alert through ON DELETE CASCADE (foreign_keys is on for the writer).
+    # their alert through ON DELETE CASCADE.
     _PRUNE = (
         ('alerts', 'DELETE FROM alerts WHERE ts < ?'),
         ('packets', 'DELETE FROM packets WHERE ts < ?'),
@@ -473,93 +392,114 @@ class DatabaseManager:
         whole lifetime rather than only the retained window. A protocol_stats
         bucket is removed only once its entire minute is older than the cutoff.
 
-        SQLite reuses the freed pages for new rows, so the file stops growing
-        at steady state instead of shrinking; run VACUUM offline to reclaim it.
-        The mitre_techniques catalog is reference data and is never pruned.
+        PostgreSQL reuses the space autovacuum reclaims, so the database stops
+        growing at steady state rather than shrinking; a VACUUM FULL is needed
+        to return space to the filesystem and takes an exclusive lock, so run
+        it in a maintenance window if you ever need to. The mitre_techniques
+        catalog is reference data and is never pruned.
         """
         bucket_cutoff = int(before_ts // 60) * 60
         deleted = {}
         with self._write_lock:
-            conn = self._write_conn
+            conn = self._backend.writer()
+            self._backend.begin(conn)
             try:
-                conn.execute('BEGIN')
                 for table, sql in self._PRUNE:
                     param = bucket_cutoff if table == 'protocol_stats' \
                         else before_ts
-                    deleted[table] = conn.execute(sql, (param,)).rowcount
-                conn.commit()
+                    deleted[table] = self._backend.execute(
+                        conn, sql, (param,)).rowcount
+                self._backend.commit(conn)
             except Exception:
-                conn.rollback()
+                self._backend.rollback(conn)
                 raise
         return deleted
 
     def acknowledge_alert(self, alert_id):
         with self._write_lock:
-            cur = self._write_conn.execute(
-                'UPDATE alerts SET acknowledged=1, ack_ts=? WHERE id=?',
-                (time.time(), alert_id))
-            self._write_conn.commit()
-            return cur.rowcount
+            conn = self._backend.writer()
+            self._backend.begin(conn)
+            try:
+                result = self._backend.execute(
+                    conn,
+                    'UPDATE alerts SET acknowledged=TRUE, ack_ts=? WHERE id=?',
+                    (time.time(), alert_id))
+                self._backend.commit(conn)
+            except Exception:
+                self._backend.rollback(conn)
+                raise
+            return result.rowcount
 
     # ── reads ────────────────────────────────────────────────────────────────
 
+    def query(self, sql, params=()):
+        """Run one read statement. Returns a db_backends.Result."""
+        with self._read_conn() as conn:
+            return self._backend.execute(conn, sql, params)
+
+    def rows(self, sql, params=()):
+        return self.query(sql, params).rows
+
     def _rows(self, sql, params=()):
-        return [dict(r) for r in self.reader().execute(sql, params).fetchall()]
+        return self.query(sql, params).rows
 
     def _one(self, sql, params=()):
-        row = self.reader().execute(sql, params).fetchone()
-        return dict(row) if row else None
+        return self.query(sql, params).one()
 
     def _scalar(self, sql, params=(), default=0):
-        row = self.reader().execute(sql, params).fetchone()
-        return (row[0] if row and row[0] is not None else default)
+        return self.query(sql, params).scalar(default)
+
+    # One statement rather than twelve. Each counter is a scalar subquery, so
+    # the dashboard's most-polled endpoint costs a single round trip and one
+    # shared pass over the buffer cache. Issued separately this was the slowest
+    # query in the API under PostgreSQL, where a round trip is a socket rather
+    # than a function call.
+    _OVERVIEW = """
+        SELECT
+          (SELECT COUNT(*) FROM packets)                        AS total_packets,
+          (SELECT COUNT(*) FROM packets WHERE ts > ?)           AS packets_last_hour,
+          (SELECT CAST(AVG(pm) AS DOUBLE PRECISION) FROM (
+             SELECT SUM(packets) AS pm FROM protocol_stats
+             WHERE bucket > ? GROUP BY bucket) AS per_bucket)   AS packets_per_min,
+          (SELECT COUNT(*) FROM alerts)                         AS total_alerts,
+          (SELECT COUNT(*) FROM alerts WHERE ts > ?)            AS alerts_24h,
+          (SELECT COUNT(*) FROM alerts
+             WHERE severity='CRITICAL' AND NOT acknowledged)    AS critical_open,
+          (SELECT COUNT(*) FROM alerts WHERE NOT acknowledged)   AS unacknowledged,
+          (SELECT COUNT(DISTINCT threat_type) FROM alerts)      AS distinct_threat_types,
+          (SELECT COUNT(DISTINCT technique_id)
+             FROM alert_techniques)                             AS techniques_observed,
+          (SELECT COUNT(*) FROM hosts)                          AS hosts_tracked,
+          (SELECT COUNT(*) FROM connections WHERE last_seen > ?) AS active_flows,
+          (SELECT AVG(confidence) FROM alerts WHERE ts > ?)      AS mean_confidence
+    """
 
     def get_overview(self):
         now = time.time()
         hour, day = now - 3600, now - 86400
-        return {
-            'total_packets': self._scalar('SELECT COUNT(*) FROM packets'),
-            'packets_last_hour': self._scalar(
-                'SELECT COUNT(*) FROM packets WHERE ts > ?', (hour,)),
-            'packets_per_min': round(self._scalar(
-                """SELECT AVG(pm) FROM (
-                     SELECT SUM(packets) AS pm FROM protocol_stats
-                     WHERE bucket > ? GROUP BY bucket)""",
-                (int(now - 600),), 0.0), 1),
-            'total_alerts': self._scalar('SELECT COUNT(*) FROM alerts'),
-            'alerts_24h': self._scalar(
-                'SELECT COUNT(*) FROM alerts WHERE ts > ?', (day,)),
-            'critical_open': self._scalar(
-                "SELECT COUNT(*) FROM alerts WHERE severity='CRITICAL' "
-                'AND acknowledged=0'),
-            'unacknowledged': self._scalar(
-                'SELECT COUNT(*) FROM alerts WHERE acknowledged=0'),
-            'distinct_threat_types': self._scalar(
-                'SELECT COUNT(DISTINCT threat_type) FROM alerts'),
-            'techniques_observed': self._scalar(
-                'SELECT COUNT(DISTINCT technique_id) FROM alert_techniques'),
-            'hosts_tracked': self._scalar('SELECT COUNT(*) FROM hosts'),
-            'active_flows': self._scalar(
-                'SELECT COUNT(*) FROM connections WHERE last_seen > ?',
-                (now - 300,)),
-            'mean_confidence': round(self._scalar(
-                'SELECT AVG(confidence) FROM alerts WHERE ts > ?', (day,),
-                0.0), 3),
-        }
+        row = self._one(self._OVERVIEW,
+                        (hour, int(now - 600), day, now - 300, day))
+        row['packets_per_min'] = round(row['packets_per_min'] or 0.0, 1)
+        row['mean_confidence'] = round(row['mean_confidence'] or 0.0, 3)
+        return row
 
     def get_throughput(self, minutes=60):
         cutoff = int(time.time() - minutes * 60)
         return self._rows(
-            """SELECT bucket, SUM(packets) AS packets, SUM(bytes) AS bytes,
-                      SUM(alerts) AS alerts
+            """SELECT bucket,
+                      CAST(SUM(packets) AS BIGINT) AS packets,
+                      CAST(SUM(bytes)   AS BIGINT) AS bytes,
+                      CAST(SUM(alerts)  AS BIGINT) AS alerts
                FROM protocol_stats WHERE bucket > ?
                GROUP BY bucket ORDER BY bucket""", (cutoff,))
 
     def get_protocol_distribution(self, minutes=1440):
         cutoff = int(time.time() - minutes * 60)
         return self._rows(
-            """SELECT protocol, SUM(packets) AS packets, SUM(bytes) AS bytes,
-                      SUM(alerts) AS alerts
+            """SELECT protocol,
+                      CAST(SUM(packets) AS BIGINT) AS packets,
+                      CAST(SUM(bytes)   AS BIGINT) AS bytes,
+                      CAST(SUM(alerts)  AS BIGINT) AS alerts
                FROM protocol_stats WHERE bucket > ?
                GROUP BY protocol ORDER BY packets DESC""", (cutoff,))
 
@@ -571,8 +511,10 @@ class DatabaseManager:
 
     def get_alert_timeline(self, hours=24, bucket_s=3600):
         cutoff = time.time() - hours * 3600
+        # FLOOR, not CAST-to-integer: SQLite truncates on that cast while
+        # PostgreSQL rounds, which would put half the alerts a bucket late.
         return self._rows(
-            """SELECT CAST(ts/? AS INTEGER)*? AS bucket, severity,
+            """SELECT CAST(FLOOR(ts/?) AS BIGINT)*? AS bucket, severity,
                       COUNT(*) AS count
                FROM alerts WHERE ts > ?
                GROUP BY bucket, severity ORDER BY bucket""",
@@ -592,7 +534,7 @@ class DatabaseManager:
             params.append(src_ip)
         if acknowledged is not None:
             where.append('acknowledged = ?')
-            params.append(1 if acknowledged else 0)
+            params.append(bool(acknowledged))
         if since is not None:
             where.append('ts > ?')
             params.append(since)
@@ -600,19 +542,19 @@ class DatabaseManager:
         total = self._scalar('SELECT COUNT(*) FROM alerts ' + clause,
                              tuple(params))
         rows = self._rows(
-            'SELECT * FROM alerts %s ORDER BY ts DESC LIMIT ? OFFSET ?'
-            % clause, tuple(params) + (limit, offset))
+            'SELECT %s FROM alerts %s ORDER BY ts DESC LIMIT ? OFFSET ?'
+            % (ALERT_COLUMNS, clause), tuple(params) + (limit, offset))
         for r in rows:
-            r['evidence'] = json.loads(r['evidence']) if r['evidence'] else {}
+            r['evidence'] = json_load(r['evidence']) or {}
         return {'total': total, 'count': len(rows), 'limit': limit,
                 'offset': offset, 'alerts': rows}
 
     def get_alert(self, alert_id):
-        alert = self._one('SELECT * FROM alerts WHERE id = ?', (alert_id,))
+        alert = self._one(
+            'SELECT %s FROM alerts WHERE id = ?' % ALERT_COLUMNS, (alert_id,))
         if not alert:
             return None
-        alert['evidence'] = json.loads(alert['evidence']) \
-            if alert['evidence'] else {}
+        alert['evidence'] = json_load(alert['evidence']) or {}
         alert['techniques'] = self._rows(
             """SELECT t.technique_id, t.name, t.tactic, t.url, t.rationale,
                       at.confidence
@@ -627,18 +569,25 @@ class DatabaseManager:
                WHERE src_ip = ? AND ts BETWEEN ? AND ?
                ORDER BY ts DESC LIMIT 20""",
             (alert['src_ip'], alert['ts'] - 60, alert['ts'] + 5))
+        for packet in alert['related_packets']:
+            packet['l7_summary'] = json_load(packet['l7_summary'])
         return alert
 
     def get_alert_stats_by_type(self, hours=24):
         cutoff = time.time() - hours * 3600
+        # COUNT(*) FILTER, not SUM(severity='CRITICAL'): summing a boolean is
+        # a type error in PostgreSQL.
         return self._rows(
             """SELECT threat_type, detector, COUNT(*) AS count,
                       AVG(confidence) AS avg_conf,
-                      SUM(severity='CRITICAL') AS critical,
-                      SUM(severity='HIGH') AS high,
+                      COUNT(*) FILTER (WHERE severity='CRITICAL') AS critical,
+                      COUNT(*) FILTER (WHERE severity='HIGH') AS high,
                       MAX(ts) AS last_seen
                FROM alerts WHERE ts > ?
-               GROUP BY threat_type ORDER BY count DESC""", (cutoff,))
+               GROUP BY threat_type, detector ORDER BY count DESC""", (cutoff,))
+        # detector is in the GROUP BY because PostgreSQL requires every bare
+        # selected column to be there. It does not change the grouping: each
+        # detector class sets name == threat_type, so the two are 1:1.
 
     def get_threat_summary(self, hours=24, limit=50):
         """Aggregated per (source, threat type) — the 'active threats' view.
@@ -650,7 +599,7 @@ class DatabaseManager:
             """SELECT src_ip, threat_type, COUNT(*) AS alert_count,
                       MIN(ts) AS first_seen, MAX(ts) AS last_seen,
                       MAX(confidence) AS max_confidence,
-                      SUM(acknowledged=0) AS open_alerts,
+                      COUNT(*) FILTER (WHERE NOT acknowledged) AS open_alerts,
                       MIN(CASE severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH'
                           THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3
                           ELSE 4 END) AS sev_rank
@@ -673,24 +622,27 @@ class DatabaseManager:
                FROM mitre_techniques t
                LEFT JOIN alert_techniques at
                  ON at.technique_id = t.technique_id %s
-               GROUP BY t.technique_id
+               GROUP BY t.technique_id, t.name, t.tactic, t.url, t.rationale
                ORDER BY alert_count DESC, t.technique_id""" % join,
             tuple(params))
 
     def get_mitre_technique(self, technique_id, limit=25):
         tech = self._one(
-            'SELECT * FROM mitre_techniques WHERE technique_id = ?',
-            (technique_id,))
+            'SELECT technique_id, name, tactic, url, rationale '
+            'FROM mitre_techniques WHERE technique_id = ?', (technique_id,))
         if not tech:
             return None
         tech['alert_count'] = self._scalar(
             'SELECT COUNT(*) FROM alert_techniques WHERE technique_id = ?',
             (technique_id,))
+        # Grouped by both columns for PostgreSQL's benefit; detector and
+        # threat_type are 1:1, so the rows are the same as grouping by detector.
         tech['detectors'] = self._rows(
             """SELECT a.detector, a.threat_type, COUNT(*) AS count
                FROM alert_techniques at JOIN alerts a ON a.id = at.alert_id
                WHERE at.technique_id = ?
-               GROUP BY a.detector ORDER BY count DESC""", (technique_id,))
+               GROUP BY a.detector, a.threat_type ORDER BY count DESC""",
+            (technique_id,))
         tech['recent_alerts'] = self._rows(
             """SELECT a.id, a.ts, a.severity, a.threat_type, a.src_ip,
                       a.dst_ip, a.protocol, a.confidence, a.description
@@ -706,7 +658,8 @@ class DatabaseManager:
                FROM mitre_techniques t
                LEFT JOIN alert_techniques at
                  ON at.technique_id = t.technique_id
-               GROUP BY t.technique_id ORDER BY t.tactic, t.technique_id""")
+               GROUP BY t.tactic, t.technique_id, t.name
+               ORDER BY t.tactic, t.technique_id""")
         by_tactic = {}
         for r in rows:
             by_tactic.setdefault(r['tactic'], []).append(r)
@@ -731,7 +684,8 @@ class DatabaseManager:
         if not host:
             return None
         host['top_protocols'] = self._rows(
-            """SELECT protocol, COUNT(*) AS packets, SUM(frame_len) AS bytes
+            """SELECT protocol, COUNT(*) AS packets,
+                      CAST(SUM(frame_len) AS BIGINT) AS bytes
                FROM packets WHERE src_ip = ?
                GROUP BY protocol ORDER BY packets DESC LIMIT 10""", (ip,))
         host['recent_alerts'] = self._rows(
@@ -740,8 +694,9 @@ class DatabaseManager:
                FROM alerts WHERE src_ip = ? ORDER BY ts DESC LIMIT 20""",
             (ip,))
         host['top_peers'] = self._rows(
-            """SELECT dst_ip AS peer, SUM(packets) AS packets,
-                      SUM(bytes) AS bytes
+            """SELECT dst_ip AS peer,
+                      CAST(SUM(packets) AS BIGINT) AS packets,
+                      CAST(SUM(bytes)   AS BIGINT) AS bytes
                FROM connections WHERE src_ip = ?
                GROUP BY dst_ip ORDER BY bytes DESC LIMIT 10""", (ip,))
         return host
@@ -749,9 +704,10 @@ class DatabaseManager:
     def get_geo_distribution(self):
         return self._rows(
             """SELECT country, COUNT(*) AS hosts,
-                      SUM(packets_sent) AS packets, SUM(bytes_sent) AS bytes,
-                      SUM(alert_count) AS alerts, AVG(latitude) AS latitude,
-                      AVG(longitude) AS longitude
+                      CAST(SUM(packets_sent) AS BIGINT) AS packets,
+                      CAST(SUM(bytes_sent)   AS BIGINT) AS bytes,
+                      CAST(SUM(alert_count)  AS BIGINT) AS alerts,
+                      AVG(latitude) AS latitude, AVG(longitude) AS longitude
                FROM hosts WHERE country NOT IN ('PRIVATE')
                GROUP BY country ORDER BY packets DESC""")
 
@@ -779,7 +735,7 @@ class DatabaseManager:
             where.append('dst_ip = ?')
             params.append(dst_ip)
         if malicious_only:
-            where.append('is_malicious = 1')
+            where.append('is_malicious')
         if since is not None:
             where.append('ts > ?')
             params.append(since)
@@ -788,41 +744,46 @@ class DatabaseManager:
             'SELECT * FROM packets %s ORDER BY ts DESC LIMIT ?' % clause,
             tuple(params) + (limit,))
         for r in rows:
-            r['l7'] = json.loads(r['l7_summary']) if r['l7_summary'] else {}
-            r.pop('l7_summary', None)
+            r['l7'] = json_load(r.pop('l7_summary', None)) or {}
         return rows
 
     def get_performance(self, limit=120, source=None):
         if source:
             return self._rows(
-                """SELECT * FROM performance_metrics WHERE source = ?
-                   ORDER BY ts DESC LIMIT ?""", (source, limit))
+                'SELECT %s FROM performance_metrics WHERE source = ? '
+                'ORDER BY ts DESC LIMIT ?' % PERF_COLUMNS, (source, limit))
         return self._rows(
-            'SELECT * FROM performance_metrics ORDER BY ts DESC LIMIT ?',
-            (limit,))
+            'SELECT %s FROM performance_metrics ORDER BY ts DESC LIMIT ?'
+            % PERF_COLUMNS, (limit,))
+
+    # Exact counts, in one round trip. An estimate from pg_class.reltuples
+    # would be cheaper still, but /api/health is the endpoint the container
+    # healthcheck and the tests read row counts from, and an approximation
+    # there would be worse than useless.
+    _COUNTS = 'SELECT ' + ', '.join(
+        '(SELECT COUNT(*) FROM "%s") AS "%s"' % (table, table)
+        for table in TABLES)
 
     def health(self):
         t0 = time.perf_counter()
-        counts = {}
-        for table in TABLES:
-            counts[table] = self._scalar('SELECT COUNT(*) FROM "%s"' % table)
-        latency_ms = (time.perf_counter() - t0) * 1000
-        try:
-            size = os.path.getsize(self.db_path)
-        except OSError:
-            size = 0
-        return {
-            'status': 'ok',
-            'db_path': self.db_path,
-            'db_size_bytes': size,
-            'tables': counts,
-            'table_count': len(counts),
-            'index_count': len(self.index_names()),
-            'journal_mode': self._scalar('PRAGMA journal_mode', (), 'unknown'),
-            'count_query_ms': round(latency_ms, 3),
-        }
+        with self._read_conn() as conn:
+            counts = dict(self._backend.execute(conn, self._COUNTS).one())
+            latency_ms = (time.perf_counter() - t0) * 1000
+            return {
+                'status': 'ok',
+                'backend': self._backend.name,
+                'database': self.display,
+                'server_version': self._backend.server_version(conn),
+                'db_size_bytes': self._backend.size_bytes(conn),
+                'tables': counts,
+                'table_count': len(counts),
+                'index_count': len(self._backend.index_names(conn)),
+                'journal_mode': self._backend.journal_mode(conn),
+                'count_query_ms': round(latency_ms, 3),
+            }
 
     def explain(self, sql, params=()):
-        """EXPLAIN QUERY PLAN output — used by tests to prove index usage."""
-        return [dict(r) for r in self.reader().execute(
-            'EXPLAIN QUERY PLAN ' + sql, params).fetchall()]
+        """Query-plan rows, each with a 'detail' string — used by tests to
+        prove index usage. The plan text is the backend's own."""
+        with self._read_conn() as conn:
+            return self._backend.explain(conn, sql, params)
