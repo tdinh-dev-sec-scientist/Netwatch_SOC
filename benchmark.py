@@ -3,7 +3,7 @@ Reproducible performance benchmark for NetWatch SOC.
 
 Measures two things, both end-to-end and both actually observed:
 
-  Throughput     frames -> ProtocolAnalyzer -> ThreatDetector -> SQLite,
+  Throughput     frames -> ProtocolAnalyzer -> ThreatDetector -> PostgreSQL,
                  including parsing, detection and batched persistence.
                  Reported as packets/minute.
 
@@ -27,6 +27,13 @@ The workload is seeded, so a given --seed reproduces byte-identical traffic.
 Iterations accumulate into one database so the query phase runs against a
 realistically populated dataset; row counts are reported alongside the
 latencies so the numbers can be judged in context.
+
+Database. With no --db the benchmark works in a scratch database of its own and
+removes it afterwards, so it never touches a real one and never reports numbers
+polluted by existing rows: under PostgreSQL that is a `<yourdb>_bench_<pid>`
+database created and dropped on the same server; under DB_BACKEND=sqlite it is
+a temporary file. Pass --db to point at a specific database (a PostgreSQL URL,
+or a path under the SQLite backend), which is then emptied before the run.
 """
 
 import argparse
@@ -40,7 +47,8 @@ import tempfile
 import time
 
 import config as config_module
-from DB_Manager import DatabaseManager
+import db_backends
+from DB_Manager import DatabaseManager, TABLES
 from PacketSimulator import PacketSimulator, TrafficGenerator
 from ProtocolAnalyzer import ProtocolAnalyzer
 from ThreatDetector import ThreatDetector
@@ -257,6 +265,51 @@ def run_query_latency(db, repeats):
     return per_query, everything
 
 
+def _prepare_target(args):
+    """Decide which database to measure against.
+
+    Returns (target, created). `created` is True when the benchmark brought the
+    database into existence and is therefore responsible for removing it.
+    """
+    if args.db:
+        settings = db_backends.resolve_settings(target=args.db)
+        if settings.backend == db_backends.POSTGRESQL:
+            db_backends.create_database(settings.dsn)
+        return settings.dsn, False
+
+    configured = db_backends.resolve_settings()
+    if configured.backend == db_backends.SQLITE:
+        path = os.path.join(tempfile.gettempdir(),
+                            'netwatch_bench_%d.db' % os.getpid())
+        for suffix in ('', '-wal', '-shm'):
+            if os.path.exists(path + suffix):
+                os.remove(path + suffix)
+        return path, True
+
+    scratch = db_backends.with_database(
+        configured.dsn,
+        '%s_bench_%d' % (db_backends.database_name(configured.dsn),
+                         os.getpid()))
+    db_backends.drop_database(scratch)      # a previous run may have been killed
+    db_backends.create_database(scratch, exists_ok=False)
+    return scratch, True
+
+
+def _discard_target(settings):
+    if settings.backend == db_backends.POSTGRESQL:
+        db_backends.drop_database(settings.dsn)
+        return
+    for suffix in ('', '-wal', '-shm'):
+        if os.path.exists(settings.dsn + suffix):
+            os.remove(settings.dsn + suffix)
+
+
+def _empty(db):
+    """Clear every telemetry table, then restore the ATT&CK catalog."""
+    db._backend.truncate(db._backend.writer(), TABLES)
+    db.seed_technique_catalog()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description='NetWatch SOC benchmark')
     ap.add_argument('--iterations', type=int, default=5)
@@ -270,25 +323,32 @@ def main(argv=None):
                          '(default: --packets)')
     ap.add_argument('--seed', type=int, default=1337)
     ap.add_argument('--db', default=None,
-                    help='database path (default: a temporary file)')
+                    help='PostgreSQL URL, or a path under DB_BACKEND=sqlite '
+                         '(default: a scratch database, removed afterwards)')
     ap.add_argument('--json', default=None, help='write results as JSON')
-    ap.add_argument('--keep-db', action='store_true')
+    ap.add_argument('--keep-db', action='store_true',
+                    help='do not remove the scratch database afterwards')
     args = ap.parse_args(argv)
 
-    db_path = args.db or os.path.join(tempfile.gettempdir(),
-                                      'netwatch_bench_%d.db' % os.getpid())
-    for suffix in ('', '-wal', '-shm'):
-        if os.path.exists(db_path + suffix):
-            os.remove(db_path + suffix)
+    try:
+        target, created = _prepare_target(args)
+    except db_backends.ConfigError as exc:
+        print('database configuration error: %s' % exc, file=sys.stderr)
+        return 2
 
     print('NetWatch SOC benchmark')
-    print('  database   : %s' % db_path)
+    print('  database   : %s%s' % (db_backends.redact(target),
+                                   ' (created for this run)' if created else ''))
     print('  iterations : %d' % args.iterations)
     print('  packets    : %d background + %d attack scenarios per iteration'
           % (args.packets, len(WORKLOAD_SCENARIOS)))
     print('  seed       : %d\n' % args.seed)
 
-    db = DatabaseManager(db_path)
+    db = DatabaseManager(target)
+    if not created:
+        # An explicitly named database may already hold rows; the throughput
+        # and latency figures are only comparable from an empty one.
+        _empty(db)
     runs = []
     base_ts = time.time() - args.iterations * 3600
 
@@ -454,10 +514,10 @@ def main(argv=None):
         print('\n  results written to %s' % args.json)
 
     db.close()
-    if not args.keep_db and not args.db:
-        for suffix in ('', '-wal', '-shm'):
-            if os.path.exists(db_path + suffix):
-                os.remove(db_path + suffix)
+    if created and not args.keep_db:
+        _discard_target(db.settings)
+    elif created:
+        print('  kept %s' % db_backends.redact(target))
 
     met = (results['targets']['throughput_met']
            and results['targets']['query_latency_met']
