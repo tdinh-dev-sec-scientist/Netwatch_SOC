@@ -344,185 +344,193 @@ def main(argv=None):
           % (args.packets, len(WORKLOAD_SCENARIOS)))
     print('  seed       : %d\n' % args.seed)
 
-    db = DatabaseManager(target)
-    if not created:
-        # An explicitly named database may already hold rows; the throughput
-        # and latency figures are only comparable from an empty one.
-        _empty(db)
-    runs = []
-    base_ts = time.time() - args.iterations * 3600
+    # The scratch database is this process's to remove, including when a
+    # measurement raises part way through — otherwise an interrupted run
+    # leaves a netwatch_bench_<pid> database behind on the server.
+    db = None
+    try:
+        db = DatabaseManager(target)
+        if not created:
+            # An explicitly named database may already hold rows; the throughput
+            # and latency figures are only comparable from an empty one.
+            _empty(db)
+        runs = []
+        base_ts = time.time() - args.iterations * 3600
 
-    for i in range(1, args.iterations + 1):
-        # A distinct seed and time offset per iteration keeps the workload
-        # varied while remaining fully reproducible from --seed.
-        frames = build_workload(args.packets, args.seed + i,
-                                base_ts + (i - 1) * 3600)
-        result = run_throughput(db, frames, i)
-        runs.append(result)
-        print('  iteration %d/%d: %8.1f pkt/min = %7.1f pkt/s  (%d packets '
-              'in %.2fs, %d alerts, %d parse errors)'
-              % (i, args.iterations, result['packets_per_min'],
-                 result['packets_per_s'], result['packets_processed'],
-                 result['elapsed_s'], result['alerts_generated'],
-                 result['parse_errors']))
+        for i in range(1, args.iterations + 1):
+            # A distinct seed and time offset per iteration keeps the workload
+            # varied while remaining fully reproducible from --seed.
+            frames = build_workload(args.packets, args.seed + i,
+                                    base_ts + (i - 1) * 3600)
+            result = run_throughput(db, frames, i)
+            runs.append(result)
+            print('  iteration %d/%d: %8.1f pkt/min = %7.1f pkt/s  (%d packets '
+                  'in %.2fs, %d alerts, %d parse errors)'
+                  % (i, args.iterations, result['packets_per_min'],
+                     result['packets_per_s'], result['packets_processed'],
+                     result['elapsed_s'], result['alerts_generated'],
+                     result['parse_errors']))
 
-    throughputs = [r['packets_per_min'] for r in runs]
-    rates = [r['packets_per_s'] for r in runs]
-    health = db.health()
+        throughputs = [r['packets_per_min'] for r in runs]
+        rates = [r['packets_per_s'] for r in runs]
+        health = db.health()
 
-    print('\n  populating query benchmark dataset: '
-          '%d packets, %d alerts, %d technique links'
-          % (health['tables']['packets'], health['tables']['alerts'],
-             health['tables']['alert_techniques']))
+        print('\n  populating query benchmark dataset: '
+              '%d packets, %d alerts, %d technique links'
+              % (health['tables']['packets'], health['tables']['alerts'],
+                 health['tables']['alert_techniques']))
 
-    per_query, all_samples = run_query_latency(db, args.query_repeats)
+        per_query, all_samples = run_query_latency(db, args.query_repeats)
 
-    reduction = None
-    if not args.skip_reduction:
-        cfg = config_module.load()
-        n = args.reduction_packets or args.packets
-        reduction = run_alert_reduction(
-            db,
-            build_workload(n, args.seed, base_ts),
-            TrafficGenerator(args.seed + 1000).background(n, start_ts=base_ts),
-            cfg)
+        reduction = None
+        if not args.skip_reduction:
+            cfg = config_module.load()
+            n = args.reduction_packets or args.packets
+            reduction = run_alert_reduction(
+                db,
+                build_workload(n, args.seed, base_ts),
+                TrafficGenerator(args.seed + 1000).background(n, start_ts=base_ts),
+                cfg)
 
-    throughput_summary = {
-        'iterations': len(runs),
-        'mean_packets_per_min': round(statistics.fmean(throughputs), 1),
-        'median_packets_per_min': round(statistics.median(throughputs), 1),
-        'min_packets_per_min': round(min(throughputs), 1),
-        'max_packets_per_min': round(max(throughputs), 1),
-        'stdev_packets_per_min': round(
-            statistics.stdev(throughputs), 1) if len(throughputs) > 1 else 0.0,
-        'mean_packets_per_s': round(statistics.fmean(rates), 1),
-        'median_packets_per_s': round(statistics.median(rates), 1),
-        'min_packets_per_s': round(min(rates), 1),
-        'max_packets_per_s': round(max(rates), 1),
-        'stdev_packets_per_s': round(
-            statistics.stdev(rates), 1) if len(rates) > 1 else 0.0,
-        'total_packets': sum(r['packets_processed'] for r in runs),
-        'total_alerts': sum(r['alerts_generated'] for r in runs),
-        'total_parse_errors': sum(r['parse_errors'] for r in runs),
-        'mean_parse_us': round(
-            statistics.fmean([r['parse_us_avg'] for r in runs]), 3),
-        'mean_detect_us': round(
-            statistics.fmean([r['detect_us_avg'] for r in runs]), 3),
-    }
-    query_summary = summarize(all_samples)
-    slowest = sorted(per_query.items(), key=lambda kv: -kv[1]['p95_ms'])[:5]
+        throughput_summary = {
+            'iterations': len(runs),
+            'mean_packets_per_min': round(statistics.fmean(throughputs), 1),
+            'median_packets_per_min': round(statistics.median(throughputs), 1),
+            'min_packets_per_min': round(min(throughputs), 1),
+            'max_packets_per_min': round(max(throughputs), 1),
+            'stdev_packets_per_min': round(
+                statistics.stdev(throughputs), 1) if len(throughputs) > 1 else 0.0,
+            'mean_packets_per_s': round(statistics.fmean(rates), 1),
+            'median_packets_per_s': round(statistics.median(rates), 1),
+            'min_packets_per_s': round(min(rates), 1),
+            'max_packets_per_s': round(max(rates), 1),
+            'stdev_packets_per_s': round(
+                statistics.stdev(rates), 1) if len(rates) > 1 else 0.0,
+            'total_packets': sum(r['packets_processed'] for r in runs),
+            'total_alerts': sum(r['alerts_generated'] for r in runs),
+            'total_parse_errors': sum(r['parse_errors'] for r in runs),
+            'mean_parse_us': round(
+                statistics.fmean([r['parse_us_avg'] for r in runs]), 3),
+            'mean_detect_us': round(
+                statistics.fmean([r['detect_us_avg'] for r in runs]), 3),
+        }
+        query_summary = summarize(all_samples)
+        slowest = sorted(per_query.items(), key=lambda kv: -kv[1]['p95_ms'])[:5]
 
-    print('\n── Throughput ' + '─' * 52)
-    print('  mean      : %9.1f packets/min  (%.1f packets/s)'
-          % (throughput_summary['mean_packets_per_min'],
-             throughput_summary['mean_packets_per_s']))
-    print('  median    : %9.1f packets/min  (%.1f packets/s)'
-          % (throughput_summary['median_packets_per_min'],
-             throughput_summary['median_packets_per_s']))
-    print('  range     : %9.1f - %.1f packets/min  (%.1f - %.1f packets/s)'
-          % (throughput_summary['min_packets_per_min'],
-             throughput_summary['max_packets_per_min'],
-             throughput_summary['min_packets_per_s'],
-             throughput_summary['max_packets_per_s']))
-    print('  per packet: %.1f us parse + %.1f us detect'
-          % (throughput_summary['mean_parse_us'],
-             throughput_summary['mean_detect_us']))
-    print('  target 5,000 pkt/min: %s'
-          % ('MET' if throughput_summary['mean_packets_per_min'] >= 5000
-             else 'NOT MET'))
+        print('\n── Throughput ' + '─' * 52)
+        print('  mean      : %9.1f packets/min  (%.1f packets/s)'
+              % (throughput_summary['mean_packets_per_min'],
+                 throughput_summary['mean_packets_per_s']))
+        print('  median    : %9.1f packets/min  (%.1f packets/s)'
+              % (throughput_summary['median_packets_per_min'],
+                 throughput_summary['median_packets_per_s']))
+        print('  range     : %9.1f - %.1f packets/min  (%.1f - %.1f packets/s)'
+              % (throughput_summary['min_packets_per_min'],
+                 throughput_summary['max_packets_per_min'],
+                 throughput_summary['min_packets_per_s'],
+                 throughput_summary['max_packets_per_s']))
+        print('  per packet: %.1f us parse + %.1f us detect'
+              % (throughput_summary['mean_parse_us'],
+                 throughput_summary['mean_detect_us']))
+        print('  target 5,000 pkt/min: %s'
+              % ('MET' if throughput_summary['mean_packets_per_min'] >= 5000
+                 else 'NOT MET'))
 
-    print('\n── Query latency (%d queries x %d repeats) '
-          % (len(QUERIES), args.query_repeats) + '─' * 20)
-    print('  p50 %.3f ms | p95 %.3f ms | p99 %.3f ms | max %.3f ms'
-          % (query_summary['p50_ms'], query_summary['p95_ms'],
-             query_summary['p99_ms'], query_summary['max_ms']))
-    print('  target <50 ms (p95): %s'
-          % ('MET' if query_summary['p95_ms'] < 50 else 'NOT MET'))
-    print('  slowest queries by p95:')
-    for name, stats in slowest:
-        print('    %-26s p50 %7.3f ms   p95 %7.3f ms'
-              % (name, stats['p50_ms'], stats['p95_ms']))
+        print('\n── Query latency (%d queries x %d repeats) '
+              % (len(QUERIES), args.query_repeats) + '─' * 20)
+        print('  p50 %.3f ms | p95 %.3f ms | p99 %.3f ms | max %.3f ms'
+              % (query_summary['p50_ms'], query_summary['p95_ms'],
+                 query_summary['p99_ms'], query_summary['max_ms']))
+        print('  target <50 ms (p95): %s'
+              % ('MET' if query_summary['p95_ms'] < 50 else 'NOT MET'))
+        print('  slowest queries by p95:')
+        for name, stats in slowest:
+            print('    %-26s p50 %7.3f ms   p95 %7.3f ms'
+                  % (name, stats['p50_ms'], stats['p95_ms']))
 
-    if reduction is not None:
-        print('\n── Alert volume ' + '─' * 51)
-        print('  workload            : %d frames (benign background + '
-              '%d attack scenarios)'
-              % (reduction['workload_frames'], len(WORKLOAD_SCENARIOS)))
-        print('  same rules, no dedup: %d alerts (%d distinct incidents)'
-              % (reduction['undeduplicated_alerts'],
-                 reduction['distinct_incidents_undeduplicated']))
-        print('  shipped tuning      : %d alerts (%d distinct incidents)'
-              % (reduction['tuned_alerts'],
-                 reduction['distinct_incidents_tuned']))
-        print('  reduction           : %.1f%%' % reduction['reduction_pct'])
-        lost = reduction['incidents_lost']
-        print('  incidents lost      : %d%s'
-              % (len(lost), ('  ' + ', '.join(lost[:5])
-                             + (' ...' if len(lost) > 5 else '')) if lost
-                 else ''))
-        print('  benign-only corpus  : %d alerts over %d frames '
-              '(%.3f per 10k packets)'
-              % (reduction['benign_alerts'], reduction['benign_frames'],
-                 reduction['benign_alerts_per_10k_packets']))
-        print('  severity mix        : %s'
-              % ', '.join('%s %d' % kv
-                          for kv in sorted(
-                              reduction['tuned_severity_mix'].items())))
-        print('  no incident lost to suppression: %s'
-              % ('MET' if not reduction['incidents_lost'] else 'NOT MET'))
+        if reduction is not None:
+            print('\n── Alert volume ' + '─' * 51)
+            print('  workload            : %d frames (benign background + '
+                  '%d attack scenarios)'
+                  % (reduction['workload_frames'], len(WORKLOAD_SCENARIOS)))
+            print('  same rules, no dedup: %d alerts (%d distinct incidents)'
+                  % (reduction['undeduplicated_alerts'],
+                     reduction['distinct_incidents_undeduplicated']))
+            print('  shipped tuning      : %d alerts (%d distinct incidents)'
+                  % (reduction['tuned_alerts'],
+                     reduction['distinct_incidents_tuned']))
+            print('  reduction           : %.1f%%' % reduction['reduction_pct'])
+            lost = reduction['incidents_lost']
+            print('  incidents lost      : %d%s'
+                  % (len(lost), ('  ' + ', '.join(lost[:5])
+                                 + (' ...' if len(lost) > 5 else '')) if lost
+                     else ''))
+            print('  benign-only corpus  : %d alerts over %d frames '
+                  '(%.3f per 10k packets)'
+                  % (reduction['benign_alerts'], reduction['benign_frames'],
+                     reduction['benign_alerts_per_10k_packets']))
+            print('  severity mix        : %s'
+                  % ', '.join('%s %d' % kv
+                              for kv in sorted(
+                                  reduction['tuned_severity_mix'].items())))
+            print('  no incident lost to suppression: %s'
+                  % ('MET' if not reduction['incidents_lost'] else 'NOT MET'))
 
-    db.record_performance({
-        'source': 'benchmark',
-        'window_s': sum(r['elapsed_s'] for r in runs),
-        'packets_processed': throughput_summary['total_packets'],
-        'packets_per_min': throughput_summary['mean_packets_per_min'],
-        'alerts_generated': throughput_summary['total_alerts'],
-        'parse_errors': throughput_summary['total_parse_errors'],
-        'parse_us_avg': throughput_summary['mean_parse_us'],
-        'detect_us_avg': throughput_summary['mean_detect_us'],
-        'db_write_ms': round(sum(r['db_write_ms_total'] for r in runs), 2),
-        'query_p50_ms': query_summary['p50_ms'],
-        'query_p95_ms': query_summary['p95_ms'],
-    })
+        db.record_performance({
+            'source': 'benchmark',
+            'window_s': sum(r['elapsed_s'] for r in runs),
+            'packets_processed': throughput_summary['total_packets'],
+            'packets_per_min': throughput_summary['mean_packets_per_min'],
+            'alerts_generated': throughput_summary['total_alerts'],
+            'parse_errors': throughput_summary['total_parse_errors'],
+            'parse_us_avg': throughput_summary['mean_parse_us'],
+            'detect_us_avg': throughput_summary['mean_detect_us'],
+            'db_write_ms': round(sum(r['db_write_ms_total'] for r in runs), 2),
+            'query_p50_ms': query_summary['p50_ms'],
+            'query_p95_ms': query_summary['p95_ms'],
+        })
 
-    results = {
-        'generated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
-        'python': sys.version.split()[0],
-        'platform': sys.platform,
-        'seed': args.seed,
-        'throughput': throughput_summary,
-        'throughput_runs': runs,
-        'query_latency_overall': query_summary,
-        'query_latency_by_query': per_query,
-        'alert_reduction': reduction,
-        'dataset': health['tables'],
-        'index_count': health['index_count'],
-        'targets': {
-            'throughput_packets_per_min': 5000,
-            'throughput_met':
-                throughput_summary['mean_packets_per_min'] >= 5000,
-            'query_latency_ms': 50,
-            'query_latency_met': query_summary['p95_ms'] < 50,
-            'no_incident_lost_to_suppression':
-                not reduction['incidents_lost'] if reduction else None,
-        },
-    }
+        results = {
+            'generated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            'python': sys.version.split()[0],
+            'platform': sys.platform,
+            'seed': args.seed,
+            'throughput': throughput_summary,
+            'throughput_runs': runs,
+            'query_latency_overall': query_summary,
+            'query_latency_by_query': per_query,
+            'alert_reduction': reduction,
+            'dataset': health['tables'],
+            'index_count': health['index_count'],
+            'targets': {
+                'throughput_packets_per_min': 5000,
+                'throughput_met':
+                    throughput_summary['mean_packets_per_min'] >= 5000,
+                'query_latency_ms': 50,
+                'query_latency_met': query_summary['p95_ms'] < 50,
+                'no_incident_lost_to_suppression':
+                    not reduction['incidents_lost'] if reduction else None,
+            },
+        }
 
-    if args.json:
-        with open(args.json, 'w', encoding='utf-8') as fh:
-            json.dump(results, fh, indent=2)
-        print('\n  results written to %s' % args.json)
+        if args.json:
+            with open(args.json, 'w', encoding='utf-8') as fh:
+                json.dump(results, fh, indent=2)
+            print('\n  results written to %s' % args.json)
 
-    db.close()
-    if created and not args.keep_db:
-        _discard_target(db.settings)
-    elif created:
-        print('  kept %s' % db_backends.redact(target))
-
-    met = (results['targets']['throughput_met']
-           and results['targets']['query_latency_met']
-           and results['targets']['no_incident_lost_to_suppression'] is not False)
-    return 0 if met else 1
+        met = (results['targets']['throughput_met']
+               and results['targets']['query_latency_met']
+               and results['targets']['no_incident_lost_to_suppression'] is not False)
+        return 0 if met else 1
+    finally:
+        if db is not None:
+            db.close()
+        if created and not args.keep_db:
+            # Resolved from `target` rather than `db`, which may never have
+            # been built if connecting was what failed.
+            _discard_target(db_backends.resolve_settings(target=target))
+        elif created:
+            print('  kept %s' % db_backends.redact(target))
 
 
 if __name__ == '__main__':
