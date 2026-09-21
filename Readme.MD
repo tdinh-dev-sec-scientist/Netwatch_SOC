@@ -110,7 +110,7 @@ Dataset     : 106,690 packets, 120 alerts, 135 technique links
 | Protocols inspected | 15+ | **21** | ✅ |
 | ATT&CK techniques | 12 | **15** across 9 tactics | ✅ |
 | SQLite tables | 8 | **8**, all written by the pipeline | ✅ |
-| Indexes | — | **24**, usage asserted by `EXPLAIN QUERY PLAN` | ✅ |
+| Indexes | — | **25**, usage asserted by `EXPLAIN QUERY PLAN` | ✅ |
 | REST endpoints | 14+ | **24** | ✅ |
 | Dashboard modules | 8+ | **9** | ✅ |
 | Throughput | 5,000 pkt/min | **315,115 pkt/min median = 5,252 pkt/s** (4,567–7,555 pkt/s) | ✅ |
@@ -339,7 +339,7 @@ Every table is written by the live pipeline; this is asserted by
 | 7 | `protocol_stats` | Per-minute protocol rollup backing the charts | `bucket` |
 | 8 | `performance_metrics` | Measured throughput and query latency | `ts`, `(source,ts)` |
 
-**24 indexes.** WAL journal mode, one long-lived writer connection under a lock
+**25 indexes.** WAL journal mode, one long-lived writer connection under a lock
 plus thread-local reader connections, and foreign keys enforced.
 
 ### Design notes

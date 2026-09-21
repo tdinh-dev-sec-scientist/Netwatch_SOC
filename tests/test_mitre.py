@@ -114,28 +114,26 @@ def test_catalog_persists_into_the_database(db):
 
 
 def test_alerts_link_to_techniques_in_the_database(populated_db):
-    links = populated_db.reader().execute(
-        'SELECT COUNT(*) FROM alert_techniques').fetchone()[0]
+    links = populated_db._scalar('SELECT COUNT(*) FROM alert_techniques')
     assert links > 0
 
     # Every link must resolve to both a real alert and a catalogued technique.
-    orphaned = populated_db.reader().execute(
+    orphaned = populated_db._scalar(
         """SELECT COUNT(*) FROM alert_techniques at
            LEFT JOIN alerts a ON a.id = at.alert_id
            LEFT JOIN mitre_techniques t ON t.technique_id = at.technique_id
-           WHERE a.id IS NULL OR t.technique_id IS NULL""").fetchone()[0]
+           WHERE a.id IS NULL OR t.technique_id IS NULL""")
     assert orphaned == 0
 
     # And no alert may exist without at least one technique attached.
-    unmapped = populated_db.reader().execute(
+    unmapped = populated_db._scalar(
         """SELECT COUNT(*) FROM alerts a
            WHERE NOT EXISTS (SELECT 1 FROM alert_techniques at
-                             WHERE at.alert_id = a.id)""").fetchone()[0]
+                             WHERE at.alert_id = a.id)""")
     assert unmapped == 0
 
 
 def test_observed_technique_count_in_database(populated_db):
-    observed = populated_db.reader().execute(
-        'SELECT COUNT(DISTINCT technique_id) FROM alert_techniques'
-    ).fetchone()[0]
+    observed = populated_db._scalar(
+        'SELECT COUNT(DISTINCT technique_id) FROM alert_techniques')
     assert observed >= 12, 'only %d techniques observed in DB' % observed
