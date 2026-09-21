@@ -115,6 +115,10 @@ def applied(backend, conn):
     rows = backend.execute(
         conn, 'SELECT version, name, checksum FROM schema_migrations '
               'ORDER BY version').rows
+    # Committed even though nothing was written: the writer connection is not
+    # in autocommit, so this read opened a transaction, and leaving it open
+    # would hold a snapshot — and block the caller from changing session state.
+    backend.commit(conn)
     return {r['version']: (r['name'], r['checksum']) for r in rows}
 
 
@@ -135,8 +139,15 @@ def apply_pending(backend, conn, log=None):
     """Apply every pending migration. Returns the versions applied.
 
     Idempotent: a database already at the latest version is untouched, which
-    is what makes it safe to call on every process start.
+    is what makes it safe to call on every process start. Held under the
+    backend's migration lock, so two processes starting together serialise
+    instead of racing to create the same table.
     """
+    with backend.migration_lock(conn):
+        return _apply_pending_locked(backend, conn, log)
+
+
+def _apply_pending_locked(backend, conn, log):
     todo, drifted = pending(backend, conn)
     if drifted:
         raise MigrationError(
