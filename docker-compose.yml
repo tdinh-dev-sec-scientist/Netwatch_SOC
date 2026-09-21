@@ -3,12 +3,14 @@
 #   docker compose --profile all-in-one up -d --build   engine + API in one process
 #   docker compose --profile split up -d --build        dedicated engine + API replicas
 #   docker compose --profile test run --rm tests
+#   docker compose up -d postgres                       just the database, for local dev
 #
-# Every service belongs to exactly one profile, and the profiles are mutually
-# exclusive by design. The all-in-one service used to have no profile, which
-# made it start alongside `--profile split` as well: two engines writing to one
-# SQLite volume, the duplication gunicorn.conf.py exists to prevent. CI checks
-# that each profile runs exactly one engine.
+# Every application service belongs to exactly one profile, and the profiles are
+# mutually exclusive by design. The all-in-one service used to have no profile,
+# which made it start alongside `--profile split` as well: two engines recording
+# the same network twice. CI checks that each profile runs exactly one engine.
+# `postgres` is the exception and belongs to all of them — it is shared
+# infrastructure, not a topology.
 #
 # The `version:` key is deliberately absent — it is obsolete in Compose v2+ and
 # emits a warning.
@@ -17,6 +19,11 @@
 # Linux capabilities dropped, privilege escalation blocked, and no host network
 # access. See the note at the bottom about live packet capture, which is the one
 # mode that genuinely needs elevated privileges.
+#
+# Credentials come from .env (see .env.example). The defaults below are
+# development values and are not a secret; a real deployment supplies
+# DATABASE_URL from its platform's secret store and does not run this file's
+# postgres service at all.
 
 x-hardening: &hardening
   # Blocks setuid binaries from gaining privileges — stops a compromised
@@ -25,8 +32,8 @@ x-hardening: &hardening
     - no-new-privileges:true
   cap_drop:
     - ALL
-  # The application is pure Python over SQLite: it binds one port and writes
-  # one file. It needs no capabilities at all.
+  # The application binds one port and opens database connections. It writes
+  # nothing to disk, which is why the root filesystem can be read-only.
   read_only: true
   tmpfs:
     - /tmp:rw,noexec,nosuid,nodev,size=64m
@@ -41,15 +48,72 @@ x-hardening: &hardening
       max-file: "5"
 
 x-app-env: &app-env
-  NETWATCH_DB: /data/netwatch.db
+  DB_BACKEND: postgresql
+  DATABASE_URL: >-
+    postgresql://${POSTGRES_USER:-netwatch}:${POSTGRES_PASSWORD:-netwatch}@postgres:5432/${POSTGRES_DB:-netwatch}
   PYTHONDONTWRITEBYTECODE: "1"
   PYTHONUNBUFFERED: "1"
   TZ: UTC
 
+x-postgres-dependency: &needs-postgres
+  postgres:
+    # Not service_started: the application applies migrations on startup, so it
+    # must not run before the server is accepting connections.
+    condition: service_healthy
+
 services:
-  # ── all-in-one: the default, and the correct shape for SQLite ─────────────
+  # ── database ──────────────────────────────────────────────────────────────
+  # Pinned to a patch release so a rebuild cannot silently move major version;
+  # upgrading across one needs pg_upgrade or a dump/restore, not a new tag.
+  postgres:
+    profiles: ["all-in-one", "split", "test", "db"]
+    image: postgres:16.13-alpine
+    container_name: netwatch-postgres
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-netwatch}
+      POSTGRES_USER: ${POSTGRES_USER:-netwatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-netwatch}
+      # scram-sha-256 rather than the image's md5 default.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      # Keeps the data directory one level down, so an anonymous volume or a
+      # lost+found directory in the mount cannot make initdb refuse to start.
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: UTC
+    ports:
+      # Loopback only: the database must not be reachable off-host. Published
+      # at all so `pytest` and `psql` can reach it from the host during
+      # development; drop this mapping in any shared environment.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - netwatch-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # -d and -U are needed or pg_isready checks the wrong database and
+      # reports ready while initdb is still running its bootstrap pass.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-netwatch} -d ${POSTGRES_DB:-netwatch}"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # ── all-in-one: engine and API in one process ─────────────────────────────
   # One process owns both the detection engine and the API, so there is exactly
-  # one writer. gunicorn.conf.py refuses to start this with >1 worker.
+  # one traffic generator. gunicorn.conf.py refuses to start this with >1 worker.
   netwatch:
     profiles: ["all-in-one"]
     build:
@@ -66,13 +130,14 @@ services:
       GUNICORN_WORKERS: "1"
       GUNICORN_THREADS: "8"
       GUNICORN_LOGLEVEL: info
+      # One connection per thread, plus the engine's writer.
+      PG_POOL_MAX: "9"
     ports:
       # Bound to loopback: this app has no authentication, so it must sit
       # behind a reverse proxy that terminates TLS and authenticates before
       # it is reachable off-host. Change to "5001:5001" only deliberately.
       - "127.0.0.1:5001:5001"
-    volumes:
-      - netwatch-data:/data
+    depends_on: *needs-postgres
     healthcheck:
       test:
         - CMD
@@ -95,9 +160,9 @@ services:
           memory: 128M
 
   # ── split topology (profile: split) ───────────────────────────────────────
-  # One writer, many readers. SQLite WAL allows concurrent readers alongside a
-  # single writer, so the API scales horizontally without touching the write
-  # path. Requires engine and web to share a filesystem — see the caveat below.
+  # One writer, many readers. Under PostgreSQL the API replicas need nothing but
+  # DATABASE_URL — no shared filesystem, no WAL sidecar files — so they can run
+  # on separate hosts, which is what this topology could not do over SQLite.
   engine:
     build:
       context: .
@@ -112,8 +177,9 @@ services:
       <<: *app-env
       NETWATCH_SIMULATE: "1"
       NETWATCH_RATE_PPS: "95"
-    volumes:
-      - netwatch-data:/data
+      # One writer and one reader for the periodic latency sample.
+      PG_POOL_MAX: "2"
+    depends_on: *needs-postgres
     healthcheck:
       # No HTTP surface, so health is "is the database still advancing?".
       test:
@@ -121,9 +187,9 @@ services:
         - python
         - -c
         - |
-          import os,sqlite3,sys,time
-          c=sqlite3.connect('file:%s?mode=ro' % os.environ['NETWATCH_DB'], uri=True)
-          fresh=c.execute('SELECT COUNT(*) FROM packets WHERE ts > ?', (time.time()-120,)).fetchone()[0]
+          import os,sys,time,psycopg
+          with psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=5) as c:
+              fresh=c.execute('SELECT COUNT(*) FROM packets WHERE ts > %s', (time.time()-120,)).fetchone()[0]
           sys.exit(0 if fresh > 0 else 1)
       interval: 60s
       timeout: 10s
@@ -149,6 +215,10 @@ services:
       NETWATCH_SIMULATE: "0"
       GUNICORN_WORKERS: "4"
       GUNICORN_THREADS: "4"
+      # Per worker process, so this tier can hold up to replicas x workers x
+      # PG_POOL_MAX connections. Keep the product under the server's
+      # max_connections (100 by default) with room for the engine.
+      PG_POOL_MAX: "4"
       # GUNICORN_FORWARDED_ALLOW_IPS is deliberately unset, so no
       # X-Forwarded-* header is trusted. It previously held a CIDR range,
       # which gunicorn 23 rejects at startup ("does not appear to be an IPv4
@@ -160,11 +230,9 @@ services:
       # by two containers, so the second replica used to fail to start with
       # "port is already allocated". Keep the range as wide as `replicas`.
       - "127.0.0.1:5001-5002:5001"
-    volumes:
-      # Readers still need write access to the -wal and -shm sidecar files;
-      # SQLite cannot open a WAL database read-only without them.
-      - netwatch-data:/data
     depends_on:
+      postgres:
+        condition: service_healthy
       engine:
         condition: service_started
     healthcheck:
@@ -195,26 +263,42 @@ services:
     image: netwatch-soc:test
     profiles: ["test"]
     <<: *hardening
-    read_only: false          # pytest writes temporary databases
+    read_only: false          # pytest and pip write temporary files
     restart: "no"
     entrypoint: []
     command: ["python", "-m", "pytest", "-q"]
     environment:
       <<: *app-env
-      NETWATCH_DB: /tmp/test.db
+      # The suite creates and drops netwatch_test_* databases alongside this
+      # one and never writes to the database named here.
+      TEST_DATABASE_URL: >-
+        postgresql://${POSTGRES_USER:-netwatch}:${POSTGRES_PASSWORD:-netwatch}@postgres:5432/${POSTGRES_DB:-netwatch}
+    depends_on: *needs-postgres
 
 volumes:
-  netwatch-data:
+  netwatch-pgdata:
     driver: local
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Operational notes
 #
-# SQLite and the split topology
-#   WAL requires the database, its -wal and its -shm sidecars to sit on a
-#   filesystem supporting POSIX advisory locks and shared mmap. A local Docker
-#   volume qualifies; NFS does not. Do not spread engine and web across hosts
-#   with a network filesystem — move to Postgres before you do that.
+# The database
+#   This postgres service is for development. In a real deployment point
+#   DATABASE_URL at a managed PostgreSQL instance and do not start it: you want
+#   someone else running backups, failover and minor-version upgrades. Use
+#   PG_SSLMODE=require (verify-full if you can pin the CA) whenever the
+#   connection leaves the host.
+#
+#   The image is pinned to a patch release of PostgreSQL 16. A major-version
+#   change is not a tag edit — the on-disk format differs, and the server will
+#   refuse to start against a data directory from another major version. Use
+#   pg_upgrade or dump and restore.
+#
+# Connection budget
+#   PostgreSQL's default max_connections is 100 and each connection costs real
+#   memory. The split topology can hold replicas x GUNICORN_WORKERS x
+#   PG_POOL_MAX (2 x 4 x 4 = 32) plus the engine's 2. Raise max_connections, or
+#   put pgbouncer in front, before scaling much past that.
 #
 # Live packet capture
 #   The shipped engine generates synthetic traffic and needs no privileges. To
@@ -232,5 +316,8 @@ volumes:
 #   in front for TLS, authn and rate limiting before changing that.
 #
 # Backups
-#   Copy the database with `sqlite3 /data/netwatch.db ".backup /backup/x.db"`,
-#   not `cp` — a plain copy of a live WAL database can be torn.
+#   pg_dump, from the host or a sidecar:
+#       docker compose exec postgres pg_dump -U netwatch -Fc netwatch > netwatch.dump
+#   A file copy of a running data directory is not a backup. For
+#   point-in-time recovery you want continuous WAL archiving, which is the main
+#   argument for letting a managed service do this.
