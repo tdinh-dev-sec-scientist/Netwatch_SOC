@@ -72,7 +72,15 @@ def test_health_reports_schema_and_engine(client):
     assert body['status'] == 'ok'
     assert body['table_count'] == 8
     assert body['index_count'] >= 20
-    assert body['journal_mode'].lower() == 'wal'
+    assert body['backend'] in ('postgresql', 'sqlite')
+    # Both backends are write-ahead logged; PostgreSQL always, SQLite because
+    # the connection asks for it. PostgreSQL also names its wal_level.
+    assert body['journal_mode'].lower().startswith('wal')
+    assert body['server_version']
+    # The DSN is reported with its password replaced, so an operator can see
+    # which database is in use without the endpoint leaking the credential.
+    assert ':***@' in body['database'] or body['backend'] == 'sqlite', \
+        'the health endpoint must not expose the database password'
     assert set(body['tables']) == {
         'packets', 'connections', 'hosts', 'alerts', 'mitre_techniques',
         'alert_techniques', 'protocol_stats', 'performance_metrics'}

@@ -26,6 +26,33 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
 
+    # The suite runs against a real PostgreSQL, because the differences that
+    # matter — strict typing, JSONB, the planner's choices — are invisible to a
+    # test that only ever sees SQLite. Pinned to the same major version as
+    # docker-compose.yml and the deployed database.
+    services:
+      postgres:
+        image: postgres:16.13-alpine
+        env:
+          POSTGRES_DB: netwatch
+          POSTGRES_USER: netwatch
+          POSTGRES_PASSWORD: netwatch
+        ports:
+          - 5432:5432
+        # The job's steps do not start until this passes, so nothing races initdb.
+        options: >-
+          --health-cmd "pg_isready -U netwatch -d netwatch"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The fixtures create and drop netwatch_test_* databases alongside this
+      # one; the benchmark creates and drops a netwatch_bench_<pid>. Both need
+      # the CREATEDB the postgres superuser already has.
+      DATABASE_URL: postgresql://netwatch:netwatch@localhost:5432/netwatch
+      TEST_DATABASE_URL: postgresql://netwatch:netwatch@localhost:5432/netwatch
+
     steps:
       - uses: actions/checkout@v7
 
@@ -39,7 +66,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Migrations apply from an empty database, and are idempotent
+        run: |
+          python migrate.py up
+          python migrate.py status
+          python migrate.py up          # a second run must be a no-op
+
       - name: Unit and integration tests
+        run: python -m pytest
+
+      # The SQLite path is a documented development fallback, so it has to keep
+      # working. Tests that assert PostgreSQL-specific behaviour skip themselves.
+      - name: Unit and integration tests (SQLite fallback)
+        env:
+          DB_BACKEND: sqlite
         run: python -m pytest
 
       # Exits non-zero if throughput misses its target, p95 query latency

@@ -1,13 +1,17 @@
 """
 NetWatch SOC — Flask application and REST API.
 
-Every endpoint reads from SQLite through DatabaseManager. Nothing returns
+Every endpoint reads from PostgreSQL through DatabaseManager. Nothing returns
 hardcoded or synthesised data: if the database is empty, endpoints return
 empty collections rather than filler.
 
 Run:
-    python App.py                      # dashboard + live simulation on :5001
+    DATABASE_URL=postgresql://netwatch:netwatch@localhost:5432/netwatch \
+        python App.py                  # dashboard + live simulation on :5001
     NETWATCH_SIMULATE=0 python App.py  # API only, no traffic generation
+    DB_BACKEND=sqlite python App.py    # local SQLite fallback, dev only
+
+Database configuration is entirely environmental; see db_backends.py.
 """
 
 import os
@@ -16,6 +20,7 @@ import threading
 from flask import Flask, jsonify, render_template, request
 
 import config as config_module
+import db_backends
 import detectors
 import hardening
 import mitre
@@ -346,7 +351,10 @@ def _register(app):
 
 
 if __name__ == '__main__':
-    application = create_app()
+    try:
+        application = create_app()
+    except db_backends.ConfigError as exc:
+        raise SystemExit('database configuration error: %s' % exc)
     debug = os.environ.get('SOC_DEBUG', 'false').lower() == 'true'
     # Never expose the Werkzeug debugger beyond loopback.
     host = '127.0.0.1' if debug else os.environ.get('NETWATCH_HOST',
@@ -356,6 +364,8 @@ if __name__ == '__main__':
           % (len(application.engine.detectors),
              len(application.engine.techniques_covered()),
              len(SUPPORTED_PROTOCOLS)))
+    print('Database:  %s (%s)' % (application.db.display,
+                                  application.db.backend_name))
     print('Dashboard: http://%s:%d   debug=%s' % (host, port, debug))
     application.run(debug=debug, host=host, port=port, threaded=True,
                     use_reloader=False)

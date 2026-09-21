@@ -1,15 +1,17 @@
 """
 Headless capture/detection engine.
 
-Runs the pipeline — frames -> ProtocolAnalyzer -> ThreatDetector -> SQLite —
-with no HTTP server attached. This is the writer half of the split deployment
-topology: one engine process owns the database, while any number of read-only
-API containers serve queries from the same file over SQLite WAL.
+Runs the pipeline — frames -> ProtocolAnalyzer -> ThreatDetector -> PostgreSQL
+— with no HTTP server attached. This is the writer half of the split deployment
+topology: one engine process owns traffic generation and writes, while any
+number of API containers serve reads from the same PostgreSQL database. With
+PostgreSQL they no longer need to share a filesystem, only a connection string.
 
-    NETWATCH_DB=/data/netwatch.db python engine.py
+    DATABASE_URL=postgresql://netwatch:...@postgres:5432/netwatch python engine.py
 
 Environment:
-    NETWATCH_DB        database path (default: ./netwatch.db)
+    DATABASE_URL       PostgreSQL connection string (see db_backends.py for
+                       the PG_* fallbacks and the SQLite dev option)
     NETWATCH_CONFIG    JSON threshold overrides
     NETWATCH_RATE_PPS  packets per second to generate (default: 95)
     NETWATCH_DURATION  seconds to run, then exit (default: run forever)
@@ -25,6 +27,7 @@ import signal
 import sys
 
 import config as config_module
+import db_backends
 from DB_Manager import DatabaseManager
 from PacketSimulator import PacketSimulator
 from ProtocolAnalyzer import ProtocolAnalyzer
@@ -50,13 +53,16 @@ def main():
         stream=sys.stdout)
 
     cfg = config_module.load()
-    db = DatabaseManager()
+    try:
+        db = DatabaseManager()
+    except db_backends.ConfigError as exc:
+        raise SystemExit('database configuration error: %s' % exc)
     detector = ThreatDetector(db, cfg=cfg)
     simulator = PacketSimulator(db, detector, ProtocolAnalyzer(), cfg=cfg)
 
-    log.info('engine ready: detectors=%d techniques=%d db=%s',
+    log.info('engine ready: detectors=%d techniques=%d backend=%s db=%s',
              len(detector.detectors), len(detector.techniques_covered()),
-             db.db_path)
+             db.backend_name, db.display)
 
     def shutdown(signum, _frame):
         # Ask the loop to stop; run() flushes its final batch on the way out.

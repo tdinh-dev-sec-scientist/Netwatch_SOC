@@ -10,3 +10,6 @@ netwatch.db-shm
 benchmark_results.json
 results.json
 .pytest_cache/
+
+# Local environment; never commit real credentials
+.env

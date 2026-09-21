@@ -9,11 +9,15 @@ unaddressed.
 
 One container built from the `runtime` stage of the Dockerfile, running the
 all-in-one topology: a single gunicorn worker that serves the API and runs the
-traffic simulator on a background thread, writing to SQLite on local disk.
-Configuration lives in `render.yaml`.
+traffic simulator on a background thread. It writes to a managed PostgreSQL
+instance, declared alongside the service in `render.yaml`, where all
+configuration lives.
 
 | Setting | Value | Why |
 |---|---|---|
+| `DATABASE_URL` | from the `netwatch-db` database | Injected by Render, including `sslmode`; never in the repo or the image |
+| `NETWATCH_AUTO_MIGRATE` | `1` | Apply pending migrations on startup — correct while there is exactly one instance |
+| `PG_POOL_MAX` | `5` | Four gunicorn threads plus the engine's writer |
 | `NETWATCH_DEMO` | `1` | Refuse every non-GET request; show the "synthetic data" banner |
 | `NETWATCH_RETENTION_S` | `3600` | Delete telemetry older than one hour |
 | `NETWATCH_BACKFILL_MIN` | `15` | Start with 15 minutes of history covering all 17 threat types |
@@ -22,10 +26,32 @@ Configuration lives in `render.yaml`.
 | `NETWATCH_RATE_LIMIT` | `0` | Per-client limit off until client IPs are verified (see below) |
 
 Free-plan behaviour that shapes the design: the service spins down after 15
-minutes without traffic, takes about a minute to spin back up, and loses its
-filesystem when it does. The database is therefore disposable by design, and
-the backfill exists so that a visitor arriving after a cold start does not see
-an empty dashboard.
+minutes without traffic and takes about a minute to spin back up. The database
+now lives outside that container, so unlike the previous SQLite file it is not
+wiped on a cold start — but `NETWATCH_RETENTION_S` keeps only the last hour, and
+the backfill exists so that a visitor arriving after a spin-up does not see an
+empty dashboard.
+
+Two things to know about the free database tier:
+
+- **It expires after 30 days and is then deleted.** For a demo meant to stay up,
+  move to a paid instance. Otherwise treat the loss as a non-event: the app
+  recreates its schema from `migrations/` on the next start, and the traffic is
+  synthetic, so nothing irreplaceable is in there.
+- **Connections are limited and cost memory.** `PG_POOL_MAX=5` keeps one
+  instance comfortably inside the allowance. If you scale to more than one
+  instance, multiply before you raise it — and set `NETWATCH_AUTO_MIGRATE=0`,
+  running `python migrate.py up` as a release step instead, or concurrent boots
+  will race each other applying the same migration.
+
+### If you deploy somewhere else
+
+The only thing that changes is `DATABASE_URL`. Set `PG_SSLMODE=require`
+(`verify-full` if you can pin the CA) for any managed database reached across a
+network you do not control — the discrete `PG_*` variables are there for
+platforms that expose host, port and credentials separately rather than as one
+string. Do not run the compose file's `postgres` service in production; it
+exists for local development and nobody is backing it up.
 
 ## Try it locally first
 

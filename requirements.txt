@@ -1,9 +1,17 @@
 # NetWatch SOC runtime dependencies.
-# The capture, parsing, detection and persistence layers use only the Python
-# standard library (struct, sqlite3, re, math). Flask serves the API and
-# dashboard; gunicorn runs it in production.
+# The capture, parsing and detection layers use only the Python standard
+# library (struct, re, math). Flask serves the API and dashboard; gunicorn runs
+# it in production; psycopg talks to PostgreSQL, which is the production
+# database. SQLite, the development fallback, needs nothing extra — its driver
+# ships with Python.
 Flask>=3.0,<4.0
 gunicorn>=22.0,<24.0
+
+# PostgreSQL. psycopg 3 rather than psycopg2: it is the maintained line, and
+# its pipeline-mode executemany is what keeps batched packet inserts fast.
+# The `binary` extra avoids needing libpq headers and a compiler at install
+# time; the `pool` extra provides the reader connection pool.
+psycopg[binary,pool]>=3.1,<4.0
 
 # Development / testing
 pytest>=8.0
