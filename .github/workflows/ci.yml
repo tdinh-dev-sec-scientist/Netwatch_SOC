@@ -82,6 +82,14 @@ jobs:
           DB_BACKEND: sqlite
         run: python -m pytest
 
+      # pytest.ini scopes a bare run to `tests`, so the Splunk integration's
+      # suite has to be named explicitly or it never runs. It needs the same
+      # PostgreSQL service: with TEST_DATABASE_URL set, the forwarder's
+      # cross-backend tests compare real PostgreSQL rows against SQLite ones
+      # instead of skipping.
+      - name: Splunk integration tests
+        run: python -m pytest integrations/splunk
+
       # Exits non-zero if throughput misses its target, p95 query latency
       # exceeds 50 ms, or alert deduplication drops a distinct incident.
       - name: Benchmark gates
