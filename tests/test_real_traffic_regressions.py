@@ -225,3 +225,22 @@ def test_replay_rejects_pcapng(tmp_path):
         assert 'pcapng' in str(exc)
     else:
         raise AssertionError('pcapng accepted')
+
+
+def test_replay_persists_through_the_live_write_path(db, tmp_path):
+    """--persist writes the same rows live capture does, on the capture clock
+    shifted by --rebase-now's offset."""
+    frames = [(1000.0 + 0.05 * i, F.tcp_frame(b'', '185.220.101.44',
+                                              INTERNAL, 40000, 1 + i * 3,
+                                              'SYN'))
+              for i in range(40)]
+    path = tmp_path / 'scan.pcap'
+    _write_pcap(path, frames)
+    shift = BASE_TS - replay.last_timestamp(str(path))
+    summary = replay.replay([str(path)], db=db, shift_s=shift)
+
+    overview = db.get_overview()
+    assert overview['total_packets'] == summary['packets'] == 40
+    alerts = db.get_alerts(threat_type='port_scan')['alerts']
+    assert alerts and alerts[0]['src_ip'] == '185.220.101.44'
+    assert abs(alerts[0]['ts'] - (frames[19][0] + shift)) < 1e-3

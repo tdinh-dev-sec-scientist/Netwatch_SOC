@@ -64,6 +64,19 @@ needs — 3.3 GB instead of 400 GB.
 
 ## Method
 
+To browse a capture in the dashboard rather than score it, replay it into
+PostgreSQL through the live write path (packets, flows, hosts, rollups,
+alerts, technique links), shifted so it ends now:
+
+```bash
+DATABASE_URL=postgresql://netwatch:netwatch@localhost:5432/netwatch \
+    python replay.py data/cicids2018/Thursday-22-02-2018_UCAP172.31.69.28.pcap \
+    --persist --rebase-now
+NETWATCH_SIMULATE=0 python App.py
+```
+
+Scoring:
+
 ```bash
 python eval/cicids2018/fetch.py --out data/cicids2018
 python eval/cicids2018/fetch.py --out data/cicids2018 --truth eval/cicids2018/holdout.json

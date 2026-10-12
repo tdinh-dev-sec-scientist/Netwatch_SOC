@@ -11,6 +11,16 @@ capture rather than on wall time. Nothing is written to a database; findings
 are emitted as JSON lines, one per alert, for scoring against a dataset's
 ground truth (see `eval/`).
 
+With `--persist` the run also goes into the database named by DATABASE_URL
+(PostgreSQL by default) through `PacketSimulator.process` and
+`DatabaseManager.persist_batch` — the same batched transactions as live
+capture — so the API and dashboard serve the real capture. The dashboard's
+queries are relative to now, so pair it with `--rebase-now`, which shifts
+every timestamp so the capture ends at the moment the replay starts:
+
+    DATABASE_URL=postgresql://netwatch:netwatch@localhost:5432/netwatch \
+        python replay.py capture.pcap --persist --rebase-now
+
 Reads classic libpcap files (either byte order, micro- or nanosecond
 resolution) with Ethernet or Linux cooked (SLL) link layers. pcapng is
 rejected with a message — convert it with `editcap -F pcap`.
@@ -79,6 +89,24 @@ def read_pcap(path):
                 yield ts, _FAKE_MACS + ethertype + data
 
 
+def last_timestamp(path):
+    """Timestamp of the final record, found by skipping over packet data."""
+    last = None
+    with open(path, 'rb') as fh:
+        header = fh.read(24)
+        endian, resolution = _MAGIC.get(header[:4], (None, None))
+        if endian is None:
+            raise ValueError('%s: not a classic pcap file' % path)
+        rec = struct.Struct(endian + 'IIII')
+        while True:
+            head = fh.read(16)
+            if len(head) < 16:
+                return last
+            sec, frac, incl, _orig = rec.unpack(head)
+            fh.seek(incl, 1)
+            last = sec + frac * resolution
+
+
 def finding_record(f, source):
     return {
         'ts': f.ts, 'threat_type': f.threat_type, 'detector': f.detector,
@@ -92,15 +120,22 @@ def finding_record(f, source):
     }
 
 
-def replay(paths, cfg=None, on_finding=None, progress_every=0):
+def replay(paths, cfg=None, on_finding=None, progress_every=0, db=None,
+           shift_s=0.0):
     """Run every pcap in `paths`, in order, through one detector instance.
 
     Files are treated as one continuous capture, so pass them in time order.
     Returns a summary dict; each finding is handed to `on_finding(record)`.
+    With `db` (a DatabaseManager) packets and alerts are also persisted, in
+    the live pipeline's batches. `shift_s` is added to every timestamp.
     """
     cfg = cfg or config_module.load()
     analyzer = ProtocolAnalyzer()
-    detector = ThreatDetector(cfg=cfg)
+    detector = ThreatDetector(db, cfg=cfg)
+    simulator = None
+    if db is not None:
+        from PacketSimulator import PacketSimulator
+        simulator = PacketSimulator(db, detector, analyzer, cfg=cfg)
     packets = parsed = findings = 0
     first_ts = last_ts = None
     by_type = {}
@@ -108,15 +143,24 @@ def replay(paths, cfg=None, on_finding=None, progress_every=0):
 
     for path in paths:
         for ts, frame in read_pcap(path):
+            ts += shift_s
             packets += 1
             if first_ts is None:
                 first_ts = ts
             last_ts = ts
-            pkt = analyzer.safe_parse(frame, ts)
-            if pkt is None:
-                continue
+            if simulator is not None:
+                before = simulator.packets_processed
+                new = simulator.process(frame, ts)
+                simulator.maybe_flush()
+                if simulator.packets_processed == before:
+                    continue
+            else:
+                pkt = analyzer.safe_parse(frame, ts)
+                if pkt is None:
+                    continue
+                new = detector.analyze(pkt)
             parsed += 1
-            for f in detector.analyze(pkt):
+            for f in new:
                 findings += 1
                 by_type[f.threat_type] = by_type.get(f.threat_type, 0) + 1
                 if on_finding:
@@ -127,7 +171,12 @@ def replay(paths, cfg=None, on_finding=None, progress_every=0):
                          packets / (time.perf_counter() - started)),
                       file=sys.stderr, flush=True)
 
+    if simulator is not None:
+        simulator.flush()
     elapsed = time.perf_counter() - started
+    if simulator is not None and elapsed > 0:
+        simulator._record_window(elapsed, simulator.packets_processed,
+                                 simulator.alerts_generated)
     return {
         'files': list(paths),
         'packets': packets,
@@ -155,19 +204,42 @@ def main(argv=None):
     ap.add_argument('--summary', help='write the run summary here as JSON')
     ap.add_argument('--progress', type=int, default=0, metavar='N',
                     help='print progress every N packets')
+    ap.add_argument('--persist', action='store_true',
+                    help='also write packets and alerts to the database '
+                    'named by DATABASE_URL')
+    ap.add_argument('--alerts-only', action='store_true',
+                    help='with --persist, write alerts only: no packet, '
+                    'flow, host or protocol rows (for multi-GB captures)')
+    ap.add_argument('--rebase-now', action='store_true',
+                    help='shift timestamps so the capture ends now')
     args = ap.parse_args(argv)
 
     cfg = config_module.load(args.config)
+    shift = 0.0
+    if args.rebase_now:
+        shift = time.time() - last_timestamp(args.pcaps[-1])
+    db = None
+    if args.persist:
+        import db_backends
+        from DB_Manager import DatabaseManager
+        if args.alerts_only:
+            cfg['engine']['store_packets'] = False
+        try:
+            db = DatabaseManager()
+        except db_backends.ConfigError as exc:
+            raise SystemExit('database configuration error: %s' % exc)
     out = open(args.alerts, 'w', encoding='utf-8') if args.alerts else None
     try:
         summary = replay(
             args.pcaps, cfg,
             on_finding=(lambda r: out.write(json.dumps(r) + '\n'))
             if out else None,
-            progress_every=args.progress)
+            progress_every=args.progress, db=db, shift_s=shift)
     finally:
         if out:
             out.close()
+        if db is not None:
+            db.close()
     text = json.dumps(summary, indent=2)
     if args.summary:
         with open(args.summary, 'w', encoding='utf-8') as fh:

@@ -123,7 +123,7 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 | `hardening.py` | Security headers, read-only demo mode, rate limiting |
 | `engine.py` | Headless engine for the split deployment topology |
 | `benchmark.py` | Reproducible throughput, latency and alert-volume measurement |
-| `replay.py` | Offline pcap replay through the real pipeline, alerts as JSON lines |
+| `replay.py` | pcap replay through the real pipeline: alerts as JSON lines, or `--persist` into PostgreSQL for the dashboard |
 | `eval/cicids2018/` | Fetch, ground truth and scoring for the real-traffic validation |
 | `static/vendor/` | Vendored Chart.js, checksum-pinned (no CDN scripts) |
 | `render.yaml` | Render Blueprint for the public demo |
