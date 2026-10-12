@@ -17,8 +17,8 @@ ruleset (ET Open as of 2024-12-11, 54,399 rules) came from.
 Scoring differences, both in Suricata's favour:
 * Its alert types do not map onto NetWatch's, so "right class" is not scored,
   and every alert from an infiltration pivot inside its window is credited.
-* `--min-severity 2` drops severity-3 (informational) signatures, the usual
-  first tuning step; both the full and the tuned set are reported.
+* Three variants are reported (see VARIANTS): the ruleset as distributed,
+  without Suricata's own anomaly events, and severity 1-2 only.
 
 `--captures` reuses NetWatch's captures.json for capture durations, so the
 per-host-hour rates divide by identical denominators.
@@ -41,6 +41,18 @@ import run  # noqa: E402
 from fetch import member_filename  # noqa: E402
 
 SEVERITY = {1: 'HIGH', 2: 'MEDIUM', 3: 'LOW', 4: 'INFO'}
+
+# Three ways an operator might run it, from untouched to the usual first
+# tuning steps. "SURICATA ..." signatures are the engine's own protocol and
+# decoder anomaly events (bad checksums, stream state), not threat rules; on
+# these captures, taken with checksum offload, they are mostly artefacts.
+VARIANTS = [
+    ('all', 'Suricata + ET Open, as distributed', lambda r: True),
+    ('et_rules', 'Suricata + ET Open, without engine anomaly events',
+     lambda r: not (r['signature'] or '').startswith('SURICATA ')),
+    ('sev12', 'Suricata + ET Open, severity 1-2 only',
+     lambda r: r['suricata_severity'] <= 2),
+]
 
 
 def alerts_only_config(config, workdir):
@@ -144,7 +156,7 @@ def main(argv=None):
             print('suricata: %s done' % cap['name'], flush=True)
 
     reports = []
-    for label, min_sev in (('all', 4), ('sev12', 2)):
+    for label, name, keep in VARIANTS:
         target = os.path.join(args.out, label)
         os.makedirs(os.path.join(target, 'alerts'), exist_ok=True)
         summaries = []
@@ -154,7 +166,7 @@ def main(argv=None):
             with open(src, encoding='utf-8') as fh:
                 for line in fh:
                     record = json.loads(line)
-                    if record['suricata_severity'] <= min_sev:
+                    if keep(record):
                         kept.append(line)
             if target != full_dir:
                 with open(os.path.join(target, 'alerts', cap['name'] + '.jsonl'),
@@ -169,8 +181,6 @@ def main(argv=None):
             })
         result = run.score(truth, summaries, target, pivot_any_type=True)
         result['false_positive_causes'] = top_signatures(target, truth)
-        name = ('Suricata + ET Open' if label == 'all'
-                else 'Suricata + ET Open, severity 1-2')
         report = run.render(result, args.rules, tool=name)
         with open(os.path.join(target, 'report.md'), 'w',
                   encoding='utf-8') as fh:
