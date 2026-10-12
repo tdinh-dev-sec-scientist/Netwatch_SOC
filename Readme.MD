@@ -123,6 +123,8 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 | `hardening.py` | Security headers, read-only demo mode, rate limiting |
 | `engine.py` | Headless engine for the split deployment topology |
 | `benchmark.py` | Reproducible throughput, latency and alert-volume measurement |
+| `replay.py` | Offline pcap replay through the real pipeline, alerts as JSON lines |
+| `eval/cicids2018/` | Fetch, ground truth and scoring for the real-traffic validation |
 | `static/vendor/` | Vendored Chart.js, checksum-pinned (no CDN scripts) |
 | `render.yaml` | Render Blueprint for the public demo |
 | `scripts/smoke_test.sh` | End-to-end checks of the image, compose topologies and demo |
@@ -153,7 +155,7 @@ Dataset     : 106,690 packets, 120 alerts, 135 technique links
 | Throughput | 5,000 pkt/min | **377,498 pkt/min median = 6,292 pkt/s** (5,875–7,080 pkt/s) | ✅ |
 | Query latency | < 50 ms | **p50 0.33 ms · p95 10.69 ms · max 16.78 ms** | ✅ |
 | Alert-volume reduction | — | **96.1%** (621 → 24), **0 incidents lost** | ✅ |
-| False positives | — | **0** across 240,000 benign packets, 8 seeds | ✅ |
+| False positives | — | **1.3 per host-hour** on held-out real traffic (CSE-CIC-IDS2018; 507 before fixing the 5 bugs it exposed) — [details](docs/real-traffic-validation.md) | ✅ |
 
 At a larger scale — 248,028 packets and 3,776 alerts, produced by relaxing
 detector cooldowns so more real detections are retained — latency stays within
@@ -305,8 +307,13 @@ tested (`tests/test_detectors.py`):
 - Repeated access to a single file server — **not** lateral movement (fan-out
   across hosts is required).
 
-**Measured false-positive rate: 0 alerts across 240,000 benign packets** over
-8 independent seeds.
+**Measured false-positive rate on real traffic: 1.3 alerts per host-hour** on
+held-out CSE-CIC-IDS2018 captures, and 1.1 on the development captures — down
+from 507 and 375 as first shipped, by fixing five logic bugs the synthetic
+corpus could not expose, with no threshold changed. Every remaining false
+positive is traced to a cause in
+[docs/real-traffic-validation.md](docs/real-traffic-validation.md). On the
+synthetic corpus the rate is 0 across 240,000 benign packets over 8 seeds.
 
 ```bash
 pytest tests/test_detectors.py::test_no_false_positives_on_benign_background
@@ -737,12 +744,14 @@ deploys `main` only after these checks pass.
 
 ## Honest limitations
 
-- **Traffic is synthetic.** `frames.py` emits real wire-format bytes and the
-  analyzer has no privileged knowledge of their origin, so the parsing and
-  detection logic is genuinely exercised — but the *traffic mix* is a model of
-  an enterprise network, not a capture of one. The measured false-positive rate
-  is against that model. Validating against real captured traffic would be the
-  next step, and would very likely require re-tuning thresholds.
+- **Most numbers are from synthetic traffic.** `frames.py` emits real
+  wire-format bytes and the analyzer has no privileged knowledge of their
+  origin, but the *traffic mix* is a model. The one real-traffic validation,
+  [CSE-CIC-IDS2018](docs/real-traffic-validation.md), found that model had
+  hidden five bugs worth 375 false positives per host-hour, and that NetWatch
+  misses application-layer DoS, form-login brute force and fast-polling bots.
+  It is one 2018 lab network; a different network would surface different
+  problems.
 - **Geo enrichment is a static prefix table**, not MaxMind. `geoip.py` returns
   `UNKNOWN` rather than guessing, and the dashboard labels it "approximate".
   The high-risk country list is a crude proxy, not threat intelligence.

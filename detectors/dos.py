@@ -1,6 +1,6 @@
 """Denial-of-service and reflection/amplification detectors."""
 
-from .base import Detector, TimedCounter, TimedSum
+from .base import Detector, TimedCounter, TimedSum, is_syn
 
 
 class SYNFloodDetector(Detector):
@@ -34,7 +34,7 @@ class SYNFloodDetector(Detector):
         ts = pkt['ts']
         key = (pkt['dst_ip'], pkt.get('dst_port'))
 
-        if flags == 'SYN':
+        if is_syn(flags):
             syns = self._syns.add(key, ts)
         else:
             if 'ACK' in flags and 'SYN' not in flags:

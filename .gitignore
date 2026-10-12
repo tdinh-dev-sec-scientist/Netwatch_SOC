@@ -13,3 +13,7 @@ results.json
 
 # Local environment; never commit real credentials
 .env
+
+# Downloaded captures for eval/ (multi-GB; fetch.py re-creates them)
+data/
+*.pcap

@@ -2,7 +2,21 @@
 
 import math
 
-from .base import Detector, TimedCounter
+from .base import Detector, TimedCounter, is_internal, is_syn
+
+
+def is_callback(pkt):
+    """True when a packet opens a new exchange from the client side."""
+    proto = pkt.get('protocol')
+    if proto == 'TCP':
+        return is_syn(pkt.get('flags', ''))
+    if proto == 'TLS':
+        return pkt.get('tls_handshake_type') == 1
+    if proto == 'HTTP':
+        return bool(pkt.get('http_method'))
+    if proto == 'QUIC':
+        return bool(pkt.get('quic_long_header'))
+    return False
 
 
 class C2BeaconDetector(Detector):
@@ -30,9 +44,12 @@ class C2BeaconDetector(Detector):
         if dport is None:
             return []
         # Only count session-initiating packets, otherwise every data packet
-        # inside one transfer looks like a separate callback.
-        flags = pkt.get('flags', '')
-        if pkt.get('protocol') == 'TCP' and flags != 'SYN':
+        # inside one transfer looks like a separate callback — and the
+        # server's replies on a long-lived connection look like a beacon in
+        # the reverse direction. A callback is a new TCP connection, a TLS
+        # ClientHello or an HTTP request; QUIC is judged on its long-header
+        # (handshake) packets.
+        if not is_callback(pkt):
             return []
         self.packets_seen += 1
         ts = pkt['ts']
@@ -41,7 +58,17 @@ class C2BeaconDetector(Detector):
         if count < self.cfg['min_callbacks']:
             return []
 
-        stamps = list(self._channels.timestamps(key))
+        # The mean interval is (last - first) / (n - 1), so the range check
+        # can run before materialising the window. Without it a flood on one
+        # channel costs O(window) per packet — on real traffic a 33 SYN/s
+        # connection storm cut replay throughput by more than 10x. After this
+        # check the window holds at most window_s / min_interval_s samples.
+        stamps = self._channels.timestamps(key)
+        span_mean = (stamps[-1] - stamps[0]) / (len(stamps) - 1)
+        if span_mean < self.cfg['min_interval_s']:
+            return []
+
+        stamps = list(stamps)
         intervals = [b - a for a, b in zip(stamps, stamps[1:])]
         if len(intervals) < self.cfg['min_callbacks'] - 1:
             return []
@@ -95,6 +122,13 @@ class TLSAnomalyDetector(Detector):
             return []
         # Only a ClientHello carries the fields we score.
         if pkt.get('tls_handshake_type') != 1:
+            return []
+        # T1573 is about *our* hosts' encrypted channels. A legacy client
+        # arriving from the internet is someone else's software talking to
+        # one of our servers: on real traffic, internet RDP scanners sending
+        # TLS 1.0 hellos to exposed 3389 accounted for 9,412 alerts and no
+        # outbound channel at all.
+        if not is_internal(pkt.get('src_ip')):
             return []
         self.packets_seen += 1
         ts = pkt['ts']

@@ -44,6 +44,16 @@ class Finding:
             raise ValueError('every finding must map to >=1 ATT&CK technique')
 
 
+def is_syn(flags):
+    """True for a connection-opening SYN: SYN set, ACK clear.
+
+    Tests the two flags individually rather than the whole flag string, so
+    an ECN-setup SYN (SYN|ECE|CWR, RFC 3168), which Windows sends by default,
+    still counts.
+    """
+    return 'SYN' in flags and 'ACK' not in flags
+
+
 def is_internal(ip):
     """RFC1918 / loopback / link-local check without the ipaddress overhead."""
     if not ip or ':' in ip:
