@@ -175,6 +175,12 @@ def _register(app):
         }
         info['simulation_running'] = bool(
             app.simulator and app.simulator._running)
+        # Where the frames on screen come from: a recorded capture replayed
+        # by NETWATCH_REPLAY_PCAP, the synthetic generator, or nothing.
+        info['traffic_source'] = (
+            None if not info['simulation_running']
+            else 'replay' if os.environ.get('NETWATCH_REPLAY_PCAP')
+            else 'synthetic')
         info['demo'] = app.config['NETWATCH_DEMO']
         return jsonify(info)
 
