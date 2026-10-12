@@ -85,6 +85,9 @@ def test_health_reports_schema_and_engine(client):
     assert set(body['tables']) == {
         'packets', 'connections', 'hosts', 'alerts', 'mitre_techniques',
         'alert_techniques', 'protocol_stats', 'performance_metrics'}
+    # The test client starts no engine, so no traffic source is claimed.
+    assert body['simulation_running'] is False
+    assert body['traffic_source'] is None
     engine = body['engine']
     assert engine['detectors'] >= 15
     assert engine['threat_types'] >= 15
