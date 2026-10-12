@@ -11,7 +11,8 @@ from .base import Detector, Finding, is_internal
 from .c2 import C2BeaconDetector, TLSAnomalyDetector
 from .credential import BruteForceDetector, CredentialAttackDetector
 from .dns import DNSTunnelDetector, SuspiciousDNSDetector
-from .dos import AmplificationDetector, SYNFloodDetector, UDPFloodDetector
+from .dos import (AmplificationDetector, HTTPFloodDetector,
+                  SYNFloodDetector, UDPFloodDetector)
 from .exfil import DataExfiltrationDetector
 from .lateral import LateralMovementDetector
 from .recon import NetworkReconDetector, PortScanDetector
@@ -35,6 +36,7 @@ REGISTRY = [
     (SYNFloodDetector, 'syn_flood'),
     (UDPFloodDetector, 'udp_flood'),
     (AmplificationDetector, 'amplification'),
+    (HTTPFloodDetector, 'http_flood'),
     (HTTPAnomalyDetector, 'http_anomaly'),
     (ARPSpoofDetector, 'arp_spoof'),
 ]

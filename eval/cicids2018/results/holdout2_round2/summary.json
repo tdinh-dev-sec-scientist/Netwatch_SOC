@@ -1,0 +1,111 @@
+{
+ "captures": 5,
+ "packets": 19538011,
+ "capture_host_hours": 28.74,
+ "alerts": 69,
+ "true_positive_alerts": 58,
+ "false_positive_alerts": 11,
+ "alert_precision": 0.8406,
+ "false_positives_per_host_hour": 0.38,
+ "incidents": 9,
+ "true_positive_incidents": 2,
+ "false_positive_incidents": 7,
+ "false_positive_incidents_per_host_day": 5.85,
+ "attack_units": 2,
+ "attack_units_detected": 2,
+ "attack_units_correct_class": 1,
+ "detection_rate": 1.0,
+ "false_positive_causes": {
+  "dns_tunnel: long, random-looking cloud/CDN hostnames": 11
+ },
+ "scenarios": [
+  {
+   "scenario": "dos_slowhttptest",
+   "label": "DoS-SlowHTTPTest",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 53,
+   "alert_types": {
+    "syn_flood": 53
+   },
+   "first_alert_after_s": 20
+  },
+  {
+   "scenario": "dos_hulk",
+   "label": "DoS-Hulk",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 5,
+   "alert_types": {
+    "http_flood": 3,
+    "data_exfil": 2
+   },
+   "first_alert_after_s": 28
+  }
+ ],
+ "per_capture": [
+  {
+   "name": "fri16_dos",
+   "packets": 18890171,
+   "capture_hours": 5.524151693648762,
+   "alerts": 58,
+   "alerts_by_type": {
+    "data_exfil": 2,
+    "http_flood": 3,
+    "syn_flood": 53
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 27628.8
+  },
+  {
+   "name": "wed14_dept_64.106",
+   "packets": 261094,
+   "capture_hours": 8.985327617261145,
+   "alerts": 5,
+   "alerts_by_type": {
+    "dns_tunnel": 5
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 14911.8
+  },
+  {
+   "name": "wed14_dept_64.99",
+   "packets": 58073,
+   "capture_hours": 2.762147774166531,
+   "alerts": 0,
+   "alerts_by_type": {},
+   "parse_errors": 1,
+   "detector_errors": 0,
+   "pkt_per_s": 11239.0
+  },
+  {
+   "name": "wed14_dept_66.49",
+   "packets": 58779,
+   "capture_hours": 2.455776085058848,
+   "alerts": 1,
+   "alerts_by_type": {
+    "dns_tunnel": 1
+   },
+   "parse_errors": 1,
+   "detector_errors": 0,
+   "pkt_per_s": 15350.7
+  },
+  {
+   "name": "wed14_dept_66.90",
+   "packets": 269894,
+   "capture_hours": 9.007718995809554,
+   "alerts": 5,
+   "alerts_by_type": {
+    "dns_tunnel": 5
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 14729.4
+  }
+ ],
+ "config": null
+}

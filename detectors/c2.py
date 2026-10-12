@@ -20,22 +20,30 @@ def is_callback(pkt):
 
 
 class C2BeaconDetector(Detector):
-    """Periodic callbacks with low timing jitter.
+    """Periodic callbacks with low timing jitter, or relentless polling.
 
     Human-driven and application traffic is bursty; implant check-ins are
     metronomic. The discriminator is the coefficient of variation of the
     inter-arrival times on one (src, dst, dport) channel.
+
+    That test only looks at intervals of min_interval_s and up, to keep
+    request/response chatter out. An implant that polls every second or two
+    (Ares, on real traffic) sits below it, so it is caught by repetition
+    instead: one internal client asking one external server for the same URL
+    path hundreds of times in a few minutes.
     """
 
     name = 'c2_beacon'
     threat_type = 'c2_beacon'
-    description = ('Low-jitter periodic callbacks on a single channel, scored '
-                   'by coefficient of variation of inter-arrival times')
+    description = ('Low-jitter periodic callbacks on a single channel, or an '
+                   'internal client polling one external URL path at high '
+                   'rate')
     techniques = ('T1071.001',)
 
     def __init__(self, cfg):
         super().__init__(cfg)
         self._channels = TimedCounter(cfg['window_s'])
+        self._polls = TimedCounter(cfg.get('poll_window_s', 600))
 
     def inspect(self, pkt):
         if pkt.get('protocol') not in ('HTTP', 'TLS', 'QUIC', 'TCP'):
@@ -53,6 +61,10 @@ class C2BeaconDetector(Detector):
             return []
         self.packets_seen += 1
         ts = pkt['ts']
+        if pkt.get('protocol') == 'HTTP':
+            polling = self._polling(pkt, dport, ts)
+            if polling:
+                return polling
         key = (pkt['src_ip'], pkt['dst_ip'], dport)
         count = self._channels.add(key, ts)
         if count < self.cfg['min_callbacks']:
@@ -99,9 +111,32 @@ class C2BeaconDetector(Detector):
             destination='%s:%d' % (pkt['dst_ip'], dport),
         )]
 
+    def _polling(self, pkt, dport, ts):
+        src, dst = pkt['src_ip'], pkt['dst_ip']
+        if not is_internal(src) or is_internal(dst):
+            return []   # C2 is outbound; internal pollers are monitoring
+        path = (pkt.get('http_uri') or '/').split('?', 1)[0]
+        count = self._polls.add((src, dst, dport, path), ts)
+        if count < self.cfg.get('poll_requests', 300):
+            return []
+        if not self._cooled_down(('poll', src, dst, dport), ts):
+            return []
+        window = self.cfg.get('poll_window_s', 600)
+        return [self._finding(
+            pkt, 'HIGH', min(0.9, 0.6 + count / 3000.0),
+            'High-rate polling from %s to %s:%d — %d requests for %s in %ds '
+            '(one every %.1fs), faster than any beacon interval the jitter '
+            'test considers'
+            % (src, dst, dport, count, path[:60], window, window / count),
+            ('T1071.001',),
+            mode='polling', requests=count, path=path[:200],
+            window_s=window, destination='%s:%d' % (dst, dport),
+        )]
+
     def expire(self, now):
         super().expire(now)
         self._channels.expire(now)
+        self._polls.expire(now)
 
 
 class TLSAnomalyDetector(Detector):

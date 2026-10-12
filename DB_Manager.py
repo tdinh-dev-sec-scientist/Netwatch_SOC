@@ -43,6 +43,7 @@ import threading
 
 import db_backends
 import geoip
+import incidents
 import migrate
 import mitre
 from db_backends import Json, json_load
@@ -607,6 +608,36 @@ class DatabaseManager:
                GROUP BY src_ip, threat_type
                ORDER BY sev_rank ASC, alert_count DESC LIMIT ?""",
             (cutoff, limit))
+
+    def get_incidents(self, hours=24, gap_s=1800, limit=50,
+                      max_alerts=20000):
+        """Recent alerts correlated into incidents (see incidents.py).
+
+        Derived on read, like the threat summary: an incident is a grouping
+        of alerts, and storing it would mean re-deciding membership every
+        time a late alert extends one. Bounded by `max_alerts`, newest first.
+        """
+        cutoff = time.time() - hours * 3600
+        rows = self._rows(
+            """SELECT a.id, a.ts, a.threat_type, a.src_ip, a.dst_ip,
+                      a.severity, t.technique_id
+               FROM (SELECT id, ts, threat_type, src_ip, dst_ip, severity
+                     FROM alerts WHERE ts > ?
+                     ORDER BY ts DESC LIMIT ?) a
+               LEFT JOIN alert_techniques t ON t.alert_id = a.id""",
+            (cutoff, max_alerts))
+        by_id = {}
+        for row in rows:
+            alert = by_id.setdefault(row['id'], {
+                'id': row['id'], 'ts': row['ts'],
+                'threat_type': row['threat_type'], 'src_ip': row['src_ip'],
+                'dst_ip': row['dst_ip'], 'severity': row['severity'],
+                'techniques': []})
+            if row['technique_id']:
+                alert['techniques'].append(row['technique_id'])
+        found = incidents.correlate(list(by_id.values()), gap_s=gap_s)
+        return {'total': len(found), 'alerts': len(by_id),
+                'gap_s': gap_s, 'incidents': found[:limit]}
 
     def get_mitre_techniques(self, hours=None):
         params = []

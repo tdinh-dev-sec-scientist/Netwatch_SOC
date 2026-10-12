@@ -36,6 +36,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 
 import config as config_module  # noqa: E402
+import incidents  # noqa: E402
 import replay  # noqa: E402
 from detectors.base import is_internal  # noqa: E402
 from fetch import member_filename  # noqa: E402
@@ -60,8 +61,12 @@ def _replay_capture(job):
 
 # ── matching ─────────────────────────────────────────────────────────────────
 
-def match_scenario(alert, scenarios):
-    """Return (scenario, victim) for the first scenario the alert belongs to."""
+def match_scenario(alert, scenarios, pivot_any_type=False):
+    """Return (scenario, victim) for the first scenario the alert belongs to.
+
+    `pivot_any_type` credits every alert from a compromised pivot host, for
+    tools whose alert types do not map onto NetWatch's (Suricata).
+    """
     ts = alert['ts']
     ends = {alert['src_ip'], alert['dst_ip']}
     for sc in scenarios:
@@ -77,7 +82,7 @@ def match_scenario(alert, scenarios):
         pivot = sc.get('pivot')
         if (pivot and alert['src_ip'] == pivot
                 and is_internal(alert['dst_ip'])
-                and alert['threat_type'] in sc['expected']):
+                and (pivot_any_type or alert['threat_type'] in sc['expected'])):
             return sc, pivot
     return None, None
 
@@ -126,24 +131,34 @@ def fp_cause(alert, scenarios=()):
 
 # ── scoring ──────────────────────────────────────────────────────────────────
 
-def score(truth, summaries, out_dir):
+def score(truth, summaries, out_dir, pivot_any_type=False):
     scenarios = truth['scenarios']
     for sc in scenarios:
         sc['_windows'] = [(_epoch(a), _epoch(b)) for a, b in sc['windows_utc']]
 
     tp = collections.defaultdict(list)       # (scenario id, victim) -> alerts
     fps = []
+    tp_incidents = fp_incidents = 0
     for s in summaries:
         path = os.path.join(out_dir, 'alerts', s['name'] + '.jsonl')
+        captured = []
         with open(path, encoding='utf-8') as fh:
             for line in fh:
                 alert = json.loads(line)
                 alert['capture'] = s['name']
-                sc, victim = match_scenario(alert, scenarios)
+                sc, victim = match_scenario(alert, scenarios, pivot_any_type)
+                alert['_tp'] = bool(sc)
+                captured.append(alert)
                 if sc:
                     tp[(sc['id'], victim)].append(alert)
                 else:
                     fps.append(alert)
+        # Incidents are what an analyst works: correlate each host's alerts,
+        # and count an incident as true if any alert in it is.
+        found = incidents.correlate(captured)
+        true_ids = {id(a['_incident']) for a in captured if a['_tp']}
+        tp_incidents += sum(1 for inc in found if id(inc) in true_ids)
+        fp_incidents += sum(1 for inc in found if id(inc) not in true_ids)
 
     rows = []
     for sc in scenarios:
@@ -173,8 +188,6 @@ def score(truth, summaries, out_dir):
     total_alerts = sum(s['alerts'] for s in summaries)
     tp_alerts = sum(len(v) for v in tp.values())
     causes = collections.Counter(fp_cause(a, scenarios) for a in fps)
-    fp_incidents = {(a['threat_type'], json.dumps(a['incident_key']))
-                    for a in fps}
 
     units = len(rows)
     result = {
@@ -188,7 +201,11 @@ def score(truth, summaries, out_dir):
         if total_alerts else None,
         'false_positives_per_host_hour': round(len(fps) / hours, 2)
         if hours else None,
-        'false_positive_incidents': len(fp_incidents),
+        'incidents': tp_incidents + fp_incidents,
+        'true_positive_incidents': tp_incidents,
+        'false_positive_incidents': fp_incidents,
+        'false_positive_incidents_per_host_day': round(
+            fp_incidents / hours * 24, 2) if hours else None,
         'attack_units': units,
         'attack_units_detected': sum(r['detected'] for r in rows),
         'attack_units_correct_class': sum(r['correct_class'] for r in rows),
@@ -203,9 +220,9 @@ def score(truth, summaries, out_dir):
     return result
 
 
-def render(result, config_path):
+def render(result, config_path, tool='NetWatch'):
     r = result
-    out = ['# NetWatch on CSE-CIC-IDS2018', '',
+    out = ['# %s on CSE-CIC-IDS2018' % tool, '',
            'Config: `%s`' % (config_path or 'shipped defaults'), '',
            '| | |', '|---|---|',
            '| Captures replayed | %d (%s packets, %.1f host-hours) |'
@@ -218,9 +235,13 @@ def render(result, config_path):
            % (r['alerts'], r['true_positive_alerts'],
               r['false_positive_alerts']),
            '| Alert precision | %.1f%% |' % (100 * (r['alert_precision'] or 0)),
-           '| False positives | **%.1f per host-hour** (%d distinct incidents) |'
-           % (r['false_positives_per_host_hour'],
-              r['false_positive_incidents']),
+           '| False positives | **%.1f alerts per host-hour** |'
+           % r['false_positives_per_host_hour'],
+           '| Incidents (alerts correlated) | %d — %d true, %d false: **%.1f '
+           'false incidents per host-day** |'
+           % (r['incidents'], r['true_positive_incidents'],
+              r['false_positive_incidents'],
+              r['false_positive_incidents_per_host_day']),
            '', '## Per attack', '',
            '| Attack | Victim | Detected | Right class | Alerts | Types | '
            'First alert |', '|---|---|---|---|---|---|---|']

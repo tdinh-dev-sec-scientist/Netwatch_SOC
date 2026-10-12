@@ -2,13 +2,11 @@
 
 [![CI](https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC/actions/workflows/ci.yml/badge.svg)](https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC/actions/workflows/ci.yml)
 
-<!-- After the first Render deploy, add the demo link on the next line, e.g.
-**Live demo:** https://<service>.onrender.com (read-only, synthetic traffic; the
-first load after the service has idled takes about a minute) -->
-
 A network security monitoring platform: deep packet inspection over 21 protocols,
-17 modular threat detectors mapped to MITRE ATT&CK, an indexed 8-table PostgreSQL
-store, a 24-endpoint REST API, and a 9-module analyst dashboard.
+18 modular threat detectors mapped to MITRE ATT&CK, alert-to-incident
+correlation, an indexed 8-table PostgreSQL store, a 25-endpoint REST API, and a
+9-module analyst dashboard — validated on 31 million packets of labelled real
+traffic and benchmarked against Suricata with the ET Open ruleset.
 
 Every number in this README is measured, and the commands to reproduce each one
 are given. Where a number falls short of a target, it says so. The headline
@@ -16,8 +14,12 @@ counts are pinned by `tests/test_readme.py`, so the documentation cannot drift
 from the code without a test failing.
 
 ---
-##🚀 Live Demo
-Application is running at: [https://netwatch-soc-demo.onrender.com](https://netwatch-soc-demo.onrender.com)
+## Live demo
+
+[netwatch-soc-demo.onrender.com](https://netwatch-soc-demo.onrender.com) — read-only,
+replaying 45 minutes of real attack traffic from the CSE-CIC-IDS2018 dataset in
+a loop (XSS, SQL injection, botnet C2, Slowloris, SSH and login-form brute
+force, nmap, HTTP flood, internet RDP credential stuffing).
 
 ## Quick start
 
@@ -72,7 +74,7 @@ The ones that matter:
 
 ```
  frames.py ──────► ProtocolAnalyzer ──────► ThreatDetector ──────► DB_Manager ──────► App.py ──────► Dashboard.html
- (or a live       parses raw bytes         17 detectors,           8 tables,          24 REST        9 modules
+ (or a live       parses raw bytes         18 detectors,           8 tables,          25 REST        9 modules
   capture)        into 21 protocols        bounded state           batched writes     endpoints
 ```
 
@@ -92,7 +94,7 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 
 1. **Parse** — `ProtocolAnalyzer.parse()` walks Ethernet → IPv4/IPv6/ARP →
    TCP/UDP/ICMP → L7, returning a flat dict of extracted fields.
-2. **Detect** — `ThreatDetector.analyze()` feeds the parsed packet to all 17
+2. **Detect** — `ThreatDetector.analyze()` feeds the parsed packet to all 18
    detectors. Each keeps bounded sliding-window state and returns `Finding`
    objects with severity, confidence, evidence and ATT&CK technique IDs.
 3. **Persist** — `PacketSimulator` buffers packets and findings, then
@@ -108,7 +110,8 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 |---|---|
 | `frames.py` | Wire-format frame construction (the capture-layer stand-in) |
 | `ProtocolAnalyzer.py` | Deep packet inspection: 21 protocols |
-| `detectors/` | 17 detectors, one module per threat family |
+| `detectors/` | 18 detectors, one module per threat family |
+| `incidents.py` | Alert-to-incident correlation, shared by the API and the evaluation |
 | `ThreatDetector.py` | Engine: registry, dispatch, state expiry, introspection |
 | `mitre.py` | ATT&CK catalog with a written rationale per technique |
 | `DB_Manager.py` | Every SQL statement: batched writes and all read queries |
@@ -145,12 +148,12 @@ Dataset     : 106,690 packets, 120 alerts, 135 technique links
 
 | Claim | Target | Measured | Status |
 |---|---|---|---|
-| Threat types | 15+ | **17** (all 17 proven by a scenario) | ✅ |
+| Threat types | 15+ | **18** (all 18 proven by a scenario) | ✅ |
 | Protocols inspected | 15+ | **21** | ✅ |
-| ATT&CK techniques | 12 | **15** across 9 tactics | ✅ |
+| ATT&CK techniques | 12 | **16** across 9 tactics | ✅ |
 | Tables | 8 | **8**, all written by the pipeline | ✅ |
 | Indexes | — | **25**, usage asserted by `EXPLAIN` on a 40k-row dataset | ✅ |
-| REST endpoints | 14+ | **24** | ✅ |
+| REST endpoints | 14+ | **25** | ✅ |
 | Dashboard modules | 8+ | **9** | ✅ |
 | Throughput | 5,000 pkt/min | **377,498 pkt/min median = 6,292 pkt/s** (5,875–7,080 pkt/s) | ✅ |
 | Query latency | < 50 ms | **p50 0.33 ms · p95 10.69 ms · max 16.78 ms** | ✅ |
@@ -267,7 +270,7 @@ suppression — so it can gate CI.
 
 ---
 
-## Detection engine — 17 threat types
+## Detection engine — 18 threat types
 
 Each detector lives in its own module under `detectors/`, declares the ATT&CK
 techniques it can emit, and is tuned by one section of `config.py`.
@@ -276,9 +279,9 @@ techniques it can emit, and is tuned by one section of `config.py`.
 |---|---|---|
 | `port_scan` | Distinct destination ports on one host in a window | T1046 |
 | `network_recon` | Many hosts within one /24 on a narrow port set; ICMP sweep | T1595 |
-| `brute_force` | In-protocol auth failures (FTP 530, SMTP 535, POP3 `-ERR`, IMAP `NO`, HTTP 401); SSH session bursts | T1110, T1078 |
+| `brute_force` | In-protocol auth failures (FTP 530, SMTP 535, POP3 `-ERR`, IMAP `NO`, HTTP 401); SSH session bursts; login-form POST bursts | T1110, T1078 |
 | `credential_attack` | Many usernames from one source; one username across many hosts; cleartext credentials | T1110, T1078 |
-| `c2_beacon` | Coefficient of variation of inter-arrival times on one channel | T1071.001 |
+| `c2_beacon` | Coefficient of variation of inter-arrival times on one channel; high-rate polling of one external URL path | T1071.001 |
 | `dns_tunnel` | Oversized label **and** high entropy / TXT-NULL-ANY / volume | T1071.004, T1048 |
 | `suspicious_dns` | NXDOMAIN ratio; repeated high-entropy SLD lookups | T1071.004 |
 | `icmp_tunnel` | Oversized, high-entropy echo payloads, repeated | T1572, T1048 |
@@ -289,6 +292,7 @@ techniques it can emit, and is tuned by one section of `config.py`.
 | `syn_flood` | SYN rate **and** SYN:completed-handshake ratio | T1498 |
 | `udp_flood` | UDP packet rate to one destination | T1498 |
 | `amplification` | Response:request byte ratio on NTP/DNS/SNMP | T1498.002 |
+| `http_flood` | HTTP request rate to one service; mass of unfinished request heads (Slowloris) | T1499.002 |
 | `http_anomaly` | SQLi / traversal / XSS / command injection / JNDI / scanner UA | T1190 |
 | `arp_spoof` | IP↔MAC binding conflict; gratuitous ARP flood | T1557.002 |
 
@@ -370,7 +374,7 @@ the packet keeps what was decoded and gains a `truncated` flag.
 
 ---
 
-## MITRE ATT&CK — 15 techniques
+## MITRE ATT&CK — 16 techniques
 
 `mitre.py` is the single source of truth and is loaded into the
 `mitre_techniques` table at startup. Every technique carries a written
@@ -402,6 +406,7 @@ Two invariants are enforced by tests:
 | T1048 | Exfiltration Over Alternative Protocol | Exfiltration | `dns_tunnel`, `icmp_tunnel` |
 | T1498 | Network Denial of Service | Impact | `syn_flood`, `udp_flood` |
 | T1498.002 | Reflection Amplification | Impact | `amplification` |
+| T1499.002 | Service Exhaustion Flood | Impact | `http_flood` |
 
 ---
 
@@ -569,7 +574,7 @@ histories.
 
 ---
 
-## REST API — 24 endpoints
+## REST API — 25 endpoints
 
 All read from PostgreSQL. Empty database returns empty collections, never filler.
 Invalid parameters return `400` with a message; unknown resources return `404`.
@@ -586,6 +591,7 @@ Invalid parameters return `400` with a message; unknown resources return `404`.
 | GET | `/api/alerts/<id>` | Detail + techniques + related packets |
 | POST | `/api/alerts/<id>/acknowledge` | |
 | GET | `/api/alerts/stats` | Grouped by threat type |
+| GET | `/api/incidents` | Alerts correlated into incidents: `?hours&gap_min&limit` |
 | GET | `/api/threats/summary` | Aggregated per source + threat type |
 | GET | `/api/threats/types` | Detector catalog joined with live counts |
 | GET | `/api/mitre/techniques` | Catalog + observed counts |

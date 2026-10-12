@@ -24,6 +24,7 @@ import db_backends
 import detectors
 import hardening
 import mitre
+import replay
 from DB_Manager import DatabaseManager
 from PacketSimulator import PacketSimulator, TrafficGenerator
 from ProtocolAnalyzer import SUPPORTED_PROTOCOLS, ProtocolAnalyzer
@@ -90,10 +91,17 @@ def _float_env(name, default):
 def _simulate(simulator):
     """Background engine thread: optional history backfill, then live traffic.
 
-    NETWATCH_BACKFILL_MIN  minutes of history to generate at startup (0 = none)
-    NETWATCH_RATE_PPS      live packets per second (default 95)
+    NETWATCH_REPLAY_PCAP   replay this capture (pcap, pcapng, .gz) in a loop
+                           instead of generating synthetic traffic
+    NETWATCH_BACKFILL_MIN  minutes of history to load at startup (0 = none)
+    NETWATCH_RATE_PPS      synthetic packets per second (default 95)
     """
     backfill = _float_env('NETWATCH_BACKFILL_MIN', 0.0)
+    capture = os.environ.get('NETWATCH_REPLAY_PCAP')
+    if capture:
+        frames = list(replay.read_pcap(capture))
+        simulator.run_capture(frames, backfill_s=backfill * 60)
+        return
     if backfill:
         simulator.backfill(backfill)
     simulator.run(rate_pps=_float_env('NETWATCH_RATE_PPS', 95.0) or 95.0)
@@ -147,7 +155,9 @@ def _register(app):
 
     @app.route('/')
     def index():
-        return render_template('Dashboard.html')
+        return render_template(
+            'Dashboard.html',
+            replaying=bool(os.environ.get('NETWATCH_REPLAY_PCAP')))
 
     # ── 1. system health ─────────────────────────────────────────────────────
 
@@ -225,6 +235,13 @@ def _register(app):
     def alert_stats():
         hours = _int_arg('hours', 24, 1, 720)
         return jsonify(db.get_alert_stats_by_type(hours=hours))
+
+    @app.route('/api/incidents')
+    def incident_list():
+        return jsonify(db.get_incidents(
+            hours=_int_arg('hours', 24, 1, 720),
+            gap_s=_int_arg('gap_min', 30, 1, 1440) * 60,
+            limit=_int_arg('limit', 50, 1, 500)))
 
     # ── 11-12. threats ───────────────────────────────────────────────────────
 

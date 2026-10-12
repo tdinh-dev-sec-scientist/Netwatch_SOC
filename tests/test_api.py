@@ -15,6 +15,7 @@ ENDPOINTS = [
     ('GET', '/api/stats/timeline'),
     ('GET', '/api/alerts'),
     ('GET', '/api/alerts/stats'),
+    ('GET', '/api/incidents'),
     ('GET', '/api/threats/summary'),
     ('GET', '/api/threats/types'),
     ('GET', '/api/mitre/techniques'),

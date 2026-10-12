@@ -22,13 +22,13 @@
       "id": "dos_goldeneye", "label": "DoS-GoldenEye", "day": "Thursday-15-02-2018",
       "attackers": ["18.219.211.138"], "victims": ["172.31.69.25"],
       "windows_utc": [["2018-02-15T13:16:00", "2018-02-15T14:19:00"]],
-      "expected": ["syn_flood", "http_anomaly"]
+      "expected": ["http_flood"]
     },
     {
       "id": "dos_slowloris", "label": "DoS-Slowloris", "day": "Thursday-15-02-2018",
       "attackers": ["18.217.165.70"], "victims": ["172.31.69.25"],
       "windows_utc": [["2018-02-15T14:49:00", "2018-02-15T15:50:00"]],
-      "expected": ["syn_flood", "http_anomaly"]
+      "expected": ["http_flood"]
     },
     {
       "id": "web_bruteforce", "label": "Brute Force -Web", "day": "Thursday-22-02-2018",

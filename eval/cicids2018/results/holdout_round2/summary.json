@@ -2,16 +2,19 @@
  "captures": 7,
  "packets": 1763242,
  "capture_host_hours": 52.86,
- "alerts": 242,
- "true_positive_alerts": 172,
+ "alerts": 271,
+ "true_positive_alerts": 201,
  "false_positive_alerts": 70,
- "alert_precision": 0.7107,
+ "alert_precision": 0.7417,
  "false_positives_per_host_hour": 1.32,
- "false_positive_incidents": 18,
+ "incidents": 86,
+ "true_positive_incidents": 58,
+ "false_positive_incidents": 28,
+ "false_positive_incidents_per_host_day": 12.71,
  "attack_units": 4,
- "attack_units_detected": 3,
- "attack_units_correct_class": 3,
- "detection_rate": 0.75,
+ "attack_units_detected": 4,
+ "attack_units_correct_class": 4,
+ "detection_rate": 1.0,
  "false_positive_causes": {
   "udp_flood: RDP-over-UDP remote desktop session (40-55 pkt/s)": 22,
   "dns_tunnel: long, random-looking cloud/CDN hostnames": 13,
@@ -30,11 +33,13 @@
    "scenario": "web_bruteforce",
    "label": "Brute Force -Web",
    "victim": null,
-   "detected": false,
-   "correct_class": false,
-   "alerts": 0,
-   "alert_types": {},
-   "first_alert_after_s": null
+   "detected": true,
+   "correct_class": true,
+   "alerts": 29,
+   "alert_types": {
+    "brute_force": 29
+   },
+   "first_alert_after_s": 113
   },
   {
    "scenario": "web_xss",
@@ -86,20 +91,21 @@
    },
    "parse_errors": 0,
    "detector_errors": 0,
-   "pkt_per_s": 18601.6
+   "pkt_per_s": 21916.7
   },
   {
    "name": "fri23_web",
    "packets": 55101,
    "capture_hours": 9.204376501109865,
-   "alerts": 79,
+   "alerts": 108,
    "alerts_by_type": {
+    "brute_force": 29,
     "c2_beacon": 3,
     "http_anomaly": 76
    },
    "parse_errors": 0,
    "detector_errors": 0,
-   "pkt_per_s": 13523.4
+   "pkt_per_s": 14356.0
   },
   {
    "name": "thu01_infiltration",
@@ -118,7 +124,7 @@
    },
    "parse_errors": 0,
    "detector_errors": 0,
-   "pkt_per_s": 16219.4
+   "pkt_per_s": 17439.9
   },
   {
    "name": "wed21_clean_69.11",
@@ -130,7 +136,7 @@
    },
    "parse_errors": 0,
    "detector_errors": 0,
-   "pkt_per_s": 16870.5
+   "pkt_per_s": 18332.6
   },
   {
    "name": "wed21_clean_69.19",
@@ -142,7 +148,7 @@
    },
    "parse_errors": 0,
    "detector_errors": 0,
-   "pkt_per_s": 15481.3
+   "pkt_per_s": 16327.1
   },
   {
    "name": "wed21_clean_69.4",
@@ -154,7 +160,7 @@
    },
    "parse_errors": 0,
    "detector_errors": 0,
-   "pkt_per_s": 18403.1
+   "pkt_per_s": 19903.6
   },
   {
    "name": "wed21_clean_69.9",
@@ -167,7 +173,7 @@
    },
    "parse_errors": 0,
    "detector_errors": 0,
-   "pkt_per_s": 19758.3
+   "pkt_per_s": 20430.4
   }
  ],
  "config": null

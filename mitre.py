@@ -54,6 +54,14 @@ TECHNIQUES = {
         'Payload encapsulated in a protocol that does not normally carry it '
         '(ICMP echo data, or a known L7 protocol on a non-standard port).',
     ),
+    'T1499.002': Technique(
+        'T1499.002', 'Endpoint Denial of Service: Service Exhaustion Flood',
+        'Impact', _B + 'T1499/002/',
+        'A request flood or a mass of never-finished requests against one web '
+        'service exhausts its workers at the application layer, over '
+        'handshakes that complete normally — the network itself is not '
+        'saturated, which is what separates it from T1498.',
+    ),
     'T1573': Technique(
         'T1573', 'Encrypted Channel', 'Command and Control', _B + 'T1573/',
         'Obsolete TLS versions, absent SNI or self-signed certificates hide '

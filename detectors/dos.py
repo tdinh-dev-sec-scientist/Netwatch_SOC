@@ -215,3 +215,73 @@ class AmplificationDetector(Detector):
         self._observations.expire(now)
         if len(self._req_bytes) > 20000:
             self._req_bytes.clear()
+
+
+def headers_complete(pkt):
+    """True when an HTTP request's header block ends inside this segment."""
+    return b'\r\n\r\n' in bytes(pkt.get('payload') or b'')
+
+
+class HTTPFloodDetector(Detector):
+    """Application-layer denial of service against one web service.
+
+    Two signals, one per attack style. A request flood (GoldenEye, HULK,
+    LOIC-HTTP) completes its handshakes, so it is invisible to syn_flood and
+    shows up only as request volume. A slow-header attack (Slowloris) sends
+    few bytes but opens hundreds of requests whose header block never ends,
+    holding every worker the server has.
+    """
+
+    name = 'http_flood'
+    threat_type = 'http_flood'
+    description = ('HTTP request rate from one source to one web service, or '
+                   'many request heads left unfinished (Slowloris)')
+    techniques = ('T1499.002',)
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self._requests = TimedCounter(cfg['window_s'])
+        self._unfinished = TimedCounter(cfg['window_s'])
+
+    def inspect(self, pkt):
+        if not pkt.get('http_method'):
+            return []
+        self.packets_seen += 1
+        ts = pkt['ts']
+        key = (pkt['src_ip'], pkt['dst_ip'], pkt.get('dst_port'))
+        requests = self._requests.add(key, ts)
+        unfinished = (self._unfinished.count(key, ts)
+                      if headers_complete(pkt)
+                      else self._unfinished.add(key, ts))
+
+        if unfinished >= self.cfg['slow_headers']:
+            style, count = 'slow-header', unfinished
+            reason = ('%d HTTP requests from %s to %s:%s in %ds left their '
+                      'headers unfinished — Slowloris-style worker exhaustion')
+        elif requests >= self.cfg['request_rate']:
+            style, count = 'request flood', requests
+            reason = ('HTTP request flood from %s to %s:%s — %d requests '
+                      'in %ds')
+        else:
+            return []
+        if not self._cooled_down(key, ts):
+            return []
+
+        target = '%s:%s' % (pkt['dst_ip'], pkt.get('dst_port'))
+        if style == 'slow-header':
+            text = reason % (count, pkt['src_ip'], pkt['dst_ip'],
+                             pkt.get('dst_port'), self.cfg['window_s'])
+        else:
+            text = reason % (pkt['src_ip'], pkt['dst_ip'],
+                             pkt.get('dst_port'), count, self.cfg['window_s'])
+        return [self._finding(
+            pkt, 'CRITICAL' if count >= 3 * self.cfg['request_rate'] else 'HIGH',
+            min(0.95, 0.7 + count / 10000.0), text, ('T1499.002',),
+            style=style, requests=requests, unfinished_headers=unfinished,
+            window_s=self.cfg['window_s'], target=target,
+        )]
+
+    def expire(self, now):
+        super().expire(now)
+        self._requests.expire(now)
+        self._unfinished.expire(now)

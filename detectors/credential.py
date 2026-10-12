@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import re
 
 from .base import Detector, TimedCounter, TimedSet
 
@@ -13,6 +14,10 @@ _ATTEMPT = 'attempt'
 
 _FROM_SERVER = 'server'
 _FROM_CLIENT = 'client'
+
+# Paths a login form posts to. Deliberately narrow: "auth" would also match
+# token-refresh APIs that machines call legitimately and often.
+_LOGIN_PATH = re.compile(r'log[-_]?in|sign[-_]?in|logon', re.IGNORECASE)
 
 
 def auth_event(pkt):
@@ -60,6 +65,11 @@ def auth_event(pkt):
             return 'HTTP', _FAILURE, _FROM_SERVER
         if pkt.get('http_auth'):
             return 'HTTP', _ATTEMPT, _FROM_CLIENT
+        # A login form answers a wrong password with 200 and a page, so the
+        # failure is invisible; each submission is an attempt.
+        if pkt.get('http_method') == 'POST' and _LOGIN_PATH.search(
+                (pkt.get('http_uri') or '').split('?', 1)[0]):
+            return 'HTTP-FORM', _ATTEMPT, _FROM_CLIENT
     elif proto == 'SSH':
         # SSH authentication happens inside the encrypted channel, so failures
         # are not observable. What *is* observable is each new session's
@@ -119,14 +129,19 @@ def decode_basic_auth(header):
     return user, password
 
 
+# Services whose failures cannot be seen on the wire, so repeated attempts
+# stand in for them, with the label used in the alert.
+_INFERRED = {'SSH': 'session attempts', 'HTTP-FORM': 'login form submissions'}
+
+
 class BruteForceDetector(Detector):
     """Repeated authentication failures against one service on one host."""
 
     name = 'brute_force'
     threat_type = 'brute_force'
     description = ('In-protocol authentication failures (FTP 530, SMTP 535, '
-                   'POP3 -ERR, IMAP NO, HTTP 401) or SSH session bursts '
-                   'exceeding a threshold within a window')
+                   'POP3 -ERR, IMAP NO, HTTP 401), or bursts of SSH sessions '
+                   'or web login-form submissions, within a window')
     techniques = ('T1110', 'T1078')
 
     def __init__(self, cfg):
@@ -166,7 +181,7 @@ class BruteForceDetector(Detector):
                 )]
             return []
 
-        if outcome == _ATTEMPT and service != 'SSH':
+        if outcome == _ATTEMPT and service not in _INFERRED:
             return []  # attempts alone are not evidence; wait for a failure
 
         count = self._failures.add(key, ts)
@@ -175,6 +190,8 @@ class BruteForceDetector(Detector):
             # Session bursts are noisier evidence than an explicit 530, so
             # require more of them before alerting.
             threshold = max(threshold * 2, 10)
+        elif service == 'HTTP-FORM':
+            threshold = self.cfg.get('form_posts', 20)
         if count < threshold:
             return []
         if not self._cooled_down(key, ts):
@@ -182,10 +199,9 @@ class BruteForceDetector(Detector):
 
         severity = 'CRITICAL' if count >= threshold * 5 else 'HIGH'
         confidence = min(0.97, 0.65 + count / (threshold * 20.0))
-        if service == 'SSH':
+        if service in _INFERRED:
             confidence = min(confidence, 0.85)  # inferred, not observed
-        label = ('session attempts' if service == 'SSH'
-                 else 'authentication failures')
+        label = _INFERRED.get(service, 'authentication failures')
         return [self._finding(
             pkt, severity, confidence,
             '%d %s %s from %s to %s in %ds'

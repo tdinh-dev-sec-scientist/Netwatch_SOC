@@ -50,6 +50,11 @@ DEFAULTS = {
         'failures': 5,              # in-protocol auth failures per service
         'window_s': 120,
         'cooldown_s': 120,
+        # Web login forms answer a wrong password with HTTP 200, so the only
+        # wire signal is volume: POSTs to a login path from one client. A
+        # person logs in once or twice; the busiest benign client in the
+        # CSE-CIC-IDS2018 replay sent none, the DVWA attack ~100 per window.
+        'form_posts': 20,
     },
     'credential_attack': {
         'distinct_users': 8,        # distinct usernames from one source
@@ -70,6 +75,12 @@ DEFAULTS = {
         'min_interval_s': 15,
         'max_interval_s': 900,
         'cooldown_s': 600,
+        # Fast pollers check in faster than min_interval_s, which the
+        # jitter test deliberately ignores. They are caught by repetition
+        # instead: one internal client requesting the same external URL path
+        # this many times in poll_window_s. Benign peak on real traffic: 52.
+        'poll_requests': 300,
+        'poll_window_s': 600,
     },
     'dns_tunnel': {
         'min_label_len': 40,        # oversized single label
@@ -125,6 +136,15 @@ DEFAULTS = {
         'packet_rate': 400,         # UDP packets to one destination
         'window_s': 10,
         'cooldown_s': 60,
+    },
+    'http_flood': {
+        # Application-layer DoS: completed handshakes, so syn_flood is quiet.
+        # Benign peaks on the CSE-CIC-IDS2018 replay: 162 requests and 39
+        # unfinished request heads per minute from one client to one server.
+        'request_rate': 600,        # HTTP requests, one source -> one service
+        'slow_headers': 200,        # request heads without the blank line
+        'window_s': 60,
+        'cooldown_s': 300,
     },
     'amplification': {
         'response_ratio': 5.0,      # response bytes / request bytes

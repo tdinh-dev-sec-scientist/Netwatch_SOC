@@ -216,15 +216,42 @@ def test_replay_handles_nanosecond_and_raw_ip_captures(tmp_path):
     assert eth[12:14] == b'\x08\x00' and eth[14:] == frame[14:]
 
 
-def test_replay_rejects_pcapng(tmp_path):
-    path = tmp_path / 'capture.pcapng'
-    path.write_bytes(b'\x0a\x0d\x0d\x0a' + b'\x00' * 28)
-    try:
-        list(replay.read_pcap(str(path)))
-    except ValueError as exc:
-        assert 'pcapng' in str(exc)
-    else:
-        raise AssertionError('pcapng accepted')
+def _write_pcapng(path, records, nanos=False):
+    def block(kind, body):
+        body += b'\x00' * (-len(body) % 4)
+        length = len(body) + 12
+        return struct.pack('<II', kind, length) + body + struct.pack('<I',
+                                                                     length)
+    out = block(0x0A0D0D0A, struct.pack('<IHHq', 0x1A2B3C4D, 1, 0, -1))
+    options = b''
+    if nanos:
+        options = struct.pack('<HHB3x', 9, 1, 9) + struct.pack('<HH', 0, 0)
+    out += block(1, struct.pack('<HHI', 1, 0, 65535) + options)
+    tick = 1e9 if nanos else 1e6
+    for ts, data in records:
+        stamp = int(round(ts * tick))
+        out += block(6, struct.pack('<IIIII', 0, stamp >> 32,
+                                    stamp & 0xFFFFFFFF, len(data), len(data))
+                     + data)
+    with open(path, 'wb') as fh:
+        fh.write(out)
+
+
+def test_replay_reads_pcapng(tmp_path):
+    """Some CSE-CIC-IDS2018 captures are pcapng, not pcap."""
+    frames = [(BASE_TS + 0.123456789 * i, F.tcp_frame(
+        b'', '185.220.101.44', INTERNAL, 40000, 1 + i, 'SYN'))
+        for i in range(30)]
+    for nanos in (False, True):
+        path = tmp_path / ('c%d.pcapng' % nanos)
+        _write_pcapng(path, frames, nanos=nanos)
+        got = list(replay.read_pcap(str(path)))
+        assert [f for _ts, f in got] == [f for _ts, f in frames]
+        tolerance = 1e-6 if nanos else 1e-5
+        assert all(abs(a[0] - b[0]) < tolerance for a, b in zip(got, frames))
+        assert abs(replay.last_timestamp(str(path)) - frames[-1][0]) < 1e-5
+    summary = replay.replay([str(path)])
+    assert summary['alerts_by_type'].get('port_scan')
 
 
 def test_replay_persists_through_the_live_write_path(db, tmp_path):
@@ -244,3 +271,50 @@ def test_replay_persists_through_the_live_write_path(db, tmp_path):
     alerts = db.get_alerts(threat_type='port_scan')['alerts']
     assert alerts and alerts[0]['src_ip'] == '185.220.101.44'
     assert abs(alerts[0]['ts'] - (frames[19][0] + shift)) < 1e-3
+
+
+# ── round 2: the misses, closed without new false positives ─────────────────
+# Each negative case is the busiest benign behaviour measured on the replay.
+
+def test_busy_browsing_is_not_an_http_flood(engine, analyzer):
+    """162 requests in a minute to one CDN host was the benign peak."""
+    out = [(BASE_TS + 60.0 * i / 170, F.tcp_frame(
+        F.http_request('GET', '/asset/%d.js' % i, 'cdn.example.com'),
+        INTERNAL, '23.36.32.85', 50000 + i, 80)) for i in range(170)]
+    assert 'http_flood' not in _types(_run(engine, analyzer, out))
+
+
+def test_large_requests_split_across_segments_are_not_slowloris(
+        engine, analyzer):
+    """39 unfinished request heads a minute was the benign peak (big cookies)."""
+    head = b'GET /page HTTP/1.1\r\nHost: shop.example.com\r\nCookie: ' + \
+        b'x' * 1200
+    out = [(BASE_TS + i, F.tcp_frame(head, INTERNAL, '52.32.186.42',
+                                     51000 + i, 80)) for i in range(45)]
+    assert 'http_flood' not in _types(_run(engine, analyzer, out))
+
+
+def test_one_person_logging_in_is_not_a_brute_force(engine, analyzer):
+    out = []
+    for i in range(3):
+        out.append((BASE_TS + 10 * i, F.tcp_frame(
+            F.http_request('POST', '/login', 'portal.example.com',
+                           body=b'user=me&password=typo%d' % i),
+            INTERNAL, '10.0.5.5', 52000 + i, 80)))
+    assert 'brute_force' not in _types(_run(engine, analyzer, out))
+
+
+def test_internal_polling_is_monitoring_not_c2(engine, analyzer):
+    """A monitoring agent polling an internal service every second."""
+    out = [(BASE_TS + i, F.tcp_frame(
+        F.http_request('GET', '/metrics', 'prometheus.internal'),
+        '10.0.5.9', '10.0.5.10', 53000 + i, 9100)) for i in range(400)]
+    assert 'c2_beacon' not in _types(_run(engine, analyzer, out))
+
+
+def test_polling_an_external_path_slowly_is_not_flagged(engine, analyzer):
+    """52 identical requests in 10 minutes was the benign peak."""
+    out = [(BASE_TS + 10.0 * i, F.tcp_frame(
+        F.http_request('GET', '/', 'ocsp.example.com'),
+        INTERNAL, '72.21.91.29', 54000 + i, 80)) for i in range(60)]
+    assert 'c2_beacon' not in _types(_run(engine, analyzer, out))

@@ -121,15 +121,22 @@ PY
   [ "$code" = 200 ] || fail "vendored Chart.js returned $code"
   pass "vendored Chart.js served"
 
-  # The backfill runs on the engine thread after the server is up.
-  local firing=0 deadline=$(( $(date +%s) + 120 ))
+  # The backfill runs on the engine thread after the server is up. Synthetic
+  # history covers every detector; the bundled real capture (what render.yaml
+  # replays) covers the six its attacks exercise.
+  local want deadline=$(( $(date +%s) + 180 )) firing=0
+  if grep -q NETWATCH_REPLAY_PCAP render.yaml; then
+    want=6
+  else
+    want=$(json "$url/api/threats/types" "len(d)")
+  fi
   while [ "$(date +%s)" -lt "$deadline" ]; do
     firing=$(json "$url/api/threats/types" "sum(1 for t in d if t['alert_count'])")
-    [ "$firing" -ge 17 ] && break
+    [ "$firing" -ge "$want" ] && break
     sleep 3
   done
-  [ "$firing" -ge 17 ] || fail "only $firing of 17 threat types fired after backfill"
-  pass "backfill: all $firing threat types have alerts"
+  [ "$firing" -ge "$want" ] || fail "only $firing of $want threat types fired after backfill"
+  pass "backfill: $firing threat types have alerts"
 
   [ "$(json "$url/api/health" "d['backend']")" = "postgresql" ] \
     || fail "the image is not running against PostgreSQL"

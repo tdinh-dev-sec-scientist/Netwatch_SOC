@@ -21,13 +21,13 @@ every timestamp so the capture ends at the moment the replay starts:
     DATABASE_URL=postgresql://netwatch:netwatch@localhost:5432/netwatch \
         python replay.py capture.pcap --persist --rebase-now
 
-Reads classic libpcap files (either byte order, micro- or nanosecond
-resolution) with Ethernet or Linux cooked (SLL) link layers. pcapng is
-rejected with a message — convert it with `editcap -F pcap`.
+Reads classic libpcap (either byte order, micro- or nanosecond resolution)
+and pcapng, with Ethernet, raw IP or Linux cooked (SLL) link layers.
 Standard library only, like the rest of the capture path.
 """
 
 import argparse
+import gzip
 import json
 import struct
 import sys
@@ -50,22 +50,42 @@ _MAGIC = {
 _FAKE_MACS = b'\x00\x00\x00\x00\x00\x00' * 2
 
 
+_LINKTYPES = (LINKTYPE_ETHERNET, LINKTYPE_RAW, LINKTYPE_LINUX_SLL)
+PCAPNG_MAGIC = b'\x0a\x0d\x0d\x0a'
+
+
+def _to_ethernet(linktype, data):
+    """Normalise a captured record to an Ethernet frame for the analyzer."""
+    if linktype == LINKTYPE_ETHERNET:
+        return data
+    if linktype == LINKTYPE_LINUX_SLL:
+        # 16-byte cooked header; the protocol type is its last field.
+        return _FAKE_MACS + data[14:16] + data[16:]
+    version = data[0] >> 4 if data else 0
+    ethertype = b'\x86\xdd' if version == 6 else b'\x08\x00'
+    return _FAKE_MACS + ethertype + data
+
+
 def read_pcap(path):
-    """Yield (timestamp, ethernet_frame_bytes) for every record in a pcap."""
-    with open(path, 'rb') as fh:
+    """Yield (timestamp, ethernet_frame_bytes) for every record in a capture.
+
+    Classic pcap and pcapng are both accepted; the format is detected from
+    the first four bytes. A `.gz` file is decompressed as it is read.
+    """
+    with _open(path) as fh:
         header = fh.read(24)
         if len(header) < 24:
             raise ValueError('%s: not a pcap file (too short)' % path)
-        if header[:4] == b'\x0a\x0d\x0d\x0a':
-            raise ValueError('%s: pcapng is not supported; convert with '
-                             '`editcap -F pcap`' % path)
+        if header[:4] == PCAPNG_MAGIC:
+            fh.seek(0)
+            yield from _read_pcapng(fh, path)
+            return
         try:
             endian, resolution = _MAGIC[header[:4]]
         except KeyError:
             raise ValueError('%s: unrecognised pcap magic' % path)
         linktype = struct.unpack(endian + 'I', header[20:24])[0] & 0x0FFFFFFF
-        if linktype not in (LINKTYPE_ETHERNET, LINKTYPE_RAW,
-                            LINKTYPE_LINUX_SLL):
+        if linktype not in _LINKTYPES:
             raise ValueError('%s: unsupported link type %d'
                              % (path, linktype))
         rec = struct.Struct(endian + 'IIII')
@@ -77,23 +97,81 @@ def read_pcap(path):
             data = fh.read(incl)
             if len(data) < incl:
                 return  # truncated final record
-            ts = sec + frac * resolution
-            if linktype == LINKTYPE_ETHERNET:
-                yield ts, data
-            elif linktype == LINKTYPE_LINUX_SLL:
-                # 16-byte cooked header; the protocol type is its last field.
-                yield ts, _FAKE_MACS + data[14:16] + data[16:]
-            else:
-                version = data[0] >> 4 if data else 0
-                ethertype = b'\x86\xdd' if version == 6 else b'\x08\x00'
-                yield ts, _FAKE_MACS + ethertype + data
+            yield sec + frac * resolution, _to_ethernet(linktype, data)
+
+
+def _read_pcapng(fh, path):
+    """pcapng: section, interface and packet blocks (Enhanced and Simple).
+
+    Each interface carries its own link type and timestamp resolution
+    (if_tsresol); a new section resets both. Other block types are skipped.
+    """
+    endian = '<'
+    interfaces = []          # [(linktype, seconds per tick)]
+    last_ts = 0.0
+    while True:
+        head = fh.read(8)
+        if len(head) < 8:
+            return
+        block_type = struct.unpack(endian + 'I', head[:4])[0]
+        if head[:4] == PCAPNG_MAGIC:
+            magic = fh.read(4)
+            endian = '<' if magic == b'\x4d\x3c\x2b\x1a' else '>'
+            length = struct.unpack(endian + 'I', head[4:8])[0]
+            fh.seek(length - 12, 1)
+            interfaces = []
+            continue
+        length = struct.unpack(endian + 'I', head[4:8])[0]
+        if length < 12:
+            raise ValueError('%s: corrupt pcapng block' % path)
+        body = fh.read(length - 8)
+        if len(body) < length - 8:
+            return   # truncated final block
+        if block_type == 1:                       # Interface Description
+            linktype = struct.unpack(endian + 'H', body[:2])[0]
+            interfaces.append((linktype, _pcapng_tsresol(body[8:-4], endian)))
+        elif block_type == 6:                     # Enhanced Packet
+            iface, hi, lo, incl = struct.unpack(endian + 'IIII', body[:16])
+            linktype, tick = interfaces[iface]
+            if linktype not in _LINKTYPES:
+                continue
+            last_ts = ((hi << 32) | lo) * tick
+            yield last_ts, _to_ethernet(linktype, body[20:20 + incl])
+        elif block_type == 3 and interfaces:      # Simple Packet: no time
+            linktype, _tick = interfaces[0]
+            orig = struct.unpack(endian + 'I', body[:4])[0]
+            if linktype in _LINKTYPES:
+                yield last_ts, _to_ethernet(linktype, body[4:4 + orig])
+
+
+def _pcapng_tsresol(options, endian):
+    """Seconds per timestamp tick from an IDB's options (default 1 µs)."""
+    off = 0
+    while off + 4 <= len(options):
+        code, size = struct.unpack(endian + 'HH', options[off:off + 4])
+        if code == 0:
+            break
+        if code == 9 and size >= 1:               # if_tsresol
+            raw = options[off + 4]
+            return 2.0 ** -(raw & 0x7F) if raw & 0x80 else 10.0 ** -raw
+        off += 4 + size + (-size % 4)
+    return 1e-6
+
+
+def _open(path):
+    return gzip.open(path, 'rb') if str(path).endswith('.gz') \
+        else open(path, 'rb')
 
 
 def last_timestamp(path):
     """Timestamp of the final record, found by skipping over packet data."""
     last = None
-    with open(path, 'rb') as fh:
+    with _open(path) as fh:
         header = fh.read(24)
+        if header[:4] == PCAPNG_MAGIC or str(path).endswith('.gz'):
+            for last, _frame in read_pcap(path):
+                pass
+            return last
         endian, resolution = _MAGIC.get(header[:4], (None, None))
         if endian is None:
             raise ValueError('%s: not a classic pcap file' % path)

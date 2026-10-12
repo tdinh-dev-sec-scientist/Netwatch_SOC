@@ -8,7 +8,8 @@ Config: `shipped defaults`
 | Attacks detected | **11 / 18** (61%); correct class 9 / 18 |
 | Alerts | 512 — 333 true positive, 179 false positive vs labels |
 | Alert precision | 65.0% |
-| False positives | **1.1 per host-hour** (60 distinct incidents) |
+| False positives | **1.1 alerts per host-hour** |
+| Incidents (alerts correlated) | 142 — 77 true, 65 false: **9.9 false incidents per host-day** |
 
 ## Per attack
 

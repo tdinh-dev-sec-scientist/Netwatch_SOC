@@ -1,0 +1,30 @@
+{
+  "dataset": "CSE-CIC-IDS2018 — second held-out set",
+  "notes": [
+    "Captures here were not replayed until the second round of detector changes (http_flood, fast-poll beacons, login-form brute force) was frozen. The first held-out set (holdout.json) could not serve again: its web brute-force miss was known when those changes were designed.",
+    "Benign hosts are Wednesday 14 Feb workstations from the 172.31.64-67 department subnets, a host population used nowhere else in this evaluation.",
+    "Windows are the dataset's published schedule converted from lab local time (UTC-4) to UTC, padded by 10 minutes each side. Attacker addresses confirmed with talkers.py before scoring."
+  ],
+  "scenarios": [
+    {
+      "id": "dos_slowhttptest", "label": "DoS-SlowHTTPTest", "day": "Friday-16-02-2018",
+      "attackers": ["13.59.126.31"], "victims": ["172.31.69.25"],
+      "windows_utc": [["2018-02-16T14:02:00", "2018-02-16T15:18:00"]],
+      "expected": ["http_flood"]
+    },
+    {
+      "id": "dos_hulk", "label": "DoS-Hulk", "day": "Friday-16-02-2018",
+      "attackers": ["18.219.193.20"], "victims": ["172.31.69.25"],
+      "windows_utc": [["2018-02-16T17:35:00", "2018-02-16T18:29:00"]],
+      "expected": ["http_flood"]
+    }
+  ],
+  "captures": [
+    {"name": "fri16_dos", "day": "Friday-16-02-2018",
+     "members": ["pcap/UCAP172.31.69.25-part1.pcap"]},
+    {"name": "wed14_dept_66.90", "day": "Wednesday-14-02-2018", "members": ["pcap/capPC1-172.31.66.90"]},
+    {"name": "wed14_dept_66.49", "day": "Wednesday-14-02-2018", "members": ["pcap/capDESKTOP-AN3U28N-172.31.66.49"]},
+    {"name": "wed14_dept_64.99", "day": "Wednesday-14-02-2018", "members": ["pcap/capDESKTOP-AN3U28N-172.31.64.99"]},
+    {"name": "wed14_dept_64.106", "day": "Wednesday-14-02-2018", "members": ["pcap/capPC1-172.31.64.106"]}
+  ]
+}
