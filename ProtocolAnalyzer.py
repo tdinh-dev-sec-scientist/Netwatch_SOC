@@ -56,6 +56,13 @@ TCP_PORT_HINTS = {
     110: 'POP3', 143: 'IMAP', 443: 'TLS', 445: 'SMB', 587: 'SMTP',
     993: 'IMAP', 995: 'POP3', 3389: 'RDP', 8080: 'HTTP', 8443: 'TLS',
 }
+# Ports whose own protocol upgrades the connection to TLS in-band: STARTTLS
+# (SMTP, POP3, IMAP), AUTH TLS (FTP), and RDP, whose standard security layer
+# is a TLS handshake inside the X.224 connection. TLS records on these ports
+# are the protocol working as designed, not a mismatch. Without this, RDP
+# alone raised 48,904 false tunnelling alerts on the CSE-CIC-IDS2018 replay.
+TLS_UPGRADE_PORTS = frozenset({21, 25, 110, 143, 587, 3389})
+
 UDP_PORT_HINTS = {
     53: 'DNS', 67: 'DHCP', 68: 'DHCP', 123: 'NTP', 161: 'SNMP',
     162: 'SNMP', 443: 'QUIC', 5353: 'DNS',
@@ -356,6 +363,10 @@ class ProtocolAnalyzer:
             expected = hints.get(dport) or hints.get(sport)
             # Flag a positively-identified protocol on an unexpected port.
             pkt['nonstandard_port'] = expected is not None and expected != decoder
+            if (decoder == 'TLS' and hints is TCP_PORT_HINTS
+                    and (dport in TLS_UPGRADE_PORTS
+                         or sport in TLS_UPGRADE_PORTS)):
+                pkt['nonstandard_port'] = False
 
     @staticmethod
     def _identify_by_signature(p):
@@ -476,7 +487,7 @@ class ProtocolAnalyzer:
     def _dec_tls(self, pkt, p):
         if len(p) < 5 or p[1] != 0x03:
             return False
-        rtype, ver_major, ver_minor, rlen = p[0], p[1], p[2], \
+        rtype, ver_minor, rlen = p[0], p[2], \
             struct.unpack('!H', p[3:5])[0]
         if rtype not in (20, 21, 22, 23):
             return False

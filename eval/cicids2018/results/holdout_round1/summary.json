@@ -1,0 +1,177 @@
+{
+ "captures": 7,
+ "packets": 1763242,
+ "capture_host_hours": 52.86,
+ "alerts": 242,
+ "true_positive_alerts": 172,
+ "false_positive_alerts": 70,
+ "alert_precision": 0.7107,
+ "false_positives_per_host_hour": 1.32,
+ "incidents": 85,
+ "true_positive_incidents": 57,
+ "false_positive_incidents": 28,
+ "false_positive_incidents_per_host_day": 12.71,
+ "attack_units": 4,
+ "attack_units_detected": 3,
+ "attack_units_correct_class": 3,
+ "detection_rate": 0.75,
+ "false_positive_causes": {
+  "udp_flood: RDP-over-UDP remote desktop session (40-55 pkt/s)": 22,
+  "dns_tunnel: long, random-looking cloud/CDN hostnames": 13,
+  "credential_attack: attack traffic from the compromised host, raised as an unexpected type": 10,
+  "credential_attack: unlabelled internet brute force / credential stuffing against an exposed service": 5,
+  "tls_anomaly: attack traffic from the compromised host, raised as an unexpected type": 4,
+  "dns_tunnel: attack traffic from the compromised host, raised as an unexpected type": 4,
+  "c2_beacon: periodic keep-alive to a benign service": 3,
+  "data_exfil: RDP-over-UDP remote desktop session (40-55 pkt/s)": 3,
+  "protocol_tunnel: attack traffic from the compromised host, raised as an unexpected type": 3,
+  "data_exfil: large legitimate upload (cloud storage, admin session)": 2,
+  "protocol_tunnel: protocol/port mismatch (non-RDP)": 1
+ },
+ "scenarios": [
+  {
+   "scenario": "web_bruteforce",
+   "label": "Brute Force -Web",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "web_xss",
+   "label": "Brute Force -XSS",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 69,
+   "alert_types": {
+    "http_anomaly": 69
+   },
+   "first_alert_after_s": 66
+  },
+  {
+   "scenario": "web_sqli",
+   "label": "SQL Injection",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 7,
+   "alert_types": {
+    "http_anomaly": 7
+   },
+   "first_alert_after_s": 180
+  },
+  {
+   "scenario": "infiltration",
+   "label": "Infilteration",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 96,
+   "alert_types": {
+    "port_scan": 79,
+    "lateral_movement": 17
+   },
+   "first_alert_after_s": 776
+  }
+ ],
+ "per_capture": [
+  {
+   "name": "fri23_clean_69.13",
+   "packets": 226777,
+   "capture_hours": 10.235011324220233,
+   "alerts": 7,
+   "alerts_by_type": {
+    "credential_attack": 3,
+    "dns_tunnel": 4
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 18601.6
+  },
+  {
+   "name": "fri23_web",
+   "packets": 55101,
+   "capture_hours": 9.204376501109865,
+   "alerts": 79,
+   "alerts_by_type": {
+    "c2_beacon": 3,
+    "http_anomaly": 76
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 13523.4
+  },
+  {
+   "name": "thu01_infiltration",
+   "packets": 782254,
+   "capture_hours": 9.224501676625676,
+   "alerts": 148,
+   "alerts_by_type": {
+    "credential_attack": 12,
+    "data_exfil": 4,
+    "dns_tunnel": 7,
+    "lateral_movement": 17,
+    "port_scan": 79,
+    "protocol_tunnel": 3,
+    "tls_anomaly": 4,
+    "udp_flood": 22
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 16219.4
+  },
+  {
+   "name": "wed21_clean_69.11",
+   "packets": 104327,
+   "capture_hours": 4.252086964713203,
+   "alerts": 1,
+   "alerts_by_type": {
+    "protocol_tunnel": 1
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 16870.5
+  },
+  {
+   "name": "wed21_clean_69.19",
+   "packets": 63229,
+   "capture_hours": 1.933793714178933,
+   "alerts": 2,
+   "alerts_by_type": {
+    "dns_tunnel": 2
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 15481.3
+  },
+  {
+   "name": "wed21_clean_69.4",
+   "packets": 307828,
+   "capture_hours": 9.00455913497342,
+   "alerts": 3,
+   "alerts_by_type": {
+    "dns_tunnel": 3
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 18403.1
+  },
+  {
+   "name": "wed21_clean_69.9",
+   "packets": 223726,
+   "capture_hours": 9.001535148620606,
+   "alerts": 2,
+   "alerts_by_type": {
+    "data_exfil": 1,
+    "dns_tunnel": 1
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 19758.3
+  }
+ ],
+ "config": null
+}

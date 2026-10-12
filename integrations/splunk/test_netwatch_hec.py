@@ -11,7 +11,6 @@ partitions the alerts exactly as the engine's own unpersisted
 `Finding.incident_key` does.
 """
 
-import json
 import os
 import sqlite3
 import sys

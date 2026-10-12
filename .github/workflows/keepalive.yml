@@ -1,0 +1,38 @@
+# Keeps the Render free-plan demo warm.
+#
+# Render spins a free web service down after 15 minutes without traffic and
+# takes about a minute to bring it back, so the first visitor after a quiet
+# spell waits on a loading page. A request every 10 minutes keeps it up.
+#
+# Cost: a free service has 750 instance hours a month and staying up all month
+# uses at most 744, so this fits — as long as it is the account's only free
+# service that stays awake. GitHub pauses scheduled workflows in a repository
+# with no activity for 60 days; re-enable it from the Actions tab if that
+# happens. Set the repository variable DEMO_URL to change the target.
+
+name: Keep demo warm
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request the dashboard
+        env:
+          DEMO_URL: ${{ vars.DEMO_URL || 'https://netwatch-soc-demo.onrender.com' }}
+        run: |
+          # A cold start can take a minute; allow for it, and retry once.
+          for attempt in 1 2; do
+            if curl -fsS -o /dev/null --max-time 150 -w '%{http_code} in %{time_total}s\n' "$DEMO_URL/"; then
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::warning::demo did not answer at $DEMO_URL"

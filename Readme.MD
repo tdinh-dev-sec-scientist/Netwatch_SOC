@@ -2,13 +2,11 @@
 
 [![CI](https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC/actions/workflows/ci.yml/badge.svg)](https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC/actions/workflows/ci.yml)
 
-<!-- After the first Render deploy, add the demo link on the next line, e.g.
-**Live demo:** https://<service>.onrender.com (read-only, synthetic traffic; the
-first load after the service has idled takes about a minute) -->
-
 A network security monitoring platform: deep packet inspection over 21 protocols,
-17 modular threat detectors mapped to MITRE ATT&CK, an indexed 8-table PostgreSQL
-store, a 24-endpoint REST API, and a 9-module analyst dashboard.
+18 modular threat detectors mapped to MITRE ATT&CK, alert-to-incident
+correlation, an indexed 8-table PostgreSQL store, a 25-endpoint REST API, and a
+9-module analyst dashboard — validated on 31 million packets of labelled real
+traffic and benchmarked against Suricata with the ET Open ruleset.
 
 Every number in this README is measured, and the commands to reproduce each one
 are given. Where a number falls short of a target, it says so. The headline
@@ -16,8 +14,12 @@ counts are pinned by `tests/test_readme.py`, so the documentation cannot drift
 from the code without a test failing.
 
 ---
-##🚀 Live Demo
-Application is running at: [https://netwatch-soc-demo.onrender.com](https://netwatch-soc-demo.onrender.com)
+## Live demo
+
+[netwatch-soc-demo.onrender.com](https://netwatch-soc-demo.onrender.com) — read-only,
+replaying 45 minutes of real attack traffic from the CSE-CIC-IDS2018 dataset in
+a loop (XSS, SQL injection, botnet C2, Slowloris, SSH and login-form brute
+force, nmap, HTTP flood, internet RDP credential stuffing).
 
 ## Quick start
 
@@ -72,7 +74,7 @@ The ones that matter:
 
 ```
  frames.py ──────► ProtocolAnalyzer ──────► ThreatDetector ──────► DB_Manager ──────► App.py ──────► Dashboard.html
- (or a live       parses raw bytes         17 detectors,           8 tables,          24 REST        9 modules
+ (or a live       parses raw bytes         18 detectors,           8 tables,          25 REST        9 modules
   capture)        into 21 protocols        bounded state           batched writes     endpoints
 ```
 
@@ -92,7 +94,7 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 
 1. **Parse** — `ProtocolAnalyzer.parse()` walks Ethernet → IPv4/IPv6/ARP →
    TCP/UDP/ICMP → L7, returning a flat dict of extracted fields.
-2. **Detect** — `ThreatDetector.analyze()` feeds the parsed packet to all 17
+2. **Detect** — `ThreatDetector.analyze()` feeds the parsed packet to all 18
    detectors. Each keeps bounded sliding-window state and returns `Finding`
    objects with severity, confidence, evidence and ATT&CK technique IDs.
 3. **Persist** — `PacketSimulator` buffers packets and findings, then
@@ -108,7 +110,8 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 |---|---|
 | `frames.py` | Wire-format frame construction (the capture-layer stand-in) |
 | `ProtocolAnalyzer.py` | Deep packet inspection: 21 protocols |
-| `detectors/` | 17 detectors, one module per threat family |
+| `detectors/` | 18 detectors, one module per threat family |
+| `incidents.py` | Alert-to-incident correlation, shared by the API and the evaluation |
 | `ThreatDetector.py` | Engine: registry, dispatch, state expiry, introspection |
 | `mitre.py` | ATT&CK catalog with a written rationale per technique |
 | `DB_Manager.py` | Every SQL statement: batched writes and all read queries |
@@ -123,6 +126,8 @@ AsyncSniffer(prn=lambda p: simulator.process(bytes(p), time.time())).start()
 | `hardening.py` | Security headers, read-only demo mode, rate limiting |
 | `engine.py` | Headless engine for the split deployment topology |
 | `benchmark.py` | Reproducible throughput, latency and alert-volume measurement |
+| `replay.py` | pcap replay through the real pipeline: alerts as JSON lines, or `--persist` into PostgreSQL for the dashboard |
+| `eval/cicids2018/` | Fetch, ground truth and scoring for the real-traffic validation |
 | `static/vendor/` | Vendored Chart.js, checksum-pinned (no CDN scripts) |
 | `render.yaml` | Render Blueprint for the public demo |
 | `scripts/smoke_test.sh` | End-to-end checks of the image, compose topologies and demo |
@@ -135,30 +140,31 @@ Produced by `python benchmark.py` on the machine described below. Re-run it and
 you will get numbers of the same shape; absolute throughput is hardware-dependent.
 
 ```
-Environment : Python 3.11.15, PostgreSQL 16.13, Linux x86_64, single-threaded,
+Environment : Python 3.13.16, PostgreSQL 16.15, Linux x86_64, single-threaded,
               shared container, database on the same host
 Command     : python benchmark.py --iterations 5 --packets 20000
-Dataset     : 106,690 packets, 120 alerts, 135 technique links
+Dataset     : 113,390 packets, 140 alerts, 155 technique links
 ```
 
 | Claim | Target | Measured | Status |
 |---|---|---|---|
-| Threat types | 15+ | **17** (all 17 proven by a scenario) | ✅ |
+| Threat types | 15+ | **18** (all 18 proven by a scenario) | ✅ |
 | Protocols inspected | 15+ | **21** | ✅ |
-| ATT&CK techniques | 12 | **15** across 9 tactics | ✅ |
+| ATT&CK techniques | 12 | **16** across 9 tactics | ✅ |
 | Tables | 8 | **8**, all written by the pipeline | ✅ |
 | Indexes | — | **25**, usage asserted by `EXPLAIN` on a 40k-row dataset | ✅ |
-| REST endpoints | 14+ | **24** | ✅ |
+| REST endpoints | 14+ | **25** | ✅ |
 | Dashboard modules | 8+ | **9** | ✅ |
-| Throughput | 5,000 pkt/min | **377,498 pkt/min median = 6,292 pkt/s** (5,875–7,080 pkt/s) | ✅ |
-| Query latency | < 50 ms | **p50 0.33 ms · p95 10.69 ms · max 16.78 ms** | ✅ |
-| Alert-volume reduction | — | **96.1%** (621 → 24), **0 incidents lost** | ✅ |
-| False positives | — | **0** across 240,000 benign packets, 8 seeds | ✅ |
+| Throughput | 5,000 pkt/min | **352,359 pkt/min median = 5,873 pkt/s** (5,646–6,074 pkt/s) | ✅ |
+| Query latency | < 50 ms | **p50 0.39 ms · p95 11.85 ms · max 21.01 ms** | ✅ |
+| Alert-volume reduction | — | **96.6%** (818 → 28), **0 incidents lost** | ✅ |
+| Detection on real traffic | — | **6 / 6** held-out CSE-CIC-IDS2018 attacks; Suricata + ET Open on the same captures: 3 / 6 — [details](docs/real-traffic-validation.md) | ✅ |
+| False positives | — | **1.0 per host-hour** on held-out real traffic (CSE-CIC-IDS2018; 507 before fixing the 5 bugs it exposed; Suricata + ET Open severity 1-2: 26.7) — [details](docs/real-traffic-validation.md) | ✅ |
 
-At a larger scale — 248,028 packets and 3,776 alerts, produced by relaxing
+At a larger scale — 256,068 packets and 4,992 alerts, produced by relaxing
 detector cooldowns so more real detections are retained — latency stays within
-target: **p50 1.27 ms, p95 14.51 ms, p99 17.26 ms, max 19.12 ms**, throughput
-338,563 pkt/min median.
+target: **p50 1.55 ms, p95 19.75 ms, p99 22.21 ms, max 27.35 ms**, throughput
+315,282 pkt/min median.
 
 ```bash
 # reproduce the scale run
@@ -173,7 +179,8 @@ NETWATCH_CONFIG=lowcooldown.json python benchmark.py --iterations 6 --packets 40
 ### What moving from SQLite to PostgreSQL cost
 
 Both columns are the same command on the same machine, five iterations of 20,000
-packets, ending at 106,690 packets:
+packets, ending at 106,690 packets. Measured at the time of the migration, with
+17 detectors; the headline table above is the current code:
 
 | | SQLite (file) | PostgreSQL 16 (same host) | Change |
 |---|---|---|---|
@@ -196,9 +203,10 @@ each endpoint from a dozen separate statements into one statement of scalar
 subqueries cut the overall p95 by 25% and is why the numbers are 10 ms rather
 than 20 ms, but the scan remains.
 
-This is a real regression and it grows with row count: at 248,028 packets
-`/api/stats/overview` is 16.3 ms. It is still **3–5× inside the 50 ms target**,
-every other endpoint is at or below 2 ms, and retention bounds the tables — so it
+This is a real regression and it grows with row count: at 256,068 packets
+`/api/stats/overview` is 21.1 ms (p50). It is still **more than 2× inside the
+50 ms target**, every endpoint but it, `/api/health` and host detail is under
+4 ms, and retention bounds the tables — so it
 is accepted rather than worked around. The available fix, `pg_class.reltuples`,
 returns an estimate, and both the container healthcheck and the test suite read
 exact counts from `/api/health`. Worth revisiting for a deployment that keeps
@@ -212,8 +220,9 @@ Throughput is measured end-to-end — parse **and** detect **and** batched
 PostgreSQL persistence — over `--iterations` independent runs, reported as mean,
 median, min, max and standard deviation, in **both packets/minute and
 packets/second**. Prefer the median and quote the range with it: on a shared
-or throttled machine the spread between runs is wide (here 4,567–7,555 pkt/s
-across five runs), so a single figure without its range says little.
+or throttled machine the spread between runs can be wide (here 5,646–6,074
+pkt/s across five runs; 4,567–7,555 on an earlier run), so a single figure
+without its range says little.
 
 Query latency covers all 22 queries that back the REST API, run against the
 dataset the throughput phase actually wrote, reported as p50/p95/p99.
@@ -225,8 +234,8 @@ tuning suppresses, against two explicit baselines on the same workload:
 
 | Baseline | What it is | Result |
 |---|---|---|
-| Same rules, dedup off | every `cooldown_s` set to 0, **every threshold unchanged** | 621 alerts |
-| Shipped tuning | `config.py` as it ships | **24 alerts — 96.1% fewer** |
+| Same rules, dedup off | every `cooldown_s` set to 0, **every threshold unchanged** | 818 alerts |
+| Shipped tuning | `config.py` as it ships | **28 alerts — 96.6% fewer** |
 | Benign-only corpus | 20,000 benign frames through the shipped tuning | **0 alerts** |
 
 The baseline changes *only* the cooldowns, which is what makes the ratio
@@ -239,12 +248,12 @@ also checks that suppression is **lossless**. Each finding carries the key its
 detector deduplicates on — `Finding.incident_key`, the identity of the
 incident rather than of the packet that exposed it, which for a flood is the
 victim and not the spoofed source — and the two runs are compared on those
-keys. Both resolve to the **same 24 distinct incidents**; the 597 suppressed
+keys. Both resolve to the **same 28 distinct incidents**; the 790 suppressed
 alerts are all repeat reports of an incident already raised. `benchmark.py`
 exits non-zero if a single incident present in the baseline is missing from
 the tuned run.
 
-Severity is triage metadata carried on every alert (here CRITICAL 9, HIGH 9,
+Severity is triage metadata carried on every alert (here CRITICAL 9, HIGH 13,
 MEDIUM 6) — it ranks the queue for an analyst; it is the per-rule cooldowns
 and thresholds that do the suppressing.
 
@@ -265,7 +274,7 @@ suppression — so it can gate CI.
 
 ---
 
-## Detection engine — 17 threat types
+## Detection engine — 18 threat types
 
 Each detector lives in its own module under `detectors/`, declares the ATT&CK
 techniques it can emit, and is tuned by one section of `config.py`.
@@ -274,9 +283,9 @@ techniques it can emit, and is tuned by one section of `config.py`.
 |---|---|---|
 | `port_scan` | Distinct destination ports on one host in a window | T1046 |
 | `network_recon` | Many hosts within one /24 on a narrow port set; ICMP sweep | T1595 |
-| `brute_force` | In-protocol auth failures (FTP 530, SMTP 535, POP3 `-ERR`, IMAP `NO`, HTTP 401); SSH session bursts | T1110, T1078 |
+| `brute_force` | In-protocol auth failures (FTP 530, SMTP 535, POP3 `-ERR`, IMAP `NO`, HTTP 401); SSH session bursts; login-form POST bursts | T1110, T1078 |
 | `credential_attack` | Many usernames from one source; one username across many hosts; cleartext credentials | T1110, T1078 |
-| `c2_beacon` | Coefficient of variation of inter-arrival times on one channel | T1071.001 |
+| `c2_beacon` | Coefficient of variation of inter-arrival times on one channel; high-rate polling of one external URL path | T1071.001 |
 | `dns_tunnel` | Oversized label **and** high entropy / TXT-NULL-ANY / volume | T1071.004, T1048 |
 | `suspicious_dns` | NXDOMAIN ratio; repeated high-entropy SLD lookups | T1071.004 |
 | `icmp_tunnel` | Oversized, high-entropy echo payloads, repeated | T1572, T1048 |
@@ -287,6 +296,7 @@ techniques it can emit, and is tuned by one section of `config.py`.
 | `syn_flood` | SYN rate **and** SYN:completed-handshake ratio | T1498 |
 | `udp_flood` | UDP packet rate to one destination | T1498 |
 | `amplification` | Response:request byte ratio on NTP/DNS/SNMP | T1498.002 |
+| `http_flood` | HTTP request rate to one service; mass of unfinished request heads (Slowloris) | T1499.002 |
 | `http_anomaly` | SQLi / traversal / XSS / command injection / JNDI / scanner UA | T1190 |
 | `arp_spoof` | IP↔MAC binding conflict; gratuitous ARP flood | T1557.002 |
 
@@ -305,8 +315,14 @@ tested (`tests/test_detectors.py`):
 - Repeated access to a single file server — **not** lateral movement (fan-out
   across hosts is required).
 
-**Measured false-positive rate: 0 alerts across 240,000 benign packets** over
-8 independent seeds.
+**Measured false-positive rate on real traffic: 1.0 alerts per host-hour** on
+held-out CSE-CIC-IDS2018 captures, and 1.1 on the development captures — down
+from 507 and 375 as first shipped, by fixing five logic bugs the synthetic
+corpus could not expose, with no threshold changed. Correlated into incidents
+(`/api/incidents`), that is about 10 false incidents per host per day. Every remaining false
+positive is traced to a cause in
+[docs/real-traffic-validation.md](docs/real-traffic-validation.md). On the
+synthetic corpus the rate is 0 across 240,000 benign packets over 8 seeds.
 
 ```bash
 pytest tests/test_detectors.py::test_no_false_positives_on_benign_background
@@ -363,7 +379,7 @@ the packet keeps what was decoded and gains a `truncated` flag.
 
 ---
 
-## MITRE ATT&CK — 15 techniques
+## MITRE ATT&CK — 16 techniques
 
 `mitre.py` is the single source of truth and is loaded into the
 `mitre_techniques` table at startup. Every technique carries a written
@@ -395,6 +411,7 @@ Two invariants are enforced by tests:
 | T1048 | Exfiltration Over Alternative Protocol | Exfiltration | `dns_tunnel`, `icmp_tunnel` |
 | T1498 | Network Denial of Service | Impact | `syn_flood`, `udp_flood` |
 | T1498.002 | Reflection Amplification | Impact | `amplification` |
+| T1499.002 | Service Exhaustion Flood | Impact | `http_flood` |
 
 ---
 
@@ -562,7 +579,7 @@ histories.
 
 ---
 
-## REST API — 24 endpoints
+## REST API — 25 endpoints
 
 All read from PostgreSQL. Empty database returns empty collections, never filler.
 Invalid parameters return `400` with a message; unknown resources return `404`.
@@ -579,6 +596,7 @@ Invalid parameters return `400` with a message; unknown resources return `404`.
 | GET | `/api/alerts/<id>` | Detail + techniques + related packets |
 | POST | `/api/alerts/<id>/acknowledge` | |
 | GET | `/api/alerts/stats` | Grouped by threat type |
+| GET | `/api/incidents` | Alerts correlated into incidents: `?hours&gap_min&limit` |
 | GET | `/api/threats/summary` | Aggregated per source + threat type |
 | GET | `/api/threats/types` | Detector catalog joined with live counts |
 | GET | `/api/mitre/techniques` | Catalog + observed counts |
@@ -737,12 +755,16 @@ deploys `main` only after these checks pass.
 
 ## Honest limitations
 
-- **Traffic is synthetic.** `frames.py` emits real wire-format bytes and the
-  analyzer has no privileged knowledge of their origin, so the parsing and
-  detection logic is genuinely exercised — but the *traffic mix* is a model of
-  an enterprise network, not a capture of one. The measured false-positive rate
-  is against that model. Validating against real captured traffic would be the
-  next step, and would very likely require re-tuning thresholds.
+- **Most numbers are from synthetic traffic.** `frames.py` emits real
+  wire-format bytes and the analyzer has no privileged knowledge of their
+  origin, but the *traffic mix* is a model. The one real-traffic validation,
+  [CSE-CIC-IDS2018](docs/real-traffic-validation.md), found that model had
+  hidden five bugs worth 375 false positives per host-hour and four attack
+  classes it could not see. Both were fixed and re-measured on held-out
+  captures, but it is one 2018 lab network with six held-out attacks; a
+  different network would surface different problems. Two dataset attacks
+  aimed at a closed port are reported as `syn_flood`, which is what the wire
+  shows.
 - **Geo enrichment is a static prefix table**, not MaxMind. `geoip.py` returns
   `UNKNOWN` rather than guessing, and the dashboard labels it "approximate".
   The high-risk country list is a crude proxy, not threat intelligence.
@@ -751,10 +773,10 @@ deploys `main` only after these checks pass.
   the standard network-side signal, and caps its confidence at 0.85 accordingly.
 - **Throughput is single-threaded and hardware-dependent.** The benchmark reports
   what your machine measured, not a fixed figure. The run recorded above spans
-  4,567–7,555 pkt/s across five iterations on a shared container; quote the
+  5,646–6,074 pkt/s across five iterations on a shared container; quote the
   median with its range rather than the best iteration.
 - **The alert-reduction figure is scoped to deduplication.** Its baseline is
-  the same rules with cooldowns disabled, so 96.1% is what per-rule dedup
+  the same rules with cooldowns disabled, so 96.6% is what per-rule dedup
   contributes on this workload — not a comparison against some other tool's
   alert volume, and not a claim about threshold tuning, whose effect is
   reported separately as the false-positive count on benign traffic. The ratio

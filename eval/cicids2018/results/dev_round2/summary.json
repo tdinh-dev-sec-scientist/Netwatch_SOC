@@ -1,0 +1,515 @@
+{
+ "captures": 18,
+ "packets": 10022252,
+ "capture_host_hours": 157.41,
+ "alerts": 662,
+ "true_positive_alerts": 483,
+ "false_positive_alerts": 179,
+ "alert_precision": 0.7296,
+ "false_positives_per_host_hour": 1.14,
+ "incidents": 167,
+ "true_positive_incidents": 102,
+ "false_positive_incidents": 65,
+ "false_positive_incidents_per_host_day": 9.91,
+ "attack_units": 18,
+ "attack_units_detected": 18,
+ "attack_units_correct_class": 17,
+ "detection_rate": 1.0,
+ "false_positive_causes": {
+  "credential_attack: unlabelled internet brute force / credential stuffing against an exposed service": 66,
+  "udp_flood: RDP-over-UDP remote desktop session (40-55 pkt/s)": 50,
+  "dns_tunnel: long, random-looking cloud/CDN hostnames": 18,
+  "credential_attack: attack traffic from the compromised host, raised as an unexpected type": 13,
+  "data_exfil: large legitimate upload (cloud storage, admin session)": 9,
+  "tls_anomaly: attack traffic from the compromised host, raised as an unexpected type": 6,
+  "protocol_tunnel: attack traffic from the compromised host, raised as an unexpected type": 6,
+  "data_exfil: RDP-over-UDP remote desktop session (40-55 pkt/s)": 5,
+  "http_anomaly: unlabelled internet scanner/exploit probe": 3,
+  "brute_force: unlabelled internet brute force / credential stuffing against an exposed service": 2,
+  "tls_anomaly: legacy/no-SNI TLS client (non-RDP)": 1
+ },
+ "scenarios": [
+  {
+   "scenario": "ftp_bruteforce",
+   "label": "FTP-BruteForce",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 97,
+   "alert_types": {
+    "syn_flood": 97
+   },
+   "first_alert_after_s": 92
+  },
+  {
+   "scenario": "ssh_bruteforce",
+   "label": "SSH-Bruteforce",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 62,
+   "alert_types": {
+    "brute_force": 46,
+    "data_exfil": 9,
+    "protocol_tunnel": 7
+   },
+   "first_alert_after_s": 50
+  },
+  {
+   "scenario": "dos_goldeneye",
+   "label": "DoS-GoldenEye",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 6,
+   "alert_types": {
+    "http_flood": 4,
+    "data_exfil": 2
+   },
+   "first_alert_after_s": 115
+  },
+  {
+   "scenario": "dos_slowloris",
+   "label": "DoS-Slowloris",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 9,
+   "alert_types": {
+    "http_flood": 9
+   },
+   "first_alert_after_s": 78
+  },
+  {
+   "scenario": "web_bruteforce",
+   "label": "Brute Force -Web",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 33,
+   "alert_types": {
+    "brute_force": 33
+   },
+   "first_alert_after_s": 106
+  },
+  {
+   "scenario": "web_xss",
+   "label": "Brute Force -XSS",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 37,
+   "alert_types": {
+    "http_anomaly": 37
+   },
+   "first_alert_after_s": 101
+  },
+  {
+   "scenario": "web_sqli",
+   "label": "SQL Injection",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 5,
+   "alert_types": {
+    "http_anomaly": 5
+   },
+   "first_alert_after_s": 232
+  },
+  {
+   "scenario": "infiltration",
+   "label": "Infilteration",
+   "victim": null,
+   "detected": true,
+   "correct_class": true,
+   "alerts": 121,
+   "alert_types": {
+    "port_scan": 99,
+    "lateral_movement": 22
+   },
+   "first_alert_after_s": -216
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.23",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 13,
+   "alert_types": {
+    "c2_beacon": 11,
+    "data_exfil": 2
+   },
+   "first_alert_after_s": 2055
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.17",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 13,
+   "alert_types": {
+    "c2_beacon": 11,
+    "data_exfil": 2
+   },
+   "first_alert_after_s": 2033
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.14",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 11,
+   "alert_types": {
+    "c2_beacon": 11
+   },
+   "first_alert_after_s": 2032
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.12",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 7,
+   "alert_types": {
+    "c2_beacon": 5,
+    "data_exfil": 2
+   },
+   "first_alert_after_s": 2033
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.10",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 11,
+   "alert_types": {
+    "c2_beacon": 11
+   },
+   "first_alert_after_s": 2033
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.8",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 13,
+   "alert_types": {
+    "c2_beacon": 11,
+    "data_exfil": 2
+   },
+   "first_alert_after_s": 2078
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.6",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 11,
+   "alert_types": {
+    "c2_beacon": 11
+   },
+   "first_alert_after_s": 2033
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.26",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 12,
+   "alert_types": {
+    "c2_beacon": 11,
+    "data_exfil": 1
+   },
+   "first_alert_after_s": 2174
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.29",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 11,
+   "alert_types": {
+    "c2_beacon": 11
+   },
+   "first_alert_after_s": 2161
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.30",
+   "detected": true,
+   "correct_class": true,
+   "alerts": 11,
+   "alert_types": {
+    "c2_beacon": 11
+   },
+   "first_alert_after_s": 2034
+  }
+ ],
+ "per_capture": [
+  {
+   "name": "fri02_bot_69.10",
+   "packets": 328571,
+   "capture_hours": 8.70903631693787,
+   "alerts": 15,
+   "alerts_by_type": {
+    "c2_beacon": 11,
+    "credential_attack": 2,
+    "udp_flood": 2
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 22907.3
+  },
+  {
+   "name": "fri02_bot_69.12",
+   "packets": 194651,
+   "capture_hours": 8.713488304482565,
+   "alerts": 7,
+   "alerts_by_type": {
+    "c2_beacon": 5,
+    "data_exfil": 2
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 22801.3
+  },
+  {
+   "name": "fri02_bot_69.14",
+   "packets": 289396,
+   "capture_hours": 8.713550323645274,
+   "alerts": 18,
+   "alerts_by_type": {
+    "c2_beacon": 11,
+    "data_exfil": 1,
+    "udp_flood": 6
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 23539.3
+  },
+  {
+   "name": "fri02_bot_69.17",
+   "packets": 275440,
+   "capture_hours": 8.711854691969023,
+   "alerts": 15,
+   "alerts_by_type": {
+    "c2_beacon": 11,
+    "data_exfil": 2,
+    "udp_flood": 2
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 25209.0
+  },
+  {
+   "name": "fri02_bot_69.23",
+   "packets": 316197,
+   "capture_hours": 8.713202448354828,
+   "alerts": 19,
+   "alerts_by_type": {
+    "c2_beacon": 11,
+    "data_exfil": 2,
+    "dns_tunnel": 1,
+    "udp_flood": 5
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 21682.6
+  },
+  {
+   "name": "fri02_bot_69.26",
+   "packets": 228488,
+   "capture_hours": 7.5077895891666415,
+   "alerts": 12,
+   "alerts_by_type": {
+    "c2_beacon": 11,
+    "data_exfil": 1
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 25740.9
+  },
+  {
+   "name": "fri02_bot_69.29",
+   "packets": 323651,
+   "capture_hours": 8.686181299421522,
+   "alerts": 15,
+   "alerts_by_type": {
+    "c2_beacon": 11,
+    "dns_tunnel": 2,
+    "udp_flood": 2
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 24816.4
+  },
+  {
+   "name": "fri02_bot_69.30",
+   "packets": 320039,
+   "capture_hours": 8.711806119481723,
+   "alerts": 13,
+   "alerts_by_type": {
+    "c2_beacon": 11,
+    "udp_flood": 2
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 24612.0
+  },
+  {
+   "name": "fri02_bot_69.6",
+   "packets": 361912,
+   "capture_hours": 8.7134708230363,
+   "alerts": 15,
+   "alerts_by_type": {
+    "c2_beacon": 11,
+    "udp_flood": 4
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 22515.6
+  },
+  {
+   "name": "fri02_bot_69.8",
+   "packets": 333702,
+   "capture_hours": 8.71305309249295,
+   "alerts": 16,
+   "alerts_by_type": {
+    "c2_beacon": 11,
+    "data_exfil": 3,
+    "udp_flood": 2
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 20739.3
+  },
+  {
+   "name": "fri02_clean_69.13",
+   "packets": 245109,
+   "capture_hours": 8.396821263101366,
+   "alerts": 7,
+   "alerts_by_type": {
+    "dns_tunnel": 4,
+    "http_anomaly": 1,
+    "udp_flood": 2
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 18179.4
+  },
+  {
+   "name": "fri02_clean_69.16",
+   "packets": 209972,
+   "capture_hours": 9.107863726350995,
+   "alerts": 13,
+   "alerts_by_type": {
+    "credential_attack": 8,
+    "data_exfil": 1,
+    "dns_tunnel": 4
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 21738.5
+  },
+  {
+   "name": "fri02_clean_69.5",
+   "packets": 182950,
+   "capture_hours": 8.908511889444457,
+   "alerts": 2,
+   "alerts_by_type": {
+    "data_exfil": 1,
+    "dns_tunnel": 1
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 21143.0
+  },
+  {
+   "name": "fri02_clean_69.9",
+   "packets": 301971,
+   "capture_hours": 8.70607425192992,
+   "alerts": 62,
+   "alerts_by_type": {
+    "credential_attack": 56,
+    "data_exfil": 1,
+    "dns_tunnel": 4,
+    "tls_anomaly": 1
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 22887.6
+  },
+  {
+   "name": "thu15_dos",
+   "packets": 424625,
+   "capture_hours": 9.026353845530085,
+   "alerts": 18,
+   "alerts_by_type": {
+    "data_exfil": 4,
+    "http_anomaly": 1,
+    "http_flood": 13
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 20168.8
+  },
+  {
+   "name": "thu22_web",
+   "packets": 47714,
+   "capture_hours": 9.083590190278159,
+   "alerts": 78,
+   "alerts_by_type": {
+    "brute_force": 35,
+    "http_anomaly": 43
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 14976.1
+  },
+  {
+   "name": "wed14_ftp_ssh",
+   "packets": 4718327,
+   "capture_hours": 8.936792161928283,
+   "alerts": 160,
+   "alerts_by_type": {
+    "brute_force": 46,
+    "data_exfil": 10,
+    "protocol_tunnel": 7,
+    "syn_flood": 97
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 27205.0
+  },
+  {
+   "name": "wed28_infiltration",
+   "packets": 919537,
+   "capture_hours": 9.34563898411062,
+   "alerts": 177,
+   "alerts_by_type": {
+    "credential_attack": 13,
+    "data_exfil": 6,
+    "dns_tunnel": 2,
+    "lateral_movement": 22,
+    "port_scan": 99,
+    "protocol_tunnel": 6,
+    "tls_anomaly": 6,
+    "udp_flood": 23
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 15827.2
+  }
+ ],
+ "config": null
+}

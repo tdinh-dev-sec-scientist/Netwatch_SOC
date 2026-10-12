@@ -1,0 +1,49 @@
+{
+  "dataset": "CSE-CIC-IDS2018 — held-out days",
+  "notes": [
+    "Captures here were not replayed until every detector change made from the development set (ground_truth.json) was frozen. They measure whether those changes generalise rather than fit the data they were derived from.",
+    "Windows are the dataset's published schedule converted from lab local time (UTC-4) to UTC, padded by 10 minutes each side."
+  ],
+  "scenarios": [
+    {
+      "id": "web_bruteforce", "label": "Brute Force -Web", "day": "Friday-23-02-2018",
+      "attackers": ["18.218.115.60"], "victims": ["172.31.69.28"],
+      "windows_utc": [["2018-02-23T13:53:00", "2018-02-23T15:13:00"]],
+      "expected": ["brute_force", "credential_attack", "http_anomaly"]
+    },
+    {
+      "id": "web_xss", "label": "Brute Force -XSS", "day": "Friday-23-02-2018",
+      "attackers": ["18.218.115.60"], "victims": ["172.31.69.28"],
+      "windows_utc": [["2018-02-23T16:50:00", "2018-02-23T18:20:00"]],
+      "expected": ["http_anomaly"]
+    },
+    {
+      "id": "web_sqli", "label": "SQL Injection", "day": "Friday-23-02-2018",
+      "attackers": ["18.218.115.60"], "victims": ["172.31.69.28"],
+      "windows_utc": [["2018-02-23T18:55:00", "2018-02-23T19:28:00"]],
+      "expected": ["http_anomaly"]
+    },
+    {
+      "id": "infiltration", "label": "Infilteration", "day": "Thursday-01-03-2018",
+      "attackers": ["13.58.225.34"], "victims": ["172.31.69.13"],
+      "pivot": "172.31.69.13",
+      "windows_utc": [["2018-03-01T13:47:00", "2018-03-01T15:05:00"],
+                      ["2018-03-01T17:50:00", "2018-03-01T19:47:00"]],
+      "expected": ["port_scan", "network_recon", "lateral_movement"]
+    }
+  ],
+  "captures": [
+    {"name": "fri23_web", "day": "Friday-23-02-2018",
+     "members": ["pcap/UCAP172.31.69.28"]},
+    {"name": "fri23_clean_69.13", "day": "Friday-23-02-2018",
+     "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.13"]},
+    {"name": "thu01_infiltration", "day": "Thursday-01-03-2018",
+     "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.13 part1",
+                 "pcap/capEC2AMAZ-O4EL3NG-172.31.69.13 part2",
+                 "pcap/capEC2AMAZ-O4EL3NG-172.31.69.13 part3"]},
+    {"name": "wed21_clean_69.4", "day": "Wednesday-21-02-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.4"]},
+    {"name": "wed21_clean_69.9", "day": "Wednesday-21-02-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.9"]},
+    {"name": "wed21_clean_69.11", "day": "Wednesday-21-02-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.11"]},
+    {"name": "wed21_clean_69.19", "day": "Wednesday-21-02-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.19"]}
+  ]
+}

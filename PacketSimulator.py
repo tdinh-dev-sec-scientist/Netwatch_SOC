@@ -436,6 +436,64 @@ class TrafficGenerator:
             ts += 5.0
         return out
 
+    def http_flood(self, start_ts=0.0, attacker='45.33.32.156',
+                   target='10.0.2.10', requests=700):
+        """GoldenEye-style GET flood: completed handshakes, random URLs."""
+        out, ts = [], start_ts
+        for i in range(requests):
+            uri = '/?%x=%x' % (self.rng.getrandbits(32), i)
+            out.append((ts, F.tcp_frame(
+                F.http_request('GET', uri, 'shop.example.com',
+                               'Mozilla/5.0 (Windows NT 10.0)'),
+                attacker, target, self._ephemeral(), 80, 'PSH|ACK',
+                ident=self._next_ident())))
+            ts += 0.04
+        return out
+
+    def slowloris(self, start_ts=0.0, attacker='45.33.32.157',
+                  target='10.0.2.10', connections=260):
+        """Hundreds of request heads that never reach the blank line."""
+        out, ts = [], start_ts
+        for _ in range(connections):
+            head = b'GET /?%d HTTP/1.1\r\nHost: shop.example.com\r\n' % (
+                self.rng.getrandbits(16))
+            out.append((ts, F.tcp_frame(head, attacker, target,
+                                        self._ephemeral(), 80, 'PSH|ACK',
+                                        ident=self._next_ident())))
+            ts += 0.1
+        return out
+
+    def form_bruteforce(self, start_ts=0.0, attacker='45.33.32.158',
+                        target='10.0.2.13', attempts=30):
+        """Password guessing against a web login form (answers 200)."""
+        out, ts = [], start_ts
+        for i in range(attempts):
+            body = b'username=admin&password=guess%04d&Login=Login' % i
+            out.append((ts, F.tcp_frame(
+                F.http_request('POST', '/app/login.php', 'portal.example.com',
+                               'Mozilla/5.0', body=body),
+                attacker, target, self._ephemeral(), 80, 'PSH|ACK',
+                ident=self._next_ident())))
+            out.append((ts + 0.05, F.tcp_frame(
+                F.http_response(200, body=b'<p>Login failed</p>'),
+                target, attacker, 80, 50000 + i, 'PSH|ACK',
+                ident=self._next_ident())))
+            ts += 2.0
+        return out
+
+    def c2_polling(self, start_ts=0.0, implant='10.0.1.24',
+                   c2='91.108.4.78', requests=320):
+        """A fast-polling implant: the same check-in URL every ~1.5 s."""
+        out, ts = [], start_ts
+        for _ in range(requests):
+            out.append((ts, F.tcp_frame(
+                F.http_request('POST', '/api/bot_77/hello', 'cdn.updates.top',
+                               'python-requests/2.18', body=b'{}'),
+                implant, c2, self._ephemeral(), 8080, 'PSH|ACK',
+                ident=self._next_ident())))
+            ts += self.rng.uniform(0.5, 2.5)
+        return out
+
     # Scenario name -> (method, threat types it is expected to raise)
     SCENARIOS = {
         'port_scan': ('port_scan', ['port_scan']),
@@ -456,6 +514,10 @@ class TrafficGenerator:
         'http_attack': ('http_attack', ['http_anomaly']),
         'arp_spoof': ('arp_spoof', ['arp_spoof']),
         'tls_anomaly': ('tls_anomaly', ['tls_anomaly']),
+        'http_flood': ('http_flood', ['http_flood']),
+        'slowloris': ('slowloris', ['http_flood']),
+        'form_bruteforce': ('form_bruteforce', ['brute_force']),
+        'c2_polling': ('c2_polling', ['c2_beacon']),
     }
 
     def scenario(self, name, start_ts=0.0, **kwargs):
@@ -670,6 +732,58 @@ class PacketSimulator:
                 # Never let one bad frame kill the loop, but do not hide the
                 # failure either — parse_errors and detector_errors surface it.
                 time.sleep(0.05)
+        self.flush()
+
+    def run_capture(self, frames, backfill_s=0.0, duration_s=None,
+                    gap_s=60.0):
+        """Replay a recorded capture in a loop, in real time.
+
+        `frames` are (ts, frame) pairs on the capture's own clock. Each pass
+        is shifted onto the wall clock and paced by the recorded gaps, so
+        windows, cooldowns and beacon intervals behave as they did when the
+        traffic was captured; `gap_s` of quiet separates passes. With
+        `backfill_s`, the capture's last `backfill_s` seconds are first
+        processed at once, stamped to end now, so a fresh dashboard opens on
+        history rather than an empty page.
+        """
+        if not frames:
+            return
+        self._running = True
+        first, last = frames[0][0], frames[-1][0]
+        started = time.time()
+        if backfill_s > 0:
+            shift = started - last
+            self.run_frames([(ts + shift, fr) for ts, fr in frames
+                             if ts >= last - backfill_s])
+        window_start = time.time()
+        window_pkts = window_alerts = 0
+        pass_start = time.time()
+        while self._running:
+            for ts, frame in frames:
+                due = pass_start + (ts - first)
+                while self._running:
+                    wait = due - time.time()
+                    if wait <= 0:
+                        break
+                    time.sleep(min(wait, 0.5))
+                if not self._running or (
+                        duration_s and time.time() - started >= duration_s):
+                    self._running = False
+                    break
+                try:
+                    findings = self.process(frame, due)
+                    window_pkts += 1
+                    window_alerts += len(findings)
+                    self.maybe_flush()
+                    now = time.time()
+                    self.maybe_prune(now)
+                    if now - window_start >= self.METRICS_WINDOW_S:
+                        self._record_window(now - window_start, window_pkts,
+                                            window_alerts)
+                        window_start, window_pkts, window_alerts = now, 0, 0
+                except Exception:
+                    time.sleep(0.05)   # as in run(): surface, do not die
+            pass_start = max(time.time(), pass_start + (last - first)) + gap_s
         self.flush()
 
     def stop(self):

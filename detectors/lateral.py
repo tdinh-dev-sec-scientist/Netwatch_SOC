@@ -1,6 +1,6 @@
 """Lateral movement detector."""
 
-from .base import Detector, TimedSet, is_internal
+from .base import Detector, TimedSet, is_internal, is_syn
 
 SERVICE_NAMES = {
     445: 'SMB', 139: 'NetBIOS', 135: 'MS-RPC', 3389: 'RDP',
@@ -35,7 +35,7 @@ class LateralMovementDetector(Detector):
         if not is_internal(src) or not is_internal(dst):
             return []
         # Count session initiations, not every packet in an established session.
-        if pkt.get('protocol') == 'TCP' and pkt.get('flags') != 'SYN':
+        if pkt.get('protocol') == 'TCP' and not is_syn(pkt.get('flags', '')):
             if pkt.get('protocol') not in ('SMB', 'RDP'):
                 return []
         self.packets_seen += 1

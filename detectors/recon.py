@@ -1,6 +1,6 @@
 """Discovery and reconnaissance detectors."""
 
-from .base import Detector, TimedSet
+from .base import Detector, TimedSet, is_syn
 
 
 def is_service_response(pkt):
@@ -55,9 +55,14 @@ class PortScanDetector(Detector):
         ts = pkt['ts']
         key = (pkt['src_ip'], pkt['dst_ip'])
 
-        # A RST/ACK reply back to the scanner is not itself scanning.
+        # A RST/ACK reply back to the scanner is not itself scanning, and
+        # neither is anything else carrying ACK: it belongs to a connection
+        # that is already open. That is what catches replies from services
+        # on high ports (8080, 8443, 3389), which is_service_response's
+        # privileged-port test cannot. SYN, NULL, FIN and Xmas probes carry
+        # no ACK, so every scan type that enumerates ports still counts.
         flags = pkt.get('flags', '')
-        if 'RST' in flags:
+        if 'RST' in flags or 'ACK' in flags:
             return []
 
         count = self._ports.add(key, port, ts)
@@ -69,7 +74,7 @@ class PortScanDetector(Detector):
         ports = sorted(self._ports.members(key))
         # A SYN-only scan is far more conclusive than mixed conversational
         # traffic, so let the flag mix drive confidence.
-        syn_only = flags == 'SYN'
+        syn_only = is_syn(flags)
         confidence = min(0.98, 0.6 + count / 100.0 + (0.15 if syn_only else 0))
         severity = 'HIGH' if count >= self.cfg['distinct_ports'] * 2 else 'MEDIUM'
         return [self._finding(

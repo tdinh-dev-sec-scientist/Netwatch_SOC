@@ -60,7 +60,7 @@ WORKLOAD_SCENARIOS = [
     'c2_beacon', 'dns_tunnel', 'dga_lookups', 'icmp_tunnel',
     'protocol_tunnel', 'lateral_movement', 'syn_flood', 'udp_flood',
     'ntp_amplification', 'http_attack', 'arp_spoof', 'tls_anomaly',
-    'icmp_sweep',
+    'icmp_sweep', 'http_flood', 'slowloris', 'form_bruteforce', 'c2_polling',
 ]
 
 

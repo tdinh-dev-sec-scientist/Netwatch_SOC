@@ -1,0 +1,95 @@
+{
+  "dataset": "CSE-CIC-IDS2018 (Canadian Institute for Cybersecurity / CSE), s3://cse-cic-ids2018",
+  "notes": [
+    "Attacker/victim addresses and windows follow the dataset's published attack schedule. The schedule is in the lab's local time (UTC-4 in the captures); windows below are converted to UTC and padded by 10 minutes each side.",
+    "Every attacker address was confirmed against the captures themselves: it is the dominant external talker to the victim inside its window and absent outside it (eval/cicids2018/talkers.py prints this per hour).",
+    "Only labelled attacks count as true positives. The victims are AWS hosts with RDP/SSH exposed to the internet, so the 'benign' traffic contains real, unlabelled internet scanning and brute forcing. Alerts on it are counted as false positives against the labels and then broken down by cause in the report."
+  ],
+  "scenarios": [
+    {
+      "id": "ftp_bruteforce", "label": "FTP-BruteForce", "day": "Wednesday-14-02-2018",
+      "attackers": ["18.221.219.4"], "victims": ["172.31.69.25"],
+      "windows_utc": [["2018-02-14T14:22:00", "2018-02-14T16:19:00"]],
+      "expected": ["brute_force", "credential_attack"]
+    },
+    {
+      "id": "ssh_bruteforce", "label": "SSH-Bruteforce", "day": "Wednesday-14-02-2018",
+      "attackers": ["13.58.98.64"], "victims": ["172.31.69.25"],
+      "windows_utc": [["2018-02-14T17:51:00", "2018-02-14T19:41:00"]],
+      "expected": ["brute_force", "credential_attack"]
+    },
+    {
+      "id": "dos_goldeneye", "label": "DoS-GoldenEye", "day": "Thursday-15-02-2018",
+      "attackers": ["18.219.211.138"], "victims": ["172.31.69.25"],
+      "windows_utc": [["2018-02-15T13:16:00", "2018-02-15T14:19:00"]],
+      "expected": ["http_flood"]
+    },
+    {
+      "id": "dos_slowloris", "label": "DoS-Slowloris", "day": "Thursday-15-02-2018",
+      "attackers": ["18.217.165.70"], "victims": ["172.31.69.25"],
+      "windows_utc": [["2018-02-15T14:49:00", "2018-02-15T15:50:00"]],
+      "expected": ["http_flood"]
+    },
+    {
+      "id": "web_bruteforce", "label": "Brute Force -Web", "day": "Thursday-22-02-2018",
+      "attackers": ["18.218.115.60"], "victims": ["172.31.69.28"],
+      "windows_utc": [["2018-02-22T14:07:00", "2018-02-22T15:34:00"]],
+      "expected": ["brute_force", "credential_attack", "http_anomaly"]
+    },
+    {
+      "id": "web_xss", "label": "Brute Force -XSS", "day": "Thursday-22-02-2018",
+      "attackers": ["18.218.115.60"], "victims": ["172.31.69.28"],
+      "windows_utc": [["2018-02-22T17:40:00", "2018-02-22T18:39:00"]],
+      "expected": ["http_anomaly"]
+    },
+    {
+      "id": "web_sqli", "label": "SQL Injection", "day": "Thursday-22-02-2018",
+      "attackers": ["18.218.115.60"], "victims": ["172.31.69.28"],
+      "windows_utc": [["2018-02-22T20:05:00", "2018-02-22T20:39:00"]],
+      "expected": ["http_anomaly"]
+    },
+    {
+      "id": "infiltration", "label": "Infilteration", "day": "Wednesday-28-02-2018",
+      "attackers": ["13.58.225.34"], "victims": ["172.31.69.24"],
+      "pivot": "172.31.69.24",
+      "windows_utc": [["2018-02-28T14:40:00", "2018-02-28T16:15:00"],
+                      ["2018-02-28T17:32:00", "2018-02-28T18:50:00"]],
+      "expected": ["port_scan", "network_recon", "lateral_movement"]
+    },
+    {
+      "id": "bot_ares", "label": "Bot", "day": "Friday-02-03-2018",
+      "attackers": ["18.219.211.138"],
+      "victims": ["172.31.69.23", "172.31.69.17", "172.31.69.14", "172.31.69.12",
+                  "172.31.69.10", "172.31.69.8", "172.31.69.6", "172.31.69.26",
+                  "172.31.69.29", "172.31.69.30"],
+      "per_victim": true,
+      "windows_utc": [["2018-03-02T14:01:00", "2018-03-02T20:05:00"]],
+      "expected": ["c2_beacon", "data_exfil"]
+    }
+  ],
+  "captures": [
+    {"name": "wed14_ftp_ssh", "day": "Wednesday-14-02-2018",
+     "members": ["pcap/UCAP172.31.69.25"]},
+    {"name": "thu15_dos", "day": "Thursday-15-02-2018",
+     "members": ["pcap/UCAP172.31.69.25"]},
+    {"name": "thu22_web", "day": "Thursday-22-02-2018",
+     "members": ["pcap/UCAP172.31.69.28"]},
+    {"name": "wed28_infiltration", "day": "Wednesday-28-02-2018",
+     "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.24- part1",
+                 "pcap/capEC2AMAZ-O4EL3NG-172.31.69.24-part2"]},
+    {"name": "fri02_bot_69.23", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.23"]},
+    {"name": "fri02_bot_69.17", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.17"]},
+    {"name": "fri02_bot_69.14", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.14"]},
+    {"name": "fri02_bot_69.12", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.12"]},
+    {"name": "fri02_bot_69.10", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.10"]},
+    {"name": "fri02_bot_69.8", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.8"]},
+    {"name": "fri02_bot_69.6", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.6"]},
+    {"name": "fri02_bot_69.26", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.26"]},
+    {"name": "fri02_bot_69.29", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.29"]},
+    {"name": "fri02_bot_69.30", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.30"]},
+    {"name": "fri02_clean_69.13", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.13"]},
+    {"name": "fri02_clean_69.9", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.9"]},
+    {"name": "fri02_clean_69.16", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.16"]},
+    {"name": "fri02_clean_69.5", "day": "Friday-02-03-2018", "members": ["pcap/capEC2AMAZ-O4EL3NG-172.31.69.5"]}
+  ]
+}

@@ -1612,7 +1612,7 @@ td .ip-link { font-family: var(--mono); }
   </div>
 </header>
 <div id="demo-banner" role="note">
-  Public demo on synthetic traffic from the built-in simulator. Read-only, so alerts can&rsquo;t be acknowledged.
+  {% if replaying %}Public demo replaying real attack traffic from the <a href="https://www.unb.ca/cic/datasets/ids-2018.html" rel="noopener">CSE-CIC-IDS2018</a> dataset in a loop.{% else %}Public demo on synthetic traffic from the built-in simulator.{% endif %} Read-only, so alerts can&rsquo;t be acknowledged.
   <a href="https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC" rel="noopener">Source on GitHub</a>
 </div>
 

@@ -2,26 +2,48 @@
 
 import math
 
-from .base import Detector, TimedCounter
+from .base import Detector, TimedCounter, is_internal, is_syn
+
+
+def is_callback(pkt):
+    """True when a packet opens a new exchange from the client side."""
+    proto = pkt.get('protocol')
+    if proto == 'TCP':
+        return is_syn(pkt.get('flags', ''))
+    if proto == 'TLS':
+        return pkt.get('tls_handshake_type') == 1
+    if proto == 'HTTP':
+        return bool(pkt.get('http_method'))
+    if proto == 'QUIC':
+        return bool(pkt.get('quic_long_header'))
+    return False
 
 
 class C2BeaconDetector(Detector):
-    """Periodic callbacks with low timing jitter.
+    """Periodic callbacks with low timing jitter, or relentless polling.
 
     Human-driven and application traffic is bursty; implant check-ins are
     metronomic. The discriminator is the coefficient of variation of the
     inter-arrival times on one (src, dst, dport) channel.
+
+    That test only looks at intervals of min_interval_s and up, to keep
+    request/response chatter out. An implant that polls every second or two
+    (Ares, on real traffic) sits below it, so it is caught by repetition
+    instead: one internal client asking one external server for the same URL
+    path hundreds of times in a few minutes.
     """
 
     name = 'c2_beacon'
     threat_type = 'c2_beacon'
-    description = ('Low-jitter periodic callbacks on a single channel, scored '
-                   'by coefficient of variation of inter-arrival times')
+    description = ('Low-jitter periodic callbacks on a single channel, or an '
+                   'internal client polling one external URL path at high '
+                   'rate')
     techniques = ('T1071.001',)
 
     def __init__(self, cfg):
         super().__init__(cfg)
         self._channels = TimedCounter(cfg['window_s'])
+        self._polls = TimedCounter(cfg.get('poll_window_s', 600))
 
     def inspect(self, pkt):
         if pkt.get('protocol') not in ('HTTP', 'TLS', 'QUIC', 'TCP'):
@@ -30,18 +52,35 @@ class C2BeaconDetector(Detector):
         if dport is None:
             return []
         # Only count session-initiating packets, otherwise every data packet
-        # inside one transfer looks like a separate callback.
-        flags = pkt.get('flags', '')
-        if pkt.get('protocol') == 'TCP' and flags != 'SYN':
+        # inside one transfer looks like a separate callback — and the
+        # server's replies on a long-lived connection look like a beacon in
+        # the reverse direction. A callback is a new TCP connection, a TLS
+        # ClientHello or an HTTP request; QUIC is judged on its long-header
+        # (handshake) packets.
+        if not is_callback(pkt):
             return []
         self.packets_seen += 1
         ts = pkt['ts']
+        if pkt.get('protocol') == 'HTTP':
+            polling = self._polling(pkt, dport, ts)
+            if polling:
+                return polling
         key = (pkt['src_ip'], pkt['dst_ip'], dport)
         count = self._channels.add(key, ts)
         if count < self.cfg['min_callbacks']:
             return []
 
-        stamps = list(self._channels.timestamps(key))
+        # The mean interval is (last - first) / (n - 1), so the range check
+        # can run before materialising the window. Without it a flood on one
+        # channel costs O(window) per packet — on real traffic a 33 SYN/s
+        # connection storm cut replay throughput by more than 10x. After this
+        # check the window holds at most window_s / min_interval_s samples.
+        stamps = self._channels.timestamps(key)
+        span_mean = (stamps[-1] - stamps[0]) / (len(stamps) - 1)
+        if span_mean < self.cfg['min_interval_s']:
+            return []
+
+        stamps = list(stamps)
         intervals = [b - a for a, b in zip(stamps, stamps[1:])]
         if len(intervals) < self.cfg['min_callbacks'] - 1:
             return []
@@ -72,9 +111,32 @@ class C2BeaconDetector(Detector):
             destination='%s:%d' % (pkt['dst_ip'], dport),
         )]
 
+    def _polling(self, pkt, dport, ts):
+        src, dst = pkt['src_ip'], pkt['dst_ip']
+        if not is_internal(src) or is_internal(dst):
+            return []   # C2 is outbound; internal pollers are monitoring
+        path = (pkt.get('http_uri') or '/').split('?', 1)[0]
+        count = self._polls.add((src, dst, dport, path), ts)
+        if count < self.cfg.get('poll_requests', 300):
+            return []
+        if not self._cooled_down(('poll', src, dst, dport), ts):
+            return []
+        window = self.cfg.get('poll_window_s', 600)
+        return [self._finding(
+            pkt, 'HIGH', min(0.9, 0.6 + count / 3000.0),
+            'High-rate polling from %s to %s:%d — %d requests for %s in %ds '
+            '(one every %.1fs), faster than any beacon interval the jitter '
+            'test considers'
+            % (src, dst, dport, count, path[:60], window, window / count),
+            ('T1071.001',),
+            mode='polling', requests=count, path=path[:200],
+            window_s=window, destination='%s:%d' % (dst, dport),
+        )]
+
     def expire(self, now):
         super().expire(now)
         self._channels.expire(now)
+        self._polls.expire(now)
 
 
 class TLSAnomalyDetector(Detector):
@@ -95,6 +157,13 @@ class TLSAnomalyDetector(Detector):
             return []
         # Only a ClientHello carries the fields we score.
         if pkt.get('tls_handshake_type') != 1:
+            return []
+        # T1573 is about *our* hosts' encrypted channels. A legacy client
+        # arriving from the internet is someone else's software talking to
+        # one of our servers: on real traffic, internet RDP scanners sending
+        # TLS 1.0 hellos to exposed 3389 accounted for 9,412 alerts and no
+        # outbound channel at all.
+        if not is_internal(pkt.get('src_ip')):
             return []
         self.packets_seen += 1
         ts = pkt['ts']

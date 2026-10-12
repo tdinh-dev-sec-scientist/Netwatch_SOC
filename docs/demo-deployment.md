@@ -18,10 +18,11 @@ configuration lives.
 | `DATABASE_URL` | from the `netwatch-db` database | Injected by Render, including `sslmode`; never in the repo or the image |
 | `NETWATCH_AUTO_MIGRATE` | `1` | Apply pending migrations on startup — correct while there is exactly one instance |
 | `PG_POOL_MAX` | `5` | Four gunicorn threads plus the engine's writer |
-| `NETWATCH_DEMO` | `1` | Refuse every non-GET request; show the "synthetic data" banner |
+| `NETWATCH_DEMO` | `1` | Refuse every non-GET request; show the demo banner |
 | `NETWATCH_RETENTION_S` | `3600` | Delete telemetry older than one hour |
-| `NETWATCH_BACKFILL_MIN` | `15` | Start with 15 minutes of history covering all 17 threat types |
-| `NETWATCH_RATE_PPS` | `50` | Leave CPU headroom on a 0.1 CPU instance |
+| `NETWATCH_REPLAY_PCAP` | `demo/cicids2018-sample.pcap.gz` | Replay 45 minutes of real CSE-CIC-IDS2018 traffic in a loop instead of simulating |
+| `NETWATCH_BACKFILL_MIN` | `45` | Load the whole capture as history at startup |
+| `NETWATCH_RATE_PPS` | `50` | Synthetic rate, used only without a replay capture |
 | `NETWATCH_GLOBAL_RATE_LIMIT` | `3000/60` | Cap total request volume |
 | `NETWATCH_RATE_LIMIT` | `0` | Per-client limit off until client IPs are verified (see below) |
 
@@ -37,7 +38,7 @@ Two things to know about the free database tier:
 - **It expires after 30 days and is then deleted.** For a demo meant to stay up,
   move to a paid instance. Otherwise treat the loss as a non-event: the app
   recreates its schema from `migrations/` on the next start, and the traffic is
-  synthetic, so nothing irreplaceable is in there.
+  a replay of a public dataset, so nothing irreplaceable is in there.
 - **Connections are limited and cost memory.** `PG_POOL_MAX=5` keeps one
   instance comfortably inside the allowance. If you scale to more than one
   instance, multiply before you raise it — and set `NETWATCH_AUTO_MIGRATE=0`,
@@ -76,8 +77,28 @@ so what passes here is what Render will run. CI runs the same script.
 4. Put the URL in the README and in the repository's **About → Website** field.
    Mention that the first load after idling can take about a minute.
 
-Do not add an uptime pinger to keep the service awake. It spends the monthly
-free instance hours and hides the cold-start behaviour rather than handling it.
+### Cold starts
+
+A free service spins down after 15 minutes without traffic, and the next
+visitor waits about a minute on Render's loading page while the container
+starts. For a portfolio link that someone opens once, that minute is most of
+the impression, so `.github/workflows/keepalive.yml` requests the dashboard
+every 10 minutes and the service never spins down.
+
+What that costs and where it stops working:
+
+- **Instance hours.** The free plan allows 750 a month; one service awake all
+  month uses at most 744. A second always-on free service in the same account
+  would run both out before the month ends.
+- **GitHub pauses scheduled workflows** in a repository with no activity for
+  60 days. Re-enable it from the Actions tab.
+- **The cold start still exists**, it is just never hit. If the workflow is
+  off, the backfill still means a cold start opens on a populated dashboard.
+
+Ways to remove the problem rather than avoid it, in order of cost: Render's
+Starter instance ($7/month, no spin-down, 5x the CPU); or an always-on VM such
+as Oracle Cloud's free tier running `docker compose --profile all-in-one up`
+behind Caddy for TLS — free, but you run the box.
 
 ## Threat model
 
@@ -101,7 +122,7 @@ HTTP requests at any rate and to link visitors to the demo.
 | 7 | Compromised or altered third-party JavaScript | Chart.js is vendored byte-identical from the npm package and its SHA-256 is pinned; no script is loaded from a CDN | `test_vendored_chart_js_is_served_and_unmodified`, `test_dashboard_loads_no_third_party_scripts` |
 | 8 | Spoofed client address to dodge per-client limits | `X-Forwarded-For` is ignored unless `NETWATCH_PROXY_HOPS` says how many proxies to trust | `test_forwarded_for_is_ignored_without_trusted_proxies` |
 | 9 | Malicious code reaching the deployment | Render deploys only commits whose CI checks pass; the workflow runs with read-only repository permissions | `render.yaml`, `.github/workflows/ci.yml` |
-| 10 | Visitors mistaking synthetic data for a real network | Banner on every page in demo mode | `templates/Dashboard.html` |
+| 10 | Visitors mistaking replayed or synthetic data for a live network | Banner on every page in demo mode, naming the source | `templates/Dashboard.html` |
 | 11 | Container privilege abuse | Image runs as a non-root user with no build tools | `Dockerfile` |
 
 ### Accepted risks and known gaps
@@ -124,7 +145,7 @@ HTTP requests at any rate and to link visitors to the demo.
   to fetch technique chips. That inflates request volume and would be better as
   a single batched response.
 - **`/api/health` discloses internals** such as the database path and row
-  counts. Nothing there is sensitive for synthetic data, but a real deployment
+  counts. Nothing there is sensitive for a public dataset, but a real deployment
   would restrict it.
 - **Python dependencies are pinned by version range, not by hash.** The
   Dockerfile describes how to move to a hash-pinned lock file.

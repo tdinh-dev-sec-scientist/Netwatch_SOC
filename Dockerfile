@@ -94,13 +94,15 @@ WORKDIR /app
 COPY --chown=${APP_UID}:${APP_GID} App.py DB_Manager.py PacketSimulator.py \
      ProtocolAnalyzer.py ThreatDetector.py benchmark.py config.py \
      db_backends.py engine.py frames.py geoip.py hardening.py migrate.py \
-     mitre.py gunicorn.conf.py ./
+     incidents.py mitre.py replay.py gunicorn.conf.py ./
 COPY --chown=${APP_UID}:${APP_GID} detectors/ ./detectors/
 # The schema lives in versioned SQL, not in the application, so the image
 # cannot create its database without these.
 COPY --chown=${APP_UID}:${APP_GID} migrations/ ./migrations/
 COPY --chown=${APP_UID}:${APP_GID} templates/ ./templates/
 COPY --chown=${APP_UID}:${APP_GID} static/ ./static/
+# A short real capture the public demo replays (NETWATCH_REPLAY_PCAP).
+COPY --chown=${APP_UID}:${APP_GID} demo/ ./demo/
 
 USER ${APP_UID}:${APP_GID}
 

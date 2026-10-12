@@ -4,8 +4,7 @@ import pytest
 
 import frames as F
 from ProtocolAnalyzer import (SUPPORTED_PROTOCOLS, ParseError,
-                              ProtocolAnalyzer, decode_tcp_flags,
-                              shannon_entropy)
+                              decode_tcp_flags, shannon_entropy)
 
 SRC, DST = '10.0.1.20', '93.184.216.34'
 

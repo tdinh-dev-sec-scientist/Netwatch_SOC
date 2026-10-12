@@ -13,7 +13,6 @@ and docker-compose.yml and check them against the source tree.
 import ast
 import os
 import re
-import sys
 
 import pytest
 

@@ -1,0 +1,463 @@
+{
+ "captures": 18,
+ "packets": 10022252,
+ "capture_host_hours": 157.41,
+ "alerts": 441695,
+ "true_positive_alerts": 4540,
+ "false_positive_alerts": 437155,
+ "alert_precision": 0.0103,
+ "false_positives_per_host_hour": 2777.26,
+ "incidents": 8438,
+ "true_positive_incidents": 99,
+ "false_positive_incidents": 8339,
+ "false_positive_incidents_per_host_day": 1271.47,
+ "attack_units": 18,
+ "attack_units_detected": 14,
+ "attack_units_correct_class": 0,
+ "detection_rate": 0.7778,
+ "false_positive_causes": {
+  "SURICATA IPv4 invalid checksum": 158024,
+  "SURICATA UDPv4 invalid checksum": 156633,
+  "ET INFO RDP - Response To External Host": 84091,
+  "SURICATA STREAM ESTABLISHED packet out of window": 14113,
+  "SURICATA STREAM Packet with invalid ack": 5308,
+  "SURICATA STREAM ESTABLISHED invalid ack": 5281,
+  "GPL NETBIOS SMB-DS IPC$ share access": 4494,
+  "GPL NETBIOS SMB-DS IPC$ unicode share access": 4419,
+  "ET JA3 Hash - Possible Malware - Fake Firefox Font Update": 1779,
+  "ET SCAN Behavioral Unusually fast Terminal Server Traffic Potential Scan or Infection (Inbound)": 495,
+  "ET USER_AGENTS Microsoft Device Metadata Retrieval Client User-Agent": 468,
+  "ET SCAN Sipvicious User-Agent Detected (friendly-scanner)": 335,
+  "ET SCAN Sipvicious Scan": 304,
+  "GPL ICMP PING *NIX": 271,
+  "SURICATA STREAM ESTABLISHED SYNACK resend": 240
+ },
+ "scenarios": [
+  {
+   "scenario": "ftp_bruteforce",
+   "label": "FTP-BruteForce",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "ssh_bruteforce",
+   "label": "SSH-Bruteforce",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 46,
+   "alert_types": {
+    "suricata": 46
+   },
+   "first_alert_after_s": 50
+  },
+  {
+   "scenario": "dos_goldeneye",
+   "label": "DoS-GoldenEye",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "dos_slowloris",
+   "label": "DoS-Slowloris",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "web_bruteforce",
+   "label": "Brute Force -Web",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "web_xss",
+   "label": "Brute Force -XSS",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 1912,
+   "alert_types": {
+    "suricata": 1912
+   },
+   "first_alert_after_s": 101
+  },
+  {
+   "scenario": "web_sqli",
+   "label": "SQL Injection",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 8,
+   "alert_types": {
+    "suricata": 8
+   },
+   "first_alert_after_s": 95
+  },
+  {
+   "scenario": "infiltration",
+   "label": "Infilteration",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 1559,
+   "alert_types": {
+    "suricata": 1559
+   },
+   "first_alert_after_s": -194
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.23",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 125,
+   "alert_types": {
+    "suricata": 125
+   },
+   "first_alert_after_s": 2054
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.17",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 128,
+   "alert_types": {
+    "suricata": 128
+   },
+   "first_alert_after_s": 2054
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.14",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 106,
+   "alert_types": {
+    "suricata": 106
+   },
+   "first_alert_after_s": 2053
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.12",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 59,
+   "alert_types": {
+    "suricata": 59
+   },
+   "first_alert_after_s": 2054
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.10",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 119,
+   "alert_types": {
+    "suricata": 119
+   },
+   "first_alert_after_s": 2053
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.8",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 140,
+   "alert_types": {
+    "suricata": 140
+   },
+   "first_alert_after_s": 2054
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.6",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 112,
+   "alert_types": {
+    "suricata": 112
+   },
+   "first_alert_after_s": 2053
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.26",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 63,
+   "alert_types": {
+    "suricata": 63
+   },
+   "first_alert_after_s": 15173
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.29",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 58,
+   "alert_types": {
+    "suricata": 58
+   },
+   "first_alert_after_s": 4802
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.30",
+   "detected": true,
+   "correct_class": false,
+   "alerts": 105,
+   "alert_types": {
+    "suricata": 105
+   },
+   "first_alert_after_s": 2054
+  }
+ ],
+ "per_capture": [
+  {
+   "name": "wed14_ftp_ssh",
+   "packets": 4718327,
+   "capture_hours": 8.936792161928283,
+   "alerts": 150,
+   "alerts_by_type": {
+    "suricata": 150
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "thu15_dos",
+   "packets": 424625,
+   "capture_hours": 9.026353845530085,
+   "alerts": 120,
+   "alerts_by_type": {
+    "suricata": 120
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "thu22_web",
+   "packets": 47714,
+   "capture_hours": 9.083590190278159,
+   "alerts": 2042,
+   "alerts_by_type": {
+    "suricata": 2042
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed28_infiltration",
+   "packets": 919537,
+   "capture_hours": 9.34563898411062,
+   "alerts": 35996,
+   "alerts_by_type": {
+    "suricata": 35996
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.23",
+   "packets": 316197,
+   "capture_hours": 8.713202448354828,
+   "alerts": 31198,
+   "alerts_by_type": {
+    "suricata": 31198
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.17",
+   "packets": 275440,
+   "capture_hours": 8.711854691969023,
+   "alerts": 16410,
+   "alerts_by_type": {
+    "suricata": 16410
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.14",
+   "packets": 289396,
+   "capture_hours": 8.713550323645274,
+   "alerts": 32585,
+   "alerts_by_type": {
+    "suricata": 32585
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.12",
+   "packets": 194651,
+   "capture_hours": 8.713488304482565,
+   "alerts": 17196,
+   "alerts_by_type": {
+    "suricata": 17196
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.10",
+   "packets": 328571,
+   "capture_hours": 8.70903631693787,
+   "alerts": 24519,
+   "alerts_by_type": {
+    "suricata": 24519
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.8",
+   "packets": 333702,
+   "capture_hours": 8.71305309249295,
+   "alerts": 77644,
+   "alerts_by_type": {
+    "suricata": 77644
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.6",
+   "packets": 361912,
+   "capture_hours": 8.7134708230363,
+   "alerts": 35300,
+   "alerts_by_type": {
+    "suricata": 35300
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.26",
+   "packets": 228488,
+   "capture_hours": 7.5077895891666415,
+   "alerts": 11546,
+   "alerts_by_type": {
+    "suricata": 11546
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.29",
+   "packets": 323651,
+   "capture_hours": 8.686181299421522,
+   "alerts": 23799,
+   "alerts_by_type": {
+    "suricata": 23799
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.30",
+   "packets": 320039,
+   "capture_hours": 8.711806119481723,
+   "alerts": 23145,
+   "alerts_by_type": {
+    "suricata": 23145
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_clean_69.13",
+   "packets": 245109,
+   "capture_hours": 8.396821263101366,
+   "alerts": 28779,
+   "alerts_by_type": {
+    "suricata": 28779
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_clean_69.9",
+   "packets": 301971,
+   "capture_hours": 8.70607425192992,
+   "alerts": 33499,
+   "alerts_by_type": {
+    "suricata": 33499
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_clean_69.16",
+   "packets": 209972,
+   "capture_hours": 9.107863726350995,
+   "alerts": 24089,
+   "alerts_by_type": {
+    "suricata": 24089
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_clean_69.5",
+   "packets": 182950,
+   "capture_hours": 8.908511889444457,
+   "alerts": 23678,
+   "alerts_by_type": {
+    "suricata": 23678
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  }
+ ]
+}
