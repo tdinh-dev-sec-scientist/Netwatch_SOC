@@ -1,0 +1,169 @@
+{
+ "captures": 7,
+ "packets": 1763242,
+ "capture_host_hours": 52.86,
+ "alerts": 4237,
+ "true_positive_alerts": 3670,
+ "false_positive_alerts": 567,
+ "alert_precision": 0.8662,
+ "false_positives_per_host_hour": 10.73,
+ "incidents": 417,
+ "true_positive_incidents": 4,
+ "false_positive_incidents": 413,
+ "false_positive_incidents_per_host_day": 187.53,
+ "attack_units": 4,
+ "attack_units_detected": 3,
+ "attack_units_correct_class": 0,
+ "detection_rate": 0.75,
+ "false_positive_causes": {
+  "ET SCAN Sipvicious User-Agent Detected (friendly-scanner)": 142,
+  "ET SCAN Sipvicious Scan": 134,
+  "ET DROP Spamhaus DROP Listed Traffic Inbound group 1": 99,
+  "ET SCAN Suspicious inbound to MSSQL port 1433": 82,
+  "ET SCAN Suspicious inbound to mySQL port 3306": 46,
+  "GPL SNMP public access udp": 10,
+  "ET DROP Spamhaus DROP Listed Traffic Inbound group 33": 8,
+  "ET SCAN Potential SSH Scan": 8,
+  "ET SCAN Suspicious inbound to PostgreSQL port 5432": 6,
+  "ET Threatview.io High Confidence Cobalt Strike C2 IP group 14": 6,
+  "ET COMPROMISED Known Compromised or Hostile Host Traffic group 15": 4,
+  "ET INFO Dropbox.com Offsite File Backup in Use": 3,
+  "ET DNS Query for .to TLD": 3,
+  "ET Threatview.io High Confidence Cobalt Strike C2 IP group 11": 3,
+  "ET CINS Active Threat Intelligence Poor Reputation IP group 92": 2
+ },
+ "scenarios": [
+  {
+   "scenario": "web_bruteforce",
+   "label": "Brute Force -Web",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "web_xss",
+   "label": "Brute Force -XSS",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 3651,
+   "alert_types": {
+    "suricata": 3651
+   },
+   "first_alert_after_s": 66
+  },
+  {
+   "scenario": "web_sqli",
+   "label": "SQL Injection",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 16,
+   "alert_types": {
+    "suricata": 16
+   },
+   "first_alert_after_s": 97
+  },
+  {
+   "scenario": "infiltration",
+   "label": "Infilteration",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 3,
+   "alert_types": {
+    "suricata": 3
+   },
+   "first_alert_after_s": 54
+  }
+ ],
+ "per_capture": [
+  {
+   "name": "fri23_web",
+   "packets": 55101,
+   "capture_hours": 9.204376501109865,
+   "alerts": 3752,
+   "alerts_by_type": {
+    "suricata": 3752
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri23_clean_69.13",
+   "packets": 226777,
+   "capture_hours": 10.235011324220233,
+   "alerts": 100,
+   "alerts_by_type": {
+    "suricata": 100
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "thu01_infiltration",
+   "packets": 782254,
+   "capture_hours": 9.224501676625676,
+   "alerts": 98,
+   "alerts_by_type": {
+    "suricata": 98
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed21_clean_69.4",
+   "packets": 307828,
+   "capture_hours": 9.00455913497342,
+   "alerts": 120,
+   "alerts_by_type": {
+    "suricata": 120
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed21_clean_69.9",
+   "packets": 223726,
+   "capture_hours": 9.001535148620606,
+   "alerts": 83,
+   "alerts_by_type": {
+    "suricata": 83
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed21_clean_69.11",
+   "packets": 104327,
+   "capture_hours": 4.252086964713203,
+   "alerts": 68,
+   "alerts_by_type": {
+    "suricata": 68
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed21_clean_69.19",
+   "packets": 63229,
+   "capture_hours": 1.933793714178933,
+   "alerts": 16,
+   "alerts_by_type": {
+    "suricata": 16
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  }
+ ]
+}

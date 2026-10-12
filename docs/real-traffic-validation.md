@@ -1,41 +1,101 @@
 # NetWatch on real traffic: CSE-CIC-IDS2018
 
 Every other number in this project comes from synthetic traffic. This is the
-answer to "and on real traffic?": 12 million packets from a labelled public
+answer to "and on real traffic?": 31 million packets from a labelled public
 dataset, replayed through the unmodified pipeline, scored against the
-dataset's ground truth, with every false positive traced to a cause.
+dataset's ground truth, with every false positive traced to a cause and the
+same captures run through Suricata with the ET Open ruleset for reference.
 
 ## Results
 
-| | As shipped | After fixes |
-|---|---|---|
-| **Development set** — 18 host captures, 10.0 M packets, 157 host-hours | | |
-| False positives | **374.6 per host-hour** (58,965 alerts) | **1.1 per host-hour** (179 alerts) |
-| Alert precision | 3.0% | 65.0% |
-| Labelled attacks detected | 16 / 18 (9 with the right threat type) | 11 / 18 (9 with the right threat type) |
-| **Held-out set** — 7 host captures, 1.8 M packets, 53 host-hours, never replayed until the fixes were frozen | | |
-| False positives | **506.7 per host-hour** (26,783 alerts) | **1.3 per host-hour** (70 alerts) |
-| Alert precision | 0.6% | 71.1% |
-| Labelled attacks detected | 3 / 4 | 3 / 4 |
+Three rounds, each measured on a development set and then on held-out
+captures that were not replayed until that round's code was frozen.
+
+| | As shipped | Round 1: bugs fixed | Round 2: misses closed |
+|---|---|---|---|
+| **Development** — 18 host captures, 10.0 M packets, 157 host-hours | | | |
+| Labelled attacks detected (right type) | 16 / 18 (9) | 11 / 18 (9) | **18 / 18 (17)** |
+| False-positive alerts per host-hour | 374.6 | 1.1 | **1.1** |
+| False-positive incidents per host-day | 292.1 | 9.9 | **9.9** |
+| Alert precision | 3.0% | 65.0% | 73.0% |
+| **Held-out 1** — 7 captures, 1.8 M packets, 53 host-hours | | | |
+| Labelled attacks detected (right type) | 3 / 4 (3) | 3 / 4 (3) | **4 / 4 (4)** |
+| False-positive alerts per host-hour | 506.7 | 1.3 | **1.3** |
+| False-positive incidents per host-day | 545.3 | 12.7 | **12.7** |
+| **Held-out 2** — 5 captures, 19.5 M packets, 29 host-hours, a host population used nowhere else | | | |
+| Labelled attacks detected (right type) | — | — | **2 / 2 (1)** |
+| False-positive alerts per host-hour | — | — | **0.4** |
+| False-positive incidents per host-day | — | — | **5.8** |
 
 **As shipped, NetWatch was unusable on real traffic**: about one false alert
 every ten seconds per host. The synthetic suite's "0 false positives across
 240,000 benign packets" said nothing about this, because the synthetic
 generator never produced the traffic that caused them.
 
-**Five logic bugs, not thresholds, caused 99.7% of them.** Each fix is
-described below; no detection threshold in `config.py` was changed. On the
-held-out days, which were not looked at until the fixes were frozen, false
-positives fell by the same factor (300-400×) and detection was unchanged — so
-the fixes generalise rather than fit the data they came from.
+**Round 1 — five logic bugs, not thresholds, caused 99.7% of them.** No
+detection threshold was changed. On the held-out days false positives fell by
+the same factor (300-400×) and detection was unchanged, so the fixes
+generalise rather than fit the data they came from. Detection on the
+development set *fell*, from 16 to 11 of 18, and that was the honest number:
+all ten botnet hosts had been "detected" by the port-scan detector misreading
+the C2 server's replies as a scan — one of the five bugs.
 
-**Detection fell from 16 to 11 of 18 on the development set, and that is the
-honest number.** All ten botnet hosts were "detected" by the port scan
-detector misreading the C2 server's replies as a scan of its own victims —
-one of the five bugs. For five of them that was the only alert, so fixing the
-bug removed the false credit.
+**Round 2 — closing what was still missed.** Three new signals for the four
+attacks NetWatch could not see (application-layer DoS, Slowloris, login-form
+brute force, a botnet polling faster than any beacon interval), each with a
+threshold set between the busiest benign behaviour and the attack, with a
+4-6× margin on both sides. Development detection went to 18 of 18 and the
+first held-out set to 4 of 4, with **no new false positives on either**. A
+second held-out set, fetched only after the round-2 code was frozen, caught
+the HULK flood within 28 seconds as `http_flood` and raised 11 false alerts
+in 29 host-hours.
+
+**Incidents are what an analyst works.** `incidents.py` groups alerts on the
+same host pair within 30 minutes; on the development set 662 alerts become 167
+incidents, and the false ones come to about one per host every two and a half
+hours.
 
 Full per-attack tables: [`eval/cicids2018/results/`](../eval/cicids2018/results/).
+
+## Against Suricata
+
+The same captures, ground truth, scoring and incident correlation, applied to
+Suricata 7.0.3 with ET Open (54,399 rules, 2024-12-11). Three configurations,
+from untouched to the usual first tuning steps (`eval/cicids2018/suricata.py`).
+Scoring is in Suricata's favour: its alerts are credited for any attack they
+touch, since its signature names do not map onto threat types.
+
+| | Dev: detected | Dev: false alerts / host-hour | Held-out 1+2: detected | Held-out: false alerts / host-hour | Held-out: false incidents / host-day |
+|---|---|---|---|---|---|
+| **NetWatch (round 2)** | **18 / 18** | **1.1** | **6 / 6** | **1.0** | **10.3** |
+| Suricata + ET Open, as distributed | 14 / 18 | 2,777 | 3 / 6 | 3,296 | 1,393 |
+| … without engine anomaly events | 4 / 18 | 619 | 3 / 6 | 590 | 1,304 |
+| … severity 1-2 only | 4 / 18 | 7.2 | 3 / 6 | 26.7 | 372 |
+
+Held-out = 6 attacks over 82 host-hours (held-out 1 and 2 combined). Per-set
+reports: `eval/cicids2018/results/suricata_*`.
+
+What the comparison shows, and does not:
+
+- **Suricata's signatures are precise where a signature exists.** It caught
+  the XSS and SQL injection with high-severity web-attack rules, the SSH
+  brute force with a scan rule, and the infiltration through its reverse
+  shell — a Windows command prompt sent outbound, which NetWatch has no
+  signal for. NetWatch caught the same infiltration by its internal nmap
+  scan instead.
+- **Volume- and behaviour-defined attacks have no signature.** Slowloris,
+  GoldenEye, HULK, SlowHTTPTest and the login-form brute force raised no
+  alert at all, at any severity; the botnet's C2 polling raised only generic
+  severity-3 HTTP-protocol anomaly events, which is how the untuned
+  configuration "detects" it.
+- **Untuned, the noise is the story**: 437,155 false alerts on the development
+  set, 72% of them invalid-checksum events (the captures were taken with
+  checksum offload) and 19% "RDP response to external host" policy alerts.
+- **This is not a verdict on Suricata.** ET Open is a general ruleset, not
+  tuned for this lab; NetWatch's round-2 thresholds were chosen on the
+  development set, which is why the held-out columns are the fair comparison.
+  The two are complementary: signatures for known exploits, behaviour for
+  floods, brute force and C2 timing.
 
 ## Dataset
 
@@ -49,7 +109,8 @@ benign workload, attacked from external AWS instances on a published schedule.
 
 Each day is one 38-50 GB zip of ~450 per-host pcaps. `fetch.py` reads the
 zip's central directory with HTTP range requests and pulls only the members it
-needs — 3.3 GB instead of 400 GB.
+needs — 8 GB instead of 400 GB. Some captures are pcapng; `replay.py` reads
+both formats.
 
 | Set | Day | Captures | Labelled attacks |
 |---|---|---|---|
@@ -58,9 +119,11 @@ needs — 3.3 GB instead of 400 GB.
 | dev | Thu 22 Feb | DVWA server `.69.28` | Web brute force, XSS, SQL injection |
 | dev | Wed 28 Feb | workstation `.69.24` | Infiltration (dropper, then internal nmap) |
 | dev | Fri 2 Mar | 14 workstations | Ares botnet on 10 of them; 4 clean controls |
-| held-out | Fri 23 Feb | DVWA server + 1 workstation | Web brute force, XSS, SQL injection |
-| held-out | Thu 1 Mar | workstation `.69.13` | Infiltration |
-| held-out | Wed 21 Feb | 4 workstations | none (benign) |
+| held-out 1 | Fri 23 Feb | DVWA server + 1 workstation | Web brute force, XSS, SQL injection |
+| held-out 1 | Thu 1 Mar | workstation `.69.13` | Infiltration |
+| held-out 1 | Wed 21 Feb | 4 workstations | none (benign) |
+| held-out 2 | Fri 16 Feb | web/FTP server `.69.25` (pcapng, 19 M packets) | DoS-Hulk, DoS-SlowHTTPTest |
+| held-out 2 | Wed 14 Feb | 4 workstations on the 172.31.64-67 department subnets | none (benign) |
 
 ## Method
 
@@ -78,11 +141,15 @@ NETWATCH_SIMULATE=0 python App.py
 Scoring:
 
 ```bash
-python eval/cicids2018/fetch.py --out data/cicids2018
-python eval/cicids2018/fetch.py --out data/cicids2018 --truth eval/cicids2018/holdout.json
-python eval/cicids2018/run.py --data data/cicids2018 --out results/dev
-python eval/cicids2018/run.py --data data/cicids2018 --out results/holdout \
-    --truth eval/cicids2018/holdout.json
+for t in ground_truth holdout holdout2; do
+  python eval/cicids2018/fetch.py --out data/cicids2018 --truth eval/cicids2018/$t.json
+  python eval/cicids2018/run.py --data data/cicids2018 --out results/$t \
+      --truth eval/cicids2018/$t.json
+done
+# Suricata on the same captures (rules: suricata-update, or the copy in the
+# jasonish/suricata image at /var/lib/suricata/rules/suricata.rules)
+python eval/cicids2018/suricata.py --data data/cicids2018 --rules suricata.rules \
+    --out results/suricata-dev --captures results/ground_truth/captures.json
 ```
 
 - **Replay.** `replay.py` reads each pcap and pushes every frame through the
@@ -105,8 +172,11 @@ python eval/cicids2018/run.py --data data/cicids2018 --out results/holdout \
   infected host.
 - **False positives per host-hour** = false-positive alerts ÷ the summed
   duration of all host captures. It is per sensor-hour, not per network-hour.
+- **Incidents** are alerts correlated by `incidents.py` (same host pair, either
+  direction, within 30 minutes; floods by victim). An incident is true if any
+  of its alerts is.
 
-## The false positives, and why
+## Round 1: the false positives, and why
 
 As shipped, development set:
 
@@ -158,33 +228,65 @@ identical.
 Each fix has a regression test in `tests/test_real_traffic_regressions.py`
 that fails on the shipped code and passes on the fixed code.
 
-### What is left: 1.1 per host-hour
+## Round 2: closing the misses
 
-| Cause | Dev | Held-out | Verdict |
-|---|---|---|---|
-| Internet RDP credential stuffing / SSH brute force on exposed hosts | 68 | 5 | **Real attacks the dataset labels benign.** 59 usernames in 5 minutes from one source is not a false positive in any SOC |
-| RDP-over-UDP sessions at 40-55 pkt/s, flagged as `udp_flood` / `data_exfil` | 55 | 25 | Real false positive. 40 pkt/s is the `udp_flood` threshold, which is too low for interactive traffic. **Deliberately not re-tuned**: it would be tuning to this test set |
-| Nmap service probes from the infiltrated host, raised as `credential_attack` (username `nmap`), `tls_anomaly` (SSLv3), `protocol_tunnel` | 25 | 21 | Caused by the attack, but typed wrong; counted as false positives anyway |
-| Long random-looking AWS/CDN hostnames (`rackcdn.com`, 53-char label) | 18 | 13 | Real false positive. Needs a resolver allowlist or per-zone baselining, not a looser global threshold |
-| Large uploads (S3, admin sessions) | 9 | 2 | Real false positive; volume alone is a weak exfiltration signal |
-| Other: scanner user-agents, a TLS anomaly, periodic TLS sessions | 4 | 4 | Mixed; the scanners are real |
+After round 1, four attacks were still invisible. Each had a clear signal on
+the wire once measured, and a wide gap to the busiest benign behaviour seen
+across all 25 development and held-out-1 captures:
 
-Read strictly against the labels it is 1.1 false positives per host-hour;
-counting the unlabelled credential stuffing as the attack it is, it is about
-0.7.
+| Attack | Signal | Attack rate | Benign peak | Threshold |
+|---|---|---|---|---|
+| GoldenEye, HULK (HTTP flood) | HTTP requests, one source to one service, per minute | ~2,650 | 162 | 600 (`http_flood`) |
+| Slowloris | Request heads without the closing blank line, per minute | ~1,280 | 39 | 200 (`http_flood`) |
+| DVWA login brute force | POSTs to a login path, per 2 minutes | ~108 | 0 | 20 (`brute_force`) |
+| Ares botnet | Requests for one external URL path, per 10 minutes | ~1,250 | 52 | 300 (`c2_beacon`) |
 
-## What is still missed, and why
+- **`http_flood`** is a new detector (T1499.002, Service Exhaustion Flood).
+  The handshakes complete, which is why `syn_flood` was right to stay quiet.
+- **Login forms** answer a wrong password with HTTP 200, so the failure is
+  invisible; volume of submissions to a login path is the only signal.
+  `brute_force` treats it like SSH: inferred, confidence capped at 0.85.
+- **Fast polling**: Ares checks in every 0.5-2 s, below the 15 s floor the
+  jitter test keeps to avoid request/response chatter. `c2_beacon` now also
+  flags one internal client requesting the same external URL path hundreds of
+  times in ten minutes. Internal destinations are excluded: that is
+  monitoring, not C2.
 
-| Attack | Result | Why |
+Thresholds were chosen on data that included the development set, so the
+development numbers flatter them. Held-out 2 was fetched afterwards — a new
+DoS tool and a new host population — to measure them honestly.
+
+## What is left
+
+### False positives: 1.1, 1.3 and 0.4 per host-hour
+
+Round 2 added none. What remains, by cause:
+
+| Cause | Dev | Held-out 1 | Held-out 2 | Verdict |
+|---|---|---|---|---|
+| Internet RDP credential stuffing / SSH brute force on exposed hosts | 68 | 5 | 0 | **Real attacks the dataset labels benign.** 59 usernames in 5 minutes from one source is not a false positive in any SOC |
+| RDP-over-UDP sessions at 40-55 pkt/s, flagged as `udp_flood` / `data_exfil` | 55 | 25 | 0 | Real false positive. 40 pkt/s is the `udp_flood` threshold, too low for interactive traffic. **Deliberately not re-tuned**: it would be tuning to the test set |
+| Nmap service probes from the infiltrated host, raised as `credential_attack` (username `nmap`), `tls_anomaly` (SSLv3), `protocol_tunnel` | 25 | 21 | 0 | Caused by the attack, but typed wrong; counted as false positives anyway |
+| Long random-looking AWS/CDN hostnames (`rackcdn.com`, 53-char label) | 18 | 13 | 11 | Real false positive, and the only one that reached held-out 2. Needs a resolver allowlist or per-zone baselining, not a looser global threshold |
+| Large uploads (S3, admin sessions) | 9 | 2 | 0 | Real false positive; volume alone is a weak exfiltration signal |
+| Other: scanner user-agents, a TLS anomaly, periodic TLS sessions | 4 | 4 | 0 | Mixed; the scanners are real |
+
+Counting the unlabelled credential stuffing as the attack it is, the
+development rate is about 0.7.
+
+### Attacks: what each one looked like to NetWatch
+
+| Attack | Result (round 2) | Notes |
 |---|---|---|
-| FTP-BruteForce | Detected in 92 s — **as `syn_flood`** | Not a NetWatch bug: in the dataset the FTP service was not running. All 19,700 SYNs in a sample 10 minutes got RST/ACK; there was never a 530 to count. NetWatch described the wire correctly |
-| SSH-Bruteforce | Detected in 50 s as `brute_force` | Correct; also raised `data_exfil` for the 13.8 MB the server sent back to the attacker |
-| DoS-GoldenEye | Only `data_exfil` (5 min in) | No application-layer DoS detector. GoldenEye completes its handshakes, so `syn_flood` correctly stays quiet |
-| DoS-Slowloris | **Missed** | Same gap; Slowloris is low-rate by design |
-| Web brute force (DVWA login) | **Missed**, both days | Failed form logins return HTTP 200, not 401. Nothing on the wire says "failure" without application knowledge |
-| XSS, SQL injection | Detected, right type, both days | `http_anomaly` signatures |
-| Infiltration | Detected, right type, both days | `port_scan` and `lateral_movement` from the compromised host |
-| Ares botnet | **5 of 10 hosts**, only via `data_exfil`, over an hour late | The bot polls its C2 every 0.5-2 s. `c2_beacon` only considers intervals of 15-900 s, by design, to keep request/response chatter out. A fast poller is outside its model; it needs a rate-based or URI-repetition signal |
+| SSH-Bruteforce | `brute_force` in 50 s | Also raised `data_exfil` for the 13.8 MB the server sent back |
+| XSS, SQL injection | `http_anomaly`, both days | Signatures |
+| Web brute force (DVWA login) | `brute_force` in under 2 min, both days | New in round 2 |
+| DoS-GoldenEye, DoS-Slowloris | `http_flood` in 115 s and 78 s | New in round 2 |
+| DoS-Hulk (held-out 2) | `http_flood` in 28 s | First time this tool was seen |
+| Infiltration | `port_scan`, `lateral_movement`, both days | From the compromised host's internal nmap |
+| Ares botnet | `c2_beacon` on 10 of 10 hosts, ~34 min after the window opens | New in round 2; the bot's polling ramps up slowly |
+| FTP-BruteForce | **`syn_flood`**, in 92 s | Not a NetWatch error: the dataset's FTP service was not running. All 19,700 SYNs in a sample 10 minutes got RST/ACK; there was never a 530 to count. NetWatch described the wire correctly |
+| DoS-SlowHTTPTest (held-out 2) | **`syn_flood`**, in 20 s | The same dataset flaw: it was aimed at port 21, which was closed, so no HTTP was ever exchanged |
 
 ## Caveats
 
@@ -192,10 +294,11 @@ counting the unlabelled credential stuffing as the attack it is, it is about
   attacks against the exposed hosts. Counting alerts on them as false
   positives understates precision; it is done anyway so the numbers are not
   adjusted by hand.
-- **The fixes came from the development set.** That is what the held-out set
-  is for. It is smaller (4 attacks, 53 host-hours) and only checks the false
-  positive rate and the web and infiltration detections; there is no held-out
-  botnet or brute-force day.
+- **The fixes came from the development set.** That is what the held-out
+  sets are for, and they are smaller: 6 attacks and 82 host-hours between
+  them. There is no held-out botnet, SSH or FTP brute-force day, because the
+  dataset has only one of each. Held-out 1 served round 1 only cleanly: its
+  web brute-force miss was known when round 2 was designed.
 - **One lab, one year.** 2018 Windows and Ubuntu hosts in AWS. A corporate
   LAN, a home network or a 2026 browser mix would surface different problems.
 - **Per-host sensors.** Each host capture is replayed on its own detector, as

@@ -1,0 +1,119 @@
+{
+ "captures": 5,
+ "packets": 19538011,
+ "capture_host_hours": 28.74,
+ "alerts": 44000,
+ "true_positive_alerts": 0,
+ "false_positive_alerts": 44000,
+ "alert_precision": 0.0,
+ "false_positives_per_host_hour": 1531.23,
+ "incidents": 1379,
+ "true_positive_incidents": 0,
+ "false_positive_incidents": 1379,
+ "false_positive_incidents_per_host_day": 1151.76,
+ "attack_units": 2,
+ "attack_units_detected": 0,
+ "attack_units_correct_class": 0,
+ "detection_rate": 0.0,
+ "false_positive_causes": {
+  "SURICATA UDPv4 invalid checksum": 13943,
+  "SURICATA IPv4 invalid checksum": 13500,
+  "ET INFO RDP - Response To External Host": 8242,
+  "SURICATA STREAM ESTABLISHED packet out of window": 2779,
+  "ET REMOTE_ACCESS MS Remote Desktop Administrator Login Request": 1546,
+  "GPL NETBIOS SMB-DS IPC$ unicode share access": 717,
+  "GPL NETBIOS SMB-DS IPC$ share access": 687,
+  "ET EXPLOIT Possible ETERNALBLUE Probe MS17-010 (MSF style)": 675,
+  "ET EXPLOIT Possible ETERNALBLUE Probe MS17-010 (Generic Flags)": 675,
+  "ET JA3 Hash - Possible Malware - Fake Firefox Font Update": 301,
+  "SURICATA HTTP unable to match response to request": 238,
+  "SURICATA STREAM Packet with invalid ack": 201,
+  "SURICATA STREAM ESTABLISHED invalid ack": 198,
+  "ET SCAN Sipvicious Scan": 70,
+  "ET SCAN Sipvicious User-Agent Detected (friendly-scanner)": 70
+ },
+ "scenarios": [
+  {
+   "scenario": "dos_slowhttptest",
+   "label": "DoS-SlowHTTPTest",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "dos_hulk",
+   "label": "DoS-Hulk",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  }
+ ],
+ "per_capture": [
+  {
+   "name": "fri16_dos",
+   "packets": 18890171,
+   "capture_hours": 5.524151693648762,
+   "alerts": 97,
+   "alerts_by_type": {
+    "suricata": 97
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed14_dept_66.90",
+   "packets": 269894,
+   "capture_hours": 9.007718995809554,
+   "alerts": 18426,
+   "alerts_by_type": {
+    "suricata": 18426
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed14_dept_66.49",
+   "packets": 58779,
+   "capture_hours": 2.455776085058848,
+   "alerts": 2958,
+   "alerts_by_type": {
+    "suricata": 2958
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed14_dept_64.99",
+   "packets": 58073,
+   "capture_hours": 2.762147774166531,
+   "alerts": 3589,
+   "alerts_by_type": {
+    "suricata": 3589
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed14_dept_64.106",
+   "packets": 261094,
+   "capture_hours": 8.985327617261145,
+   "alerts": 18930,
+   "alerts_by_type": {
+    "suricata": 18930
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  }
+ ]
+}

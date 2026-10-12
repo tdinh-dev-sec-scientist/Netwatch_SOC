@@ -487,7 +487,7 @@ class ProtocolAnalyzer:
     def _dec_tls(self, pkt, p):
         if len(p) < 5 or p[1] != 0x03:
             return False
-        rtype, ver_major, ver_minor, rlen = p[0], p[1], p[2], \
+        rtype, ver_minor, rlen = p[0], p[2], \
             struct.unpack('!H', p[3:5])[0]
         if rtype not in (20, 21, 22, 23):
             return False

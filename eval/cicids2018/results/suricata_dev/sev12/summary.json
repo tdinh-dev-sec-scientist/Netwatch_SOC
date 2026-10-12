@@ -1,0 +1,443 @@
+{
+ "captures": 18,
+ "packets": 10022252,
+ "capture_host_hours": 157.41,
+ "alerts": 3095,
+ "true_positive_alerts": 1968,
+ "false_positive_alerts": 1127,
+ "alert_precision": 0.6359,
+ "false_positives_per_host_hour": 7.16,
+ "incidents": 800,
+ "true_positive_incidents": 5,
+ "false_positive_incidents": 795,
+ "false_positive_incidents_per_host_day": 121.22,
+ "attack_units": 18,
+ "attack_units_detected": 4,
+ "attack_units_correct_class": 0,
+ "detection_rate": 0.2222,
+ "false_positive_causes": {
+  "ET SCAN Sipvicious User-Agent Detected (friendly-scanner)": 335,
+  "ET SCAN Sipvicious Scan": 304,
+  "ET DROP Spamhaus DROP Listed Traffic Inbound group 1": 202,
+  "ET SCAN Suspicious inbound to mySQL port 3306": 119,
+  "ET SCAN Suspicious inbound to MSSQL port 1433": 33,
+  "GPL SNMP public access udp": 30,
+  "ET SCAN Suspicious inbound to PostgreSQL port 5432": 24,
+  "ET VOIP Modified Sipvicious Asterisk PBX User-Agent": 16,
+  "ET SNMP Attempt to retrieve Cisco Config via TFTP (CISCO-CONFIG-COPY)": 14,
+  "GPL SNMP private access udp": 14,
+  "ET SCAN Potential SSH Scan": 10,
+  "ET SCAN Suspicious inbound to Oracle SQL port 1521": 4,
+  "ET INFO Dropbox.com Offsite File Backup in Use": 3,
+  "ET CINS Active Threat Intelligence Poor Reputation IP group 92": 3,
+  "ET INFO Noction IRP Probe": 3
+ },
+ "scenarios": [
+  {
+   "scenario": "ftp_bruteforce",
+   "label": "FTP-BruteForce",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "ssh_bruteforce",
+   "label": "SSH-Bruteforce",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 46,
+   "alert_types": {
+    "suricata": 46
+   },
+   "first_alert_after_s": 50
+  },
+  {
+   "scenario": "dos_goldeneye",
+   "label": "DoS-GoldenEye",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "dos_slowloris",
+   "label": "DoS-Slowloris",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "web_bruteforce",
+   "label": "Brute Force -Web",
+   "victim": null,
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "web_xss",
+   "label": "Brute Force -XSS",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 1912,
+   "alert_types": {
+    "suricata": 1912
+   },
+   "first_alert_after_s": 101
+  },
+  {
+   "scenario": "web_sqli",
+   "label": "SQL Injection",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 8,
+   "alert_types": {
+    "suricata": 8
+   },
+   "first_alert_after_s": 95
+  },
+  {
+   "scenario": "infiltration",
+   "label": "Infilteration",
+   "victim": null,
+   "detected": true,
+   "correct_class": false,
+   "alerts": 2,
+   "alert_types": {
+    "suricata": 2
+   },
+   "first_alert_after_s": -129
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.23",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.17",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.14",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.12",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.10",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.8",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.6",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.26",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.29",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  },
+  {
+   "scenario": "bot_ares",
+   "label": "Bot",
+   "victim": "172.31.69.30",
+   "detected": false,
+   "correct_class": false,
+   "alerts": 0,
+   "alert_types": {},
+   "first_alert_after_s": null
+  }
+ ],
+ "per_capture": [
+  {
+   "name": "wed14_ftp_ssh",
+   "packets": 4718327,
+   "capture_hours": 8.936792161928283,
+   "alerts": 103,
+   "alerts_by_type": {
+    "suricata": 103
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "thu15_dos",
+   "packets": 424625,
+   "capture_hours": 9.026353845530085,
+   "alerts": 54,
+   "alerts_by_type": {
+    "suricata": 54
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "thu22_web",
+   "packets": 47714,
+   "capture_hours": 9.083590190278159,
+   "alerts": 1998,
+   "alerts_by_type": {
+    "suricata": 1998
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "wed28_infiltration",
+   "packets": 919537,
+   "capture_hours": 9.34563898411062,
+   "alerts": 63,
+   "alerts_by_type": {
+    "suricata": 63
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.23",
+   "packets": 316197,
+   "capture_hours": 8.713202448354828,
+   "alerts": 58,
+   "alerts_by_type": {
+    "suricata": 58
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.17",
+   "packets": 275440,
+   "capture_hours": 8.711854691969023,
+   "alerts": 53,
+   "alerts_by_type": {
+    "suricata": 53
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.14",
+   "packets": 289396,
+   "capture_hours": 8.713550323645274,
+   "alerts": 55,
+   "alerts_by_type": {
+    "suricata": 55
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.12",
+   "packets": 194651,
+   "capture_hours": 8.713488304482565,
+   "alerts": 50,
+   "alerts_by_type": {
+    "suricata": 50
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.10",
+   "packets": 328571,
+   "capture_hours": 8.70903631693787,
+   "alerts": 52,
+   "alerts_by_type": {
+    "suricata": 52
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.8",
+   "packets": 333702,
+   "capture_hours": 8.71305309249295,
+   "alerts": 50,
+   "alerts_by_type": {
+    "suricata": 50
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.6",
+   "packets": 361912,
+   "capture_hours": 8.7134708230363,
+   "alerts": 68,
+   "alerts_by_type": {
+    "suricata": 68
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.26",
+   "packets": 228488,
+   "capture_hours": 7.5077895891666415,
+   "alerts": 60,
+   "alerts_by_type": {
+    "suricata": 60
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.29",
+   "packets": 323651,
+   "capture_hours": 8.686181299421522,
+   "alerts": 72,
+   "alerts_by_type": {
+    "suricata": 72
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_bot_69.30",
+   "packets": 320039,
+   "capture_hours": 8.711806119481723,
+   "alerts": 69,
+   "alerts_by_type": {
+    "suricata": 69
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_clean_69.13",
+   "packets": 245109,
+   "capture_hours": 8.396821263101366,
+   "alerts": 68,
+   "alerts_by_type": {
+    "suricata": 68
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_clean_69.9",
+   "packets": 301971,
+   "capture_hours": 8.70607425192992,
+   "alerts": 72,
+   "alerts_by_type": {
+    "suricata": 72
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_clean_69.16",
+   "packets": 209972,
+   "capture_hours": 9.107863726350995,
+   "alerts": 80,
+   "alerts_by_type": {
+    "suricata": 80
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  },
+  {
+   "name": "fri02_clean_69.5",
+   "packets": 182950,
+   "capture_hours": 8.908511889444457,
+   "alerts": 70,
+   "alerts_by_type": {
+    "suricata": 70
+   },
+   "parse_errors": 0,
+   "detector_errors": 0,
+   "pkt_per_s": 0
+  }
+ ]
+}
