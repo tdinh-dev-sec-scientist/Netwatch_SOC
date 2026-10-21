@@ -23,7 +23,7 @@ never seen — next to Suricata, an industry-standard IDS, on the same packets.
 posture, the alert queue, a SQL injection alert with the request that fired it,
 top talkers, decoded packets, the 18 detectors and the pipeline.
 
-[![NetWatch SOC — 2-minute demo walkthrough](docs/images/demo-video.png)](docs/media/netwatch-demo.mp4)
+[![NetWatch SOC — 2-minute demo walkthrough](docs/images/demo-video.png)](https://truongd-portfolio.netlify.app/assets/video/netwatch-demo.mp4)
 
 ![Alert queue: real detections from the CSE-CIC-IDS2018 replay, each mapped to ATT&CK techniques](docs/images/alert-queue.png)
 
