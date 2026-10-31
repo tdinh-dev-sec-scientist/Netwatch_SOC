@@ -144,6 +144,17 @@ bad benchmark for a signature engine, so it now says so in every report.
 This is the tool's second catch: it found a flaw in the test data before
 anyone quoted the result. A fair comparison runs on the full packs.
 
+### On the full dataset
+
+NetWatch, Suricata 7.0.17 + ET Open and Zeek 7.0.9 on all 31 million
+packets, each tuned under the same budget on the development set and scored
+on the held-out sets: **[results-cicids2018.md](../docs/bench/results-cicids2018.md)**.
+In short, NetWatch's 6/6 against Suricata's 3/6 is still not significant
+(p = 0.18); the gap in false alerts survives equal tuning (0.1 against 54
+per host-hour). Read the caveats in that document before quoting either
+number. The same run reproduced every published NetWatch number from a
+clean download.
+
 ## Gate pull requests on detection quality
 
 `diff` is a regression gate, the way a snapshot test is: commit a baseline

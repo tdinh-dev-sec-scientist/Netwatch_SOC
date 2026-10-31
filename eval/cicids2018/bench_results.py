@@ -171,10 +171,45 @@ def build(runs):
             'reason. The per-attack table lists the rules that fired, so '
             'the reader can judge: Suricata\'s infiltration "detection" is '
             'mostly protocol anomaly events, not a signature for the attack.',
+            '- **Stock Zeek is not a detection ruleset.** Out of the box it '
+            'raises a handful of detection notices (SSH password guessing, '
+            'SQL injection, FTP brute force); teams detect with their own '
+            'scripts, which `--zeek-script` loads. Its one held-out '
+            '"detection" is an `SSL::Invalid_Server_Cert` notice that '
+            'happened to involve the attacker: a coincidence, and the same '
+            'coincidence protected that noisy notice from tuning. The '
+            'significant gap against Zeek measures stock scripts, not Zeek.',
             '- **Checksum validation is off** for Suricata, because these '
             'captures were taken with NIC checksum offload (see the '
             'adapter); with it on, one capture alone raises 2.1 million '
             'checksum alerts.', '']
+    out += ['## Reproduce', '', '```bash',
+            'for t in ground_truth holdout holdout2; do',
+            '  python eval/cicids2018/fetch.py --out data/cicids2018 '
+            '--truth eval/cicids2018/$t.json',
+            'done                                         # about 8 GB',
+            'for p in dev holdout holdout2; do',
+            '  for e in "netwatch" "suricata --suricata-docker '
+            'jasonish/suricata:7.0" "zeek --zeek-docker zeek/zeek:7.0"; do',
+            '    python -m netwatch_bench run --pack packs/cicids2018-$p '
+            '--data data/cicids2018 \\',
+            '      --engine $e --jobs 4 --out runs/full/${e%% *}-$p',
+            '  done',
+            'done',
+            'for e in netwatch suricata zeek; do',
+            '  python -m netwatch_bench tune --from runs/full/$e-dev '
+            '--budget 10 --out runs/tuned/$e.tuning.json',
+            '  for p in holdout holdout2; do',
+            '    python -m netwatch_bench score --pack packs/cicids2018-$p '
+            '--data data/cicids2018 \\',
+            '      --from runs/full/$e-$p --exclude-rules-file '
+            'runs/tuned/$e.tuning.json --out runs/tuned/$e-$p',
+            '  done',
+            'done',
+            'python eval/cicids2018/bench_results.py',
+            '```', '',
+            'About 90 minutes on 4 cores, most of it NetWatch on the '
+            '19-million-packet HULK capture.', '']
     out += ['## Versions', '', '| Engine | Version | Rules |', '|---|---|---|']
     for key, (label, raw, _tuned, _dev, _t) in engines.items():
         e = raw[0]['manifest']['engine']
