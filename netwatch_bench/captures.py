@@ -41,7 +41,8 @@ def scan(path):
             if len(head) < 16:
                 break
             sec, frac, incl, _orig = record.unpack(head)
-            fh.seek(incl, 1)
+            if len(fh.read(incl)) < incl:
+                break               # truncated final record, as replay.py
             ts = sec + frac * resolution
             packets += 1
             if first is None:

@@ -1,4 +1,7 @@
+import gzip
 import hashlib
+import os
+import shutil
 
 
 class EngineError(RuntimeError):
@@ -33,3 +36,14 @@ def file_sha256(path):
         for block in iter(lambda: fh.read(1 << 20), b''):
             digest.update(block)
     return digest.hexdigest()
+
+
+def plain_pcap(path, workdir, index):
+    """Engines that cannot read .gz captures get a decompressed copy."""
+    with open(path, 'rb') as fh:
+        if fh.read(2) != b'\x1f\x8b':
+            return path
+    out = os.path.join(workdir, 'capture-%d.pcap' % index)
+    with gzip.open(path, 'rb') as src, open(out, 'wb') as dst:
+        shutil.copyfileobj(src, dst)
+    return out

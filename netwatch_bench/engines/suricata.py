@@ -16,7 +16,7 @@ import os
 import shutil
 import subprocess
 
-from .base import Engine, EngineError, file_sha256
+from .base import Engine, EngineError, file_sha256, plain_pcap
 
 SEVERITY = {1: 'HIGH', 2: 'MEDIUM', 3: 'LOW', 4: 'INFO'}
 IMAGE_RULES = '/var/lib/suricata/rules/suricata.rules'
@@ -172,7 +172,7 @@ class SuricataEngine(Engine):
         for index, pcap in enumerate(paths):
             logdir = os.path.join(workdir, 'log-%d' % index)
             os.makedirs(logdir, exist_ok=True)
-            pcap = self._plain_pcap(pcap, workdir, index)
+            pcap = plain_pcap(pcap, workdir, index)
             if self.image:
                 mounts = [(config_path, '/bench/suricata.yaml', 'ro'),
                           (pcap, '/bench/capture.pcap', 'ro'),
@@ -194,15 +194,3 @@ class SuricataEngine(Engine):
             if os.path.exists(eve):
                 findings.extend(read_eve(eve, capture.id))
         return findings
-
-    @staticmethod
-    def _plain_pcap(path, workdir, index):
-        """Suricata cannot read .gz captures; decompress to the workdir."""
-        with open(path, 'rb') as fh:
-            if fh.read(2) != b'\x1f\x8b':
-                return path
-        import gzip
-        out = os.path.join(workdir, 'capture-%d.pcap' % index)
-        with gzip.open(path, 'rb') as src, open(out, 'wb') as dst:
-            shutil.copyfileobj(src, dst)
-        return out

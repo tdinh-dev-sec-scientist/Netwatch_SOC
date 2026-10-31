@@ -125,6 +125,14 @@ def test_incidents_group_pairs_and_victims(pack):
     assert sorted(len(i) for i in incidents) == [1, 2, 5]
 
 
+def test_findings_without_addresses_are_counted_as_noise(pack):
+    bare = normalize({'ts': T0 + 10, 'capture': 'a', 'name': 'decoder'})
+    card = scoring.score(pack, [bare, f(10, ATTACKER, VICTIM)], FACTS)
+    assert card['noise']['false_alerts'] == 1
+    assert card['noise']['without_addresses'] == 1
+    assert row(card, 'brute')['detected']
+
+
 def test_unknown_capture_is_an_error(pack):
     with pytest.raises(ValueError, match='captures the pack does not have'):
         scoring.score(pack, [f(10, ATTACKER, VICTIM, capture='zzz')], FACTS)
@@ -135,8 +143,6 @@ def test_normalize_rejects_what_cannot_be_scored():
         normalize({'src_ip': '1.2.3.4', 'capture': 'a'})
     with pytest.raises(FindingError, match='capture'):
         normalize({'ts': 1, 'src_ip': '1.2.3.4'})
-    with pytest.raises(FindingError, match='src_ip or dst_ip'):
-        normalize({'ts': 1, 'capture': 'a'})
     with pytest.raises(FindingError, match='severity'):
         normalize({'ts': 1, 'capture': 'a', 'src_ip': 'x',
                    'severity': 'urgent'})

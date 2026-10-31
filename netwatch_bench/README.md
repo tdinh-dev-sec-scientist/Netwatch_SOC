@@ -86,6 +86,7 @@ graded against the same key. Rules are in the
 |---|---|---|
 | `netwatch` | NetWatch's behavioural pipeline, in process | The reference engine in this repository |
 | `suricata` | Suricata, offline, over each capture | `--suricata-bin` + `--rules`, or `--suricata-docker IMAGE` (sandboxed, `--network none`; defaults to the image's ET Open). Techniques come from each rule's `mitre_technique_id` metadata |
+| `zeek` | Zeek, offline, over each capture | `--zeek-bin`, or `--zeek-docker zeek/zeek:7.0`. Loads `local` plus your own `--zeek-script` files; notices map to ATT&CK in [zeek.py](engines/zeek.py) |
 | `eve` | An `eve.json` you already have | No replay; `--input [CAPTURE=]eve.json` |
 | `findings` | Any tool's alerts as JSON lines | Zeek notices, Snort, a commercial NDR export: map them to the [normalized finding](findings.py) and pass `--engine-name` |
 
@@ -143,6 +144,68 @@ bad benchmark for a signature engine, so it now says so in every report.
 This is the tool's second catch: it found a flaw in the test data before
 anyone quoted the result. A fair comparison runs on the full packs.
 
+## Gate pull requests on detection quality
+
+`diff` is a regression gate, the way a snapshot test is: commit a baseline
+scorecard, and fail any change that loses a detection, misclassifies one, or
+pushes noise past its budget. Exit code 1, a Markdown summary, and SARIF
+that GitHub shows as annotations on the pack file.
+
+```bash
+python -m netwatch_bench diff bench/baselines/cicids2018-demo.netwatch.json runs/netwatch \
+    --max-noise-increase 0.10 --sarif gate.sarif
+```
+
+Raise one HTTP-flood threshold too far and it looks like this:
+
+```
+## NetWatch Bench regression gate: FAILED
+
+| | Baseline | Candidate |
+|---|---|---|
+| Attacks detected | 7 / 7 | 5 / 7 |
+| False alerts | 1 | 1 |
+
+**Regressions**
+
+- `NWB001` Slowloris: detected in the baseline (http_flood), missed now
+- `NWB001` GoldenEye HTTP flood: detected in the baseline (http_flood), missed now
+```
+
+The same thing as a GitHub Action, for your own rules repository:
+
+```yaml
+- uses: tdinh-dev-sec-scientist/Netwatch_SOC@main
+  with:
+    pack: packs/my-lab
+    engine: suricata
+    engine-args: --suricata-bin suricata --rules rules/local.rules
+    baseline: bench/baselines/my-lab.suricata.json
+- uses: github/codeql-action/upload-sarif@v4      # optional: annotations
+  if: always()
+  with:
+    sarif_file: netwatch-bench-run/gate.sarif
+```
+
+This repository gates itself the same way: every push runs NetWatch on the
+demo pack against
+[`bench/baselines/`](../bench/baselines/cicids2018-demo.netwatch.json). An
+intentional change updates the baseline in the same commit, where a reviewer
+sees it. Gate rules: [metric contract](../docs/bench/metric-contract.md#the-regression-gate).
+
+## Compare engines fairly: an equal tuning budget
+
+Untuned Suricata against a NetWatch tuned on the same data proves nothing.
+`tune` gives each engine the same budget on the development pack: suppress up
+to N rules, the noisiest first, never one that caught an attack. Then each
+engine is scored on held-out traffic with its own list, unchanged.
+
+```bash
+python -m netwatch_bench tune --from runs/suricata-dev --budget 10 --out suricata.tuning.json
+python -m netwatch_bench score --pack packs/cicids2018-holdout --from runs/suricata-holdout \
+    --exclude-rules-file suricata.tuning.json --out runs/suricata-holdout-tuned
+```
+
 ## Packs
 
 | Pack | Captures | Scored units | Download |
@@ -166,11 +229,13 @@ The pack labels what is actually on the wire; see `notes` in its
 
 ## Status and roadmap
 
-`v0.1`, in this repository while the interfaces settle. Next:
+`v0.2`, in this repository while the interfaces settle.
 
-- [ ] `diff` and a GitHub Action: fail a pull request when coverage drops or
+- [x] `diff` and a GitHub Action: fail a pull request when coverage drops or
       noise exceeds a budget; SARIF output for the Security tab
-- [ ] Zeek adapter (`notice.log`, `weird.log`)
+- [x] Zeek adapter (`notice.log`, custom scripts)
+- [x] Equal tuning budget (`tune`) for fair engine comparisons
+- [x] Full-dataset runs of NetWatch, Suricata and Zeek from a clean download
 - [ ] **Mutation testing for detections**: replay each attack with timing
       jitter, rate changes, other ports, fragmentation and encodings, and
       report how many variants each rule survives

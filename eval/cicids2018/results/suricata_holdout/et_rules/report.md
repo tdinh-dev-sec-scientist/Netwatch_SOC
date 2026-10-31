@@ -1,6 +1,6 @@
 # Suricata + ET Open, without engine anomaly events on CSE-CIC-IDS2018
 
-Config: `/tmp/claude-0/-home-user-Netwatch-SOC/56b49ed9-d091-5fbb-9c58-028dcf25e911/scratchpad/suri/suricata.rules`
+Config: `ET Open as of 2024-12-11 (54,399 rules), from the jasonish/suricata image`
 
 | | |
 |---|---|

@@ -96,6 +96,10 @@ def markdown(card):
                 for kv in noise['top_false_positive_rules'].items()]
     else:
         out.append('None.')
+    if noise.get('without_addresses'):
+        out += ['', '%s carried no IP address (decoder events on '
+                'malformed packets) and could not be attributed to any host.'
+                % plural(noise['without_addresses'], 'false alert')]
     if noise['explained_by_annotations']:
         out += ['', 'Explained by known, unlabelled activity in the pack '
                 '(still counted as false positives):', '']

@@ -8,6 +8,10 @@ netwatch-bench: score network detections against labelled traffic.
     netwatch-bench score --pack packs/cicids2018-demo --from runs/suricata \\
         --min-severity MEDIUM --out runs/suricata-sev12
     netwatch-bench compare runs/nw runs/suricata
+    netwatch-bench diff baseline.json runs/nw --sarif gate.sarif   # CI gate
+    netwatch-bench tune --from runs/suricata-dev --budget 10 --out tuning.json
+
+Exit codes: 0 ok, 1 the regression gate failed, 2 usage or input error.
 """
 
 import argparse
@@ -32,6 +36,9 @@ def _filter_args(p):
                    'with PREFIX (e.g. "SURICATA " for engine anomaly events)')
     g.add_argument('--exclude-rule', action='append', default=[],
                    metavar='RULE', help='drop findings from one rule id')
+    g.add_argument('--exclude-rules-file', metavar='FILE',
+                   help='drop findings from every rule in a tuning file '
+                   '(from `tune`) or a list with one rule id per line')
 
 
 def _common(p):
@@ -73,6 +80,11 @@ def parser():
     e.add_argument('--rules', help='suricata: rules file (default with '
                    'Docker: the image\'s bundled ET Open)')
     e.add_argument('--suricata-config', help='suricata: suricata.yaml')
+    e.add_argument('--zeek-bin', help='zeek: local binary')
+    e.add_argument('--zeek-docker', metavar='IMAGE',
+                   help='zeek: run in this Docker image')
+    e.add_argument('--zeek-script', action='append', metavar='FILE',
+                   help='zeek: script to load after `local` (repeatable)')
     e.add_argument('--input', action='append', metavar='[CAPTURE=]PATH',
                    help='eve/findings: alert file to import (repeatable)')
     e.add_argument('--engine-name', help='findings: name to report the '
@@ -90,6 +102,33 @@ def parser():
     c.add_argument('a', help='run directory or scorecard.json')
     c.add_argument('b', help='run directory or scorecard.json')
     c.add_argument('--out', help='write the comparison Markdown here')
+
+    d = sub.add_parser('diff', help='regression gate: fail if a candidate '
+                       'run is worse than a baseline')
+    d.add_argument('baseline', help='baseline run directory or scorecard.json')
+    d.add_argument('candidate', help='candidate run directory or '
+                   'scorecard.json')
+    d.add_argument('--max-noise-increase', type=float, default=0.10,
+                   metavar='FRACTION', help='allowed rise in false alerts '
+                   '(default 0.10 = 10%%)')
+    d.add_argument('--noise-slack', type=int, default=2, metavar='N',
+                   help='extra false alerts always allowed (default 2)')
+    d.add_argument('--max-false-alerts-per-host-hour', type=float,
+                   metavar='RATE', help='absolute noise ceiling')
+    d.add_argument('--fail-on-new-noise', action='store_true',
+                   help='fail when a rule starts raising false alerts')
+    d.add_argument('--allow-pack-change', action='store_true',
+                   help='compare even if the pack changed')
+    d.add_argument('--out', help='write the gate summary Markdown here')
+    d.add_argument('--sarif', help='write SARIF 2.1.0 here')
+
+    t = sub.add_parser('tune', help='pick the rules to suppress under an '
+                       'equal tuning budget')
+    t.add_argument('--from', dest='run_dir', required=True,
+                   help='a run on the development pack')
+    t.add_argument('--budget', type=int, required=True, metavar='N',
+                   help='at most N rules may be suppressed')
+    t.add_argument('--out', help='write the tuning file (JSON) here')
     return ap
 
 
@@ -138,6 +177,24 @@ def _validate(args):
     return 1 if problems else 0
 
 
+def _diff(args):
+    from . import gate
+    budget = gate.Budget(args.max_noise_increase, args.noise_slack,
+                         args.max_false_alerts_per_host_hour,
+                         args.fail_on_new_noise, args.allow_pack_change)
+    result = gate.diff(_load_card(args.baseline), _load_card(args.candidate),
+                       budget)
+    text = gate.markdown(result)
+    if args.out:
+        with open(args.out, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+    if args.sarif:
+        with open(args.sarif, 'w', encoding='utf-8') as fh:
+            json.dump(gate.sarif(result, os.getcwd()), fh, indent=1)
+    print(text)
+    return 0 if result['passed'] else 1
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     args = parser().parse_args(argv)
@@ -148,6 +205,17 @@ def main(argv=None):
     try:
         if args.command == 'validate':
             return _validate(args)
+        if args.command == 'diff':
+            return _diff(args)
+        if args.command == 'tune':
+            from .tune import from_run
+            result = from_run(args.run_dir, args.budget)
+            text = json.dumps(result, indent=1)
+            if args.out:
+                with open(args.out, 'w', encoding='utf-8') as fh:
+                    fh.write(text + '\n')
+            print(text)
+            return 0
         if args.command == 'compare':
             result = report.compare(_load_card(args.a), _load_card(args.b))
             text = report.compare_markdown(result)
@@ -157,8 +225,12 @@ def main(argv=None):
             print(text)
             return 0
         pack = load(args.pack)
+        excluded = list(args.exclude_rule)
+        if args.exclude_rules_file:
+            from .tune import load_rules
+            excluded += load_rules(args.exclude_rules_file)
         finding_filter = Filter(args.min_severity, args.exclude_name_prefix,
-                                args.exclude_rule)
+                                excluded)
         if args.command == 'score':
             out = args.out or args.run_dir
             card = runner.rescore(pack, args.run_dir, finding_filter, argv,

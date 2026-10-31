@@ -9,6 +9,7 @@ code. In short:
   or, for a scenario with a `pivot` (a compromised internal host), if it goes
   from the pivot to an internal address and its techniques match the
   scenario's. A finding with no techniques gets the benefit of the doubt.
+  A finding that names only one address matches if it is an attacker.
 * Every other finding is a **false positive against the labels**. Findings
   that match an annotation (known but unlabelled activity) are still false
   positives, but are reported as explained.
@@ -41,6 +42,12 @@ def match(finding, pack, scenarios=None):
             victims = ends & set(sc.victims)
             if victims:
                 return sc, (dst if dst in victims else src)
+            # A one-sided alert ("this host is brute forcing"), as Zeek's
+            # aggregate notices are, names only the attacker. It counts for
+            # every victim of a non-per-victim scenario, but cannot say which
+            # victim of a per-victim one it hit.
+            if (src is None) != (dst is None) and not sc.per_victim:
+                return sc, sc.victims[0]
         if (sc.pivot and src == sc.pivot and pack.is_internal(dst)
                 and (not finding['techniques']
                      or techniques_match(finding['techniques'],
@@ -170,6 +177,9 @@ def score(pack, findings, captures):
             'false_incidents': fp_incidents,
             'false_incidents_per_host_day': (fp_incidents / host_hours * 24
                                              if host_hours else None),
+            'without_addresses': sum(
+                1 for f in false_positives
+                if not (f.get('src_ip') or f.get('dst_ip'))),
             'explained_by_annotations': {k: v for k, v in explained.items()
                                          if k is not None},
             'top_false_positive_rules': dict(collections.Counter(

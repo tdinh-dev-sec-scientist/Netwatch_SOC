@@ -95,7 +95,7 @@ Full write-up, every false positive traced to a cause:
 | REST endpoints | Flask, parameterised queries, read-only demo mode | **25** |
 | Throughput | parse + detect + batched PostgreSQL writes, one thread | **5,873** packets/s |
 | Query latency | p95 across the 22 queries behind the API | **11.9** ms |
-| Tests | PostgreSQL and SQLite in CI, plus a Docker smoke test | **481** |
+| Tests | PostgreSQL and SQLite in CI, plus a Docker smoke test | **500** |
 
 ## How it works
 
@@ -194,7 +194,7 @@ replay.py             pcap/pcapng replay through the real pipeline
 eval/cicids2018/      dataset fetch, ground truth, scoring, Suricata runner
 netwatch_bench/       engine-agnostic detection scoring (NetWatch Bench)
 packs/                labelled traffic packs for NetWatch Bench
-tests/                481 tests, run against real PostgreSQL
+tests/                500 tests, run against real PostgreSQL
 ```
 
 ## What I learned

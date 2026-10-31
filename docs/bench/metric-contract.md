@@ -22,10 +22,20 @@ of *S*'s windows (inclusive) and either:
    pivot to an address inside `internal_networks`, and the alert's
    techniques match *S*'s, or the alert carries no techniques at all.
 
+3. the alert names **only one** address, that address is an attacker of
+   *S*, and *S* is not `per_victim`. Aggregate detections ("this host is
+   guessing SSH passwords", as Zeek's notices are) name the attacker and
+   nothing else. An alert naming only a *victim* is never credited: victims
+   receive plenty of unrelated traffic.
+
 Scenarios are tried in pack order; the first match wins. Rule 2 is narrower
 than rule 1 on purpose: a compromised workstation keeps its ordinary
 traffic, and an unrelated alert on it must not be credited to the attack.
 An engine that attributes no techniques gets the benefit of the doubt.
+
+An alert with **no address at all** (an engine's decoder event on a
+malformed packet) cannot match anything. It counts as a false positive, and
+the report says how many there were.
 
 Every other alert is a **false positive against the labels**. That includes
 alerts on real but unlabelled attacks in the background traffic. A pack can
@@ -78,6 +88,35 @@ dropping Suricata's own `SURICATA ` decoder events) are scored. A filter is
 recorded in the scorecard's manifest and marks the engine as "(filtered)" in
 every report, so a tuned result is never mistaken for the engine as
 distributed.
+
+## Equal tuning budget
+
+An engine as distributed against one tuned on the same data is not a fair
+fight. `netwatch-bench tune --budget N` gives every engine the same budget
+on a development pack: suppress at most *N* rules, chosen by false alerts
+raised, **never** a rule that raised a true positive. The suppression list
+is then applied, unchanged, to held-out packs that played no part in
+choosing it (`score --exclude-rules-file`). The list and the pack it was
+tuned on are recorded in the tuning file; the filter is recorded in every
+scorecard scored with it.
+
+## The regression gate
+
+`netwatch-bench diff BASELINE CANDIDATE` exits 1 when the candidate:
+
+| Code | Fails when |
+|---|---|
+| `NWB001` | a unit the baseline detected is missed |
+| `NWB002` | a unit the baseline classified correctly is detected with only wrong techniques |
+| `NWB003` | false alerts exceed baseline × (1 + `--max-noise-increase`, default 0.10) + `--noise-slack` (default 2) |
+| `NWB004` | false alerts per host-hour exceed `--max-false-alerts-per-host-hour` |
+| `NWB005` | a rule not in the baseline's top false-positive list raises ≥ 3 (warning; fails with `--fail-on-new-noise`) |
+| `NWB006` | the two scorecards come from different packs (unless `--allow-pack-change`) |
+
+Gains never fail the gate. A unit becoming *not assessable* never fails it
+either: that is a change in what the engine reports, not in what it detects.
+The gate compares two scores on the same pack, so there is no sampling error
+to test for: the same traffic and the same engine give the same alerts.
 
 ## What these metrics do not measure
 

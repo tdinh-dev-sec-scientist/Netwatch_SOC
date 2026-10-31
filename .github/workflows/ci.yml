@@ -105,9 +105,12 @@ jobs:
           retention-days: 14
 
   bench:
-    name: NetWatch Bench (NetWatch and Suricata on the demo pack)
+    name: NetWatch Bench (NetWatch, Suricata and Zeek on the demo pack)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write      # upload the regression gate's SARIF
 
     steps:
       - uses: actions/checkout@v7
@@ -125,10 +128,31 @@ jobs:
       - name: Validate every pack
         run: for pack in packs/*/; do python -m netwatch_bench validate "$pack"; done
 
-      - name: Score NetWatch on the demo pack
+      # The repository's own Action, gating NetWatch against the committed
+      # baseline: a change that loses a detection or adds noise fails here.
+      # An intentional change updates bench/baselines/ in the same commit.
+      - name: Regression gate (NetWatch on the demo pack)
+        id: gate
+        uses: ./
+        with:
+          pack: packs/cicids2018-demo
+          engine: netwatch
+          baseline: bench/baselines/cicids2018-demo.netwatch.json
+          out: runs/netwatch
+
+      - name: Upload the gate's SARIF to code scanning
+        if: always() && steps.gate.outputs.sarif != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ steps.gate.outputs.sarif }}
+          category: netwatch-bench
+
+      - name: Score Zeek on the same pack
+        continue-on-error: true
         run: >-
           python -m netwatch_bench run --pack packs/cicids2018-demo
-          --engine netwatch --out runs/netwatch
+          --engine zeek --zeek-docker zeek/zeek:7.0 --out runs/zeek
 
       # Suricata and ET Open come from the network (apt and the rules
       # mirror), so a mirror outage must not block the deployment gate.
@@ -153,8 +177,8 @@ jobs:
       - name: Publish the scorecards
         if: always()
         run: |
-          for f in runs/netwatch/report.md runs/suricata/report.md \
-                   runs/suricata-et-rules/report.md runs/compare.md; do
+          for f in runs/suricata/report.md runs/suricata-et-rules/report.md \
+                   runs/zeek/report.md runs/compare.md; do
             [ -f "$f" ] && { cat "$f"; echo; } >> "$GITHUB_STEP_SUMMARY"
           done
           for f in runs/*/report.md runs/compare.md; do

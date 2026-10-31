@@ -1,8 +1,10 @@
 """
 The normalized finding: what every engine adapter emits and the scorer reads.
 
-One JSON object per line. Only `ts`, `capture` and at least one address are
-required; everything else improves the report but not the score.
+One JSON object per line. Only `ts` and `capture` are required. A finding
+with no address (an engine's decoder event on a malformed packet, say) can
+never match an attack, so it counts as a false positive, and the scorecard
+reports how many there were.
 
     {"ts": 1518618120.5,            epoch seconds, capture clock
      "capture": "wed14_ftp_ssh",    the pack capture this alert came from
@@ -42,8 +44,6 @@ def normalize(record, default_capture=None, where='finding'):
     if not capture:
         raise FindingError('%s: capture is required when the pack has more '
                            'than one capture' % where)
-    if not (record.get('src_ip') or record.get('dst_ip')):
-        raise FindingError('%s: src_ip or dst_ip is required' % where)
     severity = str(record.get('severity') or 'INFO').upper()
     if severity not in SEVERITY_RANK:
         raise FindingError('%s: unknown severity %r' % (where, severity))

@@ -1,0 +1,276 @@
+{
+ "alerts": {
+  "false_positive": 1,
+  "precision": {
+   "ci95": [
+    0.6226415635484043,
+    0.9837678271141151
+   ],
+   "k": 10,
+   "n": 11,
+   "rate": 0.9090909090909091
+  },
+  "total": 11,
+  "true_positive": 10
+ },
+ "captures": [
+  {
+   "end": 1500002696.737513,
+   "files": [
+    {
+     "packets": 70758,
+     "path": "../../demo/cicids2018-sample.pcap.gz",
+     "sha256": "f0c4654abbc40efa932bc87b19029d07e0b2fe8d95071e6dd5dd8f99a4958ea4"
+    }
+   ],
+   "host_hours": 0.7488973808288574,
+   "id": "demo",
+   "packets": 70758,
+   "start": 1500000000.706942
+  }
+ ],
+ "classification": {
+  "ci95": [
+   0.6456695649333126,
+   1.0
+  ],
+  "k": 7,
+  "n": 7,
+  "not_assessable": 0,
+  "rate": 1.0
+ },
+ "detection": {
+  "ci95": [
+   0.6456695649333126,
+   1.0
+  ],
+  "k": 7,
+  "n": 7,
+  "rate": 1.0
+ },
+ "exposure": {
+  "captures": 1,
+  "host_hours": 0.749,
+  "packets": 70758
+ },
+ "limitations": [
+  "A smoke test, not evidence: every slice comes from the development set NetWatch was tuned on, and each was chosen because NetWatch detects it.",
+  "Each attack is a short slice (15 s to 12 min) of a longer attack, on one 45-minute timeline.",
+  "The stitched timeline counts as one host, so per-host-hour rates on this pack are not comparable with the full packs.",
+  "Not a fair test of signature engines: packets are truncated to 256 bytes and slices from different captures are stitched together, so payload signatures cannot match and stream reassembly breaks. Suricata on this pack fires mostly engine anomaly events (checksums, stream state). Compare engines on the full packs.",
+  "One 2018 lab network on AWS. A different network would surface different false positives."
+ ],
+ "manifest": {
+  "captures": [
+   {
+    "files": [
+     {
+      "packets": 70758,
+      "path": "../../demo/cicids2018-sample.pcap.gz",
+      "sha256": "f0c4654abbc40efa932bc87b19029d07e0b2fe8d95071e6dd5dd8f99a4958ea4"
+     }
+    ],
+    "id": "demo"
+   }
+  ],
+  "command": [
+   "netwatch-bench",
+   "run",
+   "--pack",
+   "packs/cicids2018-demo",
+   "--engine",
+   "netwatch",
+   "--out",
+   "/tmp/bl"
+  ],
+  "engine": {
+   "config": "shipped defaults",
+   "config_sha256": null,
+   "name": "netwatch",
+   "version": "ce398210359b9bc7a3cf570095ed2e1588df5b00-dirty"
+  },
+  "environment": {
+   "machine": "x86_64",
+   "platform": "Linux-6.18.44-fc-v185-x86_64-with-glibc2.39",
+   "python": "3.13.17"
+  },
+  "filter": null,
+  "finished_utc": "2026-10-31T03:31:20.042111+00:00",
+  "inputs_hashed": true,
+  "pack": {
+   "id": "cicids2018-demo",
+   "path": "packs/cicids2018-demo/pack.yaml",
+   "sha256": "4b51c42e66569a106753bb893a98569fc4162ae5d9faedd8901e6c86c3773829",
+   "source": {
+    "citation": "Sharaf, Habibi Lashkari and Ghorbani, \"Toward Generating a New Intrusion Detection Dataset and Intrusion Traffic Characterization\", ICISSP 2018.",
+    "license": "See the dataset page; cite the paper below when using it.",
+    "name": "CSE-CIC-IDS2018",
+    "publisher": "Canadian Institute for Cybersecurity (UNB) and the Communications Security Establishment",
+    "url": "https://www.unb.ca/cic/datasets/ids-2018.html"
+   }
+  },
+  "schema": "netwatch-bench/manifest/v0",
+  "started_utc": "2026-10-31T03:31:17.413958+00:00",
+  "tool": {
+   "name": "netwatch-bench",
+   "version": "0.2.0"
+  }
+ },
+ "noise": {
+  "explained_by_annotations": {
+   "rdp_credential_stuffing": 1
+  },
+  "false_alerts": 1,
+  "false_alerts_per_host_hour": 1.3352964312590194,
+  "false_alerts_per_host_hour_ci95": [
+   0.03380677864872347,
+   7.439795536168615
+  ],
+  "false_incidents": 1,
+  "false_incidents_per_host_day": 32.04711435021647,
+  "incidents": 8,
+  "top_false_positive_rules": {
+   "credential_attack": 1
+  },
+  "true_incidents": 7,
+  "without_addresses": 0
+ },
+ "pack": {
+  "id": "cicids2018-demo",
+  "title": "CSE-CIC-IDS2018 demo (45 minutes, 7 attacks)"
+ },
+ "scenarios": [
+  {
+   "alerts": 1,
+   "correct_class": true,
+   "detected": true,
+   "expected_techniques": [
+    "T1071.001",
+    "T1041"
+   ],
+   "first_alert_after_s": 153.5,
+   "label": "Ares botnet polling its C2",
+   "rules": {
+    "c2_beacon": 1
+   },
+   "scenario": "bot_ares",
+   "techniques_seen": [
+    "T1071.001"
+   ],
+   "victim": null
+  },
+  {
+   "alerts": 1,
+   "correct_class": true,
+   "detected": true,
+   "expected_techniques": [
+    "T1499"
+   ],
+   "first_alert_after_s": 10.5,
+   "label": "Slowloris",
+   "rules": {
+    "http_flood": 1
+   },
+   "scenario": "dos_slowloris",
+   "techniques_seen": [
+    "T1499.002"
+   ],
+   "victim": null
+  },
+  {
+   "alerts": 1,
+   "correct_class": true,
+   "detected": true,
+   "expected_techniques": [
+    "T1110",
+    "T1078"
+   ],
+   "first_alert_after_s": 0.5,
+   "label": "SSH brute force",
+   "rules": {
+    "brute_force": 1
+   },
+   "scenario": "ssh_bruteforce",
+   "techniques_seen": [
+    "T1110"
+   ],
+   "victim": null
+  },
+  {
+   "alerts": 2,
+   "correct_class": true,
+   "detected": true,
+   "expected_techniques": [
+    "T1110",
+    "T1078",
+    "T1190"
+   ],
+   "first_alert_after_s": 21.3,
+   "label": "Login-form brute force",
+   "rules": {
+    "brute_force": 2
+   },
+   "scenario": "web_bruteforce",
+   "techniques_seen": [
+    "T1110"
+   ],
+   "victim": null
+  },
+  {
+   "alerts": 2,
+   "correct_class": true,
+   "detected": true,
+   "expected_techniques": [
+    "T1046",
+    "T1595",
+    "T1021"
+   ],
+   "first_alert_after_s": 0.0,
+   "label": "Nmap from an infiltrated workstation",
+   "rules": {
+    "port_scan": 2
+   },
+   "scenario": "infiltration",
+   "techniques_seen": [
+    "T1046"
+   ],
+   "victim": null
+  },
+  {
+   "alerts": 2,
+   "correct_class": true,
+   "detected": true,
+   "expected_techniques": [
+    "T1190"
+   ],
+   "first_alert_after_s": 232.2,
+   "label": "SQL injection",
+   "rules": {
+    "http_anomaly": 2
+   },
+   "scenario": "web_sqli",
+   "techniques_seen": [
+    "T1190"
+   ],
+   "victim": null
+  },
+  {
+   "alerts": 1,
+   "correct_class": true,
+   "detected": true,
+   "expected_techniques": [
+    "T1499"
+   ],
+   "first_alert_after_s": 1.6,
+   "label": "GoldenEye HTTP flood",
+   "rules": {
+    "http_flood": 1
+   },
+   "scenario": "dos_goldeneye",
+   "techniques_seen": [
+    "T1499.002"
+   ],
+   "victim": null
+  }
+ ]
+}

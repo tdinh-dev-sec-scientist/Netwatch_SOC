@@ -4,6 +4,7 @@ whether two scorecards can be compared at all.
 """
 
 import datetime as dt
+import os
 import platform
 import sys
 
@@ -18,7 +19,8 @@ def build(pack, engine_info, captures, finding_filter, argv, started,
         'command': ['netwatch-bench'] + list(argv),
         'started_utc': started.isoformat(),
         'finished_utc': dt.datetime.now(dt.timezone.utc).isoformat(),
-        'pack': {'id': pack.id, 'path': pack.path, 'sha256': pack.sha256(),
+        'pack': {'id': pack.id, 'path': _portable(pack.path),
+                 'sha256': pack.sha256(),
                  'source': pack.source},
         'engine': engine_info,
         'filter': finding_filter.describe() or None,
@@ -30,3 +32,10 @@ def build(pack, engine_info, captures, finding_filter, argv, started,
             'machine': platform.machine(),
         },
     }
+
+
+def _portable(path):
+    """Relative to the working directory when inside it, so a committed
+    scorecard does not carry one machine's absolute paths."""
+    relative = os.path.relpath(path)
+    return path if relative.startswith('..') else relative

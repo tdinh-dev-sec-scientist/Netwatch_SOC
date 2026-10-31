@@ -1,0 +1,108 @@
+name: NetWatch Bench
+description: >-
+  Score a network detection engine against labelled traffic and fail the
+  build when coverage drops or noise exceeds its budget.
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  pack:
+    description: Pack directory (relative to the workspace).
+    required: true
+  engine:
+    description: netwatch, suricata, zeek, eve or findings.
+    required: true
+  engine-args:
+    description: >-
+      Extra arguments for `netwatch-bench run`, e.g.
+      "--suricata-bin suricata --rules rules/local.rules".
+    required: false
+    default: ""
+  data:
+    description: Dataset directory, for packs whose captures live outside it.
+    required: false
+    default: ""
+  baseline:
+    description: >-
+      A committed scorecard.json to gate against. Without it the action only
+      scores and reports.
+    required: false
+    default: ""
+  gate-args:
+    description: >-
+      Extra arguments for `netwatch-bench diff`, e.g.
+      "--max-noise-increase 0.05 --fail-on-new-noise".
+    required: false
+    default: ""
+  out:
+    description: Where to write the run.
+    required: false
+    default: netwatch-bench-run
+
+outputs:
+  scorecard:
+    description: Path of the run's scorecard.json.
+    value: ${{ steps.run.outputs.scorecard }}
+  sarif:
+    description: Path of the gate's SARIF file (empty without a baseline).
+    value: ${{ steps.gate.outputs.sarif }}
+  passed:
+    description: '"true" if the gate passed or no baseline was given.'
+    value: ${{ steps.gate.outputs.passed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install NetWatch Bench requirements
+      shell: bash
+      run: python3 -m pip install --quiet "PyYAML>=6,<7"
+
+    - name: Score the engine
+      id: run
+      shell: bash
+      env:
+        NWB_PACK: ${{ inputs.pack }}
+        NWB_ENGINE: ${{ inputs.engine }}
+        NWB_ENGINE_ARGS: ${{ inputs.engine-args }}
+        NWB_DATA: ${{ inputs.data }}
+        NWB_OUT: ${{ inputs.out }}
+      run: |
+        # Inputs are passed through the environment, never interpolated into
+        # the script, so a crafted input cannot inject shell.
+        data_args=()
+        [ -n "$NWB_DATA" ] && data_args=(--data "$NWB_DATA")
+        read -r -a extra <<< "$NWB_ENGINE_ARGS"
+        PYTHONPATH="$GITHUB_ACTION_PATH" python3 -m netwatch_bench run \
+          --pack "$NWB_PACK" --engine "$NWB_ENGINE" --out "$NWB_OUT" \
+          "${data_args[@]}" "${extra[@]}"
+        cat "$NWB_OUT/report.md" >> "$GITHUB_STEP_SUMMARY"
+        echo "scorecard=$NWB_OUT/scorecard.json" >> "$GITHUB_OUTPUT"
+
+    - name: Regression gate
+      id: gate
+      shell: bash
+      env:
+        NWB_BASELINE: ${{ inputs.baseline }}
+        NWB_GATE_ARGS: ${{ inputs.gate-args }}
+        NWB_OUT: ${{ inputs.out }}
+      run: |
+        if [ -z "$NWB_BASELINE" ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+          echo "sarif=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        read -r -a extra <<< "$NWB_GATE_ARGS"
+        status=0
+        PYTHONPATH="$GITHUB_ACTION_PATH" python3 -m netwatch_bench diff \
+          "$NWB_BASELINE" "$NWB_OUT" --out "$NWB_OUT/gate.md" \
+          --sarif "$NWB_OUT/gate.sarif" "${extra[@]}" || status=$?
+        cat "$NWB_OUT/gate.md" >> "$GITHUB_STEP_SUMMARY"
+        echo "sarif=$NWB_OUT/gate.sarif" >> "$GITHUB_OUTPUT"
+        if [ "$status" -eq 0 ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+          [ "$status" -eq 1 ] && echo "::error::NetWatch Bench regression gate failed; see the job summary"
+          exit "$status"
+        fi

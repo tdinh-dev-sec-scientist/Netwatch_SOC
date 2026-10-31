@@ -170,3 +170,17 @@ def test_netwatch_records_group_floods_by_victim():
     assert to_finding(record, 'c')['group_by'] == 'victim'
     record['threat_type'] = 'port_scan'
     assert to_finding(record, 'c')['group_by'] == 'pair'
+
+
+def test_capture_scan_ignores_a_truncated_final_record(tmp_path):
+    """A capture cut off mid-record must not contribute a garbage timestamp
+    (two CSE-CIC-IDS2018 captures end this way)."""
+    import struct
+    from netwatch_bench.captures import scan
+    path = tmp_path / 'cut.pcap'
+    with open(path, 'wb') as fh:
+        fh.write(struct.pack('<IHHiIII', 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1))
+        for sec in (100, 160):
+            fh.write(struct.pack('<IIII', sec, 0, 4, 4) + b'abcd')
+        fh.write(struct.pack('<IIII', 4000000000, 0, 64, 64) + b'ab')
+    assert scan(str(path)) == (2, 100.0, 160.0)
