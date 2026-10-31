@@ -83,6 +83,7 @@ class ZeekEngine(Engine):
                 raise EngineError('%s does not exist' % path)
         self.binary = zeek_bin
         self.image = zeek_docker
+        self.warnings = []
 
     def _command(self, args, workdir=None, mounts=()):
         if not self.image:
@@ -94,11 +95,19 @@ class ZeekEngine(Engine):
             cmd += ['-w', '/bench/work']
         return cmd + [self.image, 'zeek'] + list(args)
 
-    def _exec(self, cmd, cwd=None):
+    def _exec(self, cmd, cwd=None, capture=None):
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
         except OSError as exc:
             raise EngineError('could not run %s: %s' % (cmd[0], exc))
+        if proc.returncode != 0 and 'truncated dump file' in proc.stderr:
+            # Zeek stops at a capture's cut-off final record, after logging
+            # everything before it: the same place replay.py and Suricata
+            # stop. Keep the logs and say so in the manifest.
+            self.warnings.append('%s: capture ends in a truncated record; '
+                                 'Zeek analysed everything before it'
+                                 % (capture or 'capture'))
+            return proc.stdout
         if proc.returncode != 0:
             raise EngineError('zeek failed (exit %d):\n%s' % (
                 proc.returncode, (proc.stderr or proc.stdout)[-2000:]))
@@ -135,12 +144,12 @@ class ZeekEngine(Engine):
                 cmd = self._command(['-C', '-r', '/bench/capture.pcap', 'local',
                                      'LogAscii::use_json=T'] + scripts,
                                     workdir=True, mounts=mounts)
-                self._exec(cmd)
+                self._exec(cmd, capture=capture.id)
             else:
                 cmd = self._command(['-C', '-r', os.path.abspath(pcap), 'local',
                                      'LogAscii::use_json=T']
                                     + [os.path.abspath(p) for p in self.scripts])
-                self._exec(cmd, cwd=logdir)
+                self._exec(cmd, cwd=logdir, capture=capture.id)
             notices = os.path.join(logdir, 'notice.log')
             if os.path.exists(notices):
                 findings.extend(read_notices(notices, capture.id))

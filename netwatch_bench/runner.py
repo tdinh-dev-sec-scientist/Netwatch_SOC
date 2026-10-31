@@ -13,16 +13,20 @@ from .findings import normalize, read_jsonl, write_jsonl
 
 
 def _replay_one(job):
+    """(findings, warnings) for one capture. Warnings are things the engine
+    worked around and the manifest must say, e.g. a truncated capture."""
     engine, capture, paths = job
+    engine.warnings = []
     with tempfile.TemporaryDirectory(prefix='nwbench-') as workdir:
-        return [normalize(f, capture.id) for f in
-                engine.run(capture, paths, workdir)]
+        found = [normalize(f, capture.id) for f in
+                 engine.run(capture, paths, workdir)]
+    return found, list(engine.warnings)
 
 
 def collect(engine, pack, data_dir=None, jobs=1, progress=None):
-    """All normalized findings an engine raises on a pack."""
+    """(findings, warnings): everything an engine raises on a pack."""
     if not engine.replays:
-        return [normalize(f) for f in engine.findings(pack)]
+        return [normalize(f) for f in engine.findings(pack)], []
     work = []
     for capture in pack.captures:
         paths = capture.resolve(data_dir)
@@ -34,21 +38,23 @@ def collect(engine, pack, data_dir=None, jobs=1, progress=None):
         work.append((engine, capture, paths))
     # Largest first, so a long capture does not start last.
     work.sort(key=lambda j: -sum(os.path.getsize(p) for p in j[2]))
-    findings = []
+    findings, warnings = [], []
     if jobs > 1 and len(work) > 1:
         with ProcessPoolExecutor(max_workers=jobs) as pool:
-            for (_e, capture, _p), found in zip(work, pool.map(_replay_one,
-                                                               work)):
+            results = zip(work, pool.map(_replay_one, work))
+            for (_e, capture, _p), (found, warned) in results:
                 findings.extend(found)
+                warnings.extend(warned)
                 if progress:
                     progress('%s: %d alerts' % (capture.id, len(found)))
     else:
         for job in work:
-            found = _replay_one(job)
+            found, warned = _replay_one(job)
             findings.extend(found)
+            warnings.extend(warned)
             if progress:
                 progress('%s: %d alerts' % (job[1].id, len(found)))
-    return findings
+    return findings, warnings
 
 
 def describe_captures(pack, data_dir=None, hash_files=True):
@@ -85,9 +91,10 @@ def run(pack, engine, finding_filter, argv, out_dir=None, data_dir=None,
     started = dt.datetime.now(dt.timezone.utc)
     engine_info = engine.describe()
     facts = describe_captures(pack, data_dir, hash_files)
-    findings = collect(engine, pack, data_dir, jobs, progress)
+    findings, warnings = collect(engine, pack, data_dir, jobs, progress)
     card = scorecard(pack, findings, facts, engine_info, finding_filter, argv,
                      started, hash_files)
+    card['manifest']['warnings'] = warnings
     if out_dir:
         write_outputs(out_dir, card, findings)
     return card
@@ -103,6 +110,7 @@ def rescore(pack, run_dir, finding_filter, argv, out_dir, data_dir=None,
     facts = describe_captures(pack, data_dir, hash_files)
     card = scorecard(pack, findings, facts, previous['manifest']['engine'],
                      finding_filter, argv, started, hash_files)
+    card['manifest']['warnings'] = previous['manifest'].get('warnings', [])
     write_outputs(out_dir, card, findings if out_dir != run_dir else None)
     return card
 

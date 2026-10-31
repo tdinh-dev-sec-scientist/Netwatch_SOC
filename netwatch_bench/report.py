@@ -119,6 +119,8 @@ def markdown(card):
                m['environment']['platform']),
             '| Command | `%s` |' % ' '.join(m['command']),
             '| Finished | %s |' % m['finished_utc']]
+    for warning in m.get('warnings') or []:
+        out.append('| Warning | %s |' % warning)
     if card.get('limitations'):
         out += ['', '## Limitations of this pack', '']
         out += ['- %s' % item for item in card['limitations']]
