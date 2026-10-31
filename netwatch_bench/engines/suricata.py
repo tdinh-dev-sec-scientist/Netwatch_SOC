@@ -60,15 +60,25 @@ def read_eve(path, capture_id):
                     yield finding
 
 
-def alerts_only_config(text):
+def alerts_only_config(text, validate_checksums=False):
     """A suricata.yaml whose only output is EVE alerts.
 
     The stock config also logs every flow, HTTP transaction and DNS query,
     which over a long capture is gigabytes nobody reads.
+
+    Checksum validation is turned off unless asked for. Datasets are mostly
+    captured on hosts with NIC checksum offload, so outgoing packets carry
+    checksums the NIC would have filled in; validating them turns every one
+    into an "invalid checksum" alert (2.1 million on one CSE-CIC-IDS2018
+    capture). `-k none` alone does not stop it in Suricata 7.0.17, whose
+    stock config sets pcap-file.checksum-checks: auto.
     """
     import yaml
     body = text.split('\n', 1)[1] if text.startswith('%YAML') else text
     conf = yaml.safe_load(body)
+    if not validate_checksums:
+        conf.setdefault('stream', {})['checksum-validation'] = False
+        conf.setdefault('pcap-file', {})['checksum-checks'] = 'no'
     for output in conf.get('outputs', []):
         (name, settings), = output.items()
         if not isinstance(settings, dict):
@@ -87,7 +97,8 @@ class SuricataEngine(Engine):
     name = 'suricata'
 
     def __init__(self, suricata_bin=None, suricata_docker=None, rules=None,
-                 suricata_config=None, **_ignored):
+                 suricata_config=None, suricata_validate_checksums=False,
+                 **_ignored):
         if bool(suricata_bin) == bool(suricata_docker):
             raise EngineError('give exactly one of --suricata-bin or '
                               '--suricata-docker')
@@ -104,6 +115,7 @@ class SuricataEngine(Engine):
         self.image = suricata_docker
         self.rules = rules
         self.config = suricata_config
+        self.validate_checksums = bool(suricata_validate_checksums)
         self._config_text = None
 
     # ── command construction ────────────────────────────────────────────────
@@ -162,12 +174,14 @@ class SuricataEngine(Engine):
             'rules_sha256': self._rules_sha256(),
             'config_sha256': __import__('hashlib').sha256(
                 self._base_config().encode()).hexdigest(),
+            'checksum_validation': self.validate_checksums,
         }
 
     def run(self, capture, paths, workdir):
         config_path = os.path.join(workdir, 'suricata.yaml')
         with open(config_path, 'w', encoding='utf-8') as fh:
-            fh.write(alerts_only_config(self._base_config()))
+            fh.write(alerts_only_config(self._base_config(),
+                                        self.validate_checksums))
         findings = []
         for index, pcap in enumerate(paths):
             logdir = os.path.join(workdir, 'log-%d' % index)

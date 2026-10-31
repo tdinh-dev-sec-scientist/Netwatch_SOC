@@ -80,6 +80,9 @@ def parser():
     e.add_argument('--rules', help='suricata: rules file (default with '
                    'Docker: the image\'s bundled ET Open)')
     e.add_argument('--suricata-config', help='suricata: suricata.yaml')
+    e.add_argument('--suricata-validate-checksums', action='store_true',
+                   help='suricata: keep checksum validation on (off by '
+                   'default: offloaded captures make every packet "invalid")')
     e.add_argument('--zeek-bin', help='zeek: local binary')
     e.add_argument('--zeek-docker', metavar='IMAGE',
                    help='zeek: run in this Docker image')

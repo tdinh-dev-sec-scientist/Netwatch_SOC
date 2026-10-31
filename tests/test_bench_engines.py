@@ -74,6 +74,12 @@ def test_alerts_only_config_disables_every_other_output():
     assert outputs['eve-log']['enabled'] is True
     assert outputs['eve-log']['types'] == [
         {'alert': {'tagged-packets': False, 'metadata': True}}]
+    conf = yaml.safe_load(text.split('\n', 2)[2])
+    assert conf['stream']['checksum-validation'] is False
+    assert conf['pcap-file']['checksum-checks'] == 'no'
+    kept = yaml.safe_load(alerts_only_config(STOCK_CONFIG, True)
+                          .split('\n', 2)[2])
+    assert 'pcap-file' not in kept
 
 
 @pytest.fixture
