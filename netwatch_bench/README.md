@@ -15,7 +15,7 @@ python -m netwatch_bench run --pack packs/cicids2018-demo --engine netwatch
 netwatch on CSE-CIC-IDS2018 demo (45 minutes, 7 attacks)
 
   Attacks detected  7 / 7  (100%, 95% CI 65–100%)
-  Right technique   7 / 7 assessable  (95% CI 65–100%)
+  Right technique   7 / 7  (95% CI 65–100%; missed attacks count as wrong)
   False alerts      1.34 per host-hour  (95% CI 0.03–7.44; 1 in 0.75 host-hours)
   False incidents   32.0 per host-day  (1 of 8 incidents)
   Alert precision   91%  (10 of 11 alerts)
@@ -123,6 +123,25 @@ through the same tests (`netwatch_bench.stats`, using the published counts). It 
 first thing the tool corrected: 6/6 against 3/6 on six attacks is not, by
 itself, evidence that one engine detects more. (The 26× gap in false alerts
 per host-hour is significant.)
+
+### What CI found when it ran real Suricata on the demo pack
+
+Every push runs Suricata 7.0.3 with ET Open on the same demo pack and posts
+both scorecards in the job summary. The first run:
+
+| On the demo pack | NetWatch | Suricata + ET Open | Suricata, engine events removed |
+|---|---|---|---|
+| Attacks detected | 7 / 7 | 5 / 7 | 2 / 7 |
+| False alerts per host-hour | 1.3 | 3,895 | 712 |
+
+**Do not read that as "NetWatch beats Suricata."** The report explains the
+numbers: most of Suricata's "detections" and noise are its own checksum and
+stream-state events. The demo capture truncates every packet to 256 bytes
+and stitches slices from different captures together, which breaks payload
+signatures and TCP reassembly. The pack is a smoke test for NetWatch and a
+bad benchmark for a signature engine, so it now says so in every report.
+This is the tool's second catch: it found a flaw in the test data before
+anyone quoted the result. A fair comparison runs on the full packs.
 
 ## Packs
 

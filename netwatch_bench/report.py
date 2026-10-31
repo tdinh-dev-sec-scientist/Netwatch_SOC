@@ -47,10 +47,11 @@ def headline(card):
     rows = [
         ('Attacks detected', '%d / %d  (%s, 95%% CI %s)'
          % (d['k'], d['n'], pct(d['rate']), ci_pct(d['ci95']))),
-        ('Right technique', '%d / %d assessable  (95%% CI %s)%s'
+        ('Right technique', '%d / %d  (95%% CI %s; missed attacks count as '
+         'wrong%s)'
          % (c['k'], c['n'], ci_pct(c['ci95']),
-            '; %d not assessable' % c['not_assessable']
-            if c['not_assessable'] else '')),
+            '; %d detected without any technique, not assessable'
+            % c['not_assessable'] if c['not_assessable'] else '')),
         ('False alerts', '%s per host-hour  (95%% CI %s; %d in %s host-hours)'
          % (num(n['false_alerts_per_host_hour'], 2),
             ci_num(n['false_alerts_per_host_hour_ci95'], 2),

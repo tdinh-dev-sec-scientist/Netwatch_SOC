@@ -216,6 +216,12 @@ def demo_pack():
             'attack, on one 45-minute timeline.',
             'The stitched timeline counts as one host, so per-host-hour '
             'rates on this pack are not comparable with the full packs.',
+            'Not a fair test of signature engines: packets are truncated to '
+            '256 bytes and slices from different captures are stitched '
+            'together, so payload signatures cannot match and stream '
+            'reassembly breaks. Suricata on this pack fires mostly engine '
+            'anomaly events (checksums, stream state). Compare engines on '
+            'the full packs.',
         ] + COMMON_LIMITATIONS[:1],
     }
 
