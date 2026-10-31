@@ -33,6 +33,8 @@ NOTICE_TECHNIQUES = {
     'TeamCymruMalwareHashRegistry::Match': ['T1105'],
 }
 HEALTH_NOTICE_PREFIXES = ('CaptureLoss::', 'PacketFilter::')
+# How libpcap reports a capture whose final record is cut off or garbage.
+TRUNCATION_MESSAGES = ('truncated dump file', 'bigger than snaplen')
 
 
 def notice_to_finding(notice, capture_id):
@@ -100,7 +102,8 @@ class ZeekEngine(Engine):
             proc = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
         except OSError as exc:
             raise EngineError('could not run %s: %s' % (cmd[0], exc))
-        if proc.returncode != 0 and 'truncated dump file' in proc.stderr:
+        if proc.returncode != 0 and any(m in proc.stderr
+                                        for m in TRUNCATION_MESSAGES):
             # Zeek stops at a capture's cut-off final record, after logging
             # everything before it: the same place replay.py and Suricata
             # stop. Keep the logs and say so in the manifest.

@@ -256,7 +256,10 @@ def test_zeek_engine_runs_the_binary(tmp_path):
         ENGINES['zeek']()
 
 
-def test_zeek_stopping_at_a_truncated_record_is_a_warning(tmp_path):
+@pytest.mark.parametrize('message', [
+    'truncated dump file; tried to read 371 captured bytes, only got 291',
+    'invalid packet capture length 4279763712, bigger than snaplen of 65535'])
+def test_zeek_stopping_at_a_truncated_record_is_a_warning(tmp_path, message):
     script = tmp_path / 'zeek'
     script.write_text(textwrap.dedent('''\
         #!%s
@@ -266,9 +269,9 @@ def test_zeek_stopping_at_a_truncated_record_is_a_warning(tmp_path):
         with open('notice.log', 'w') as fh:
             fh.write(json.dumps({'ts': 1.0, 'note': 'SSH::Password_Guessing',
                                  'src': '13.58.98.64'}) + '\\n')
-        sys.stderr.write('fatal error: truncated dump file; tried to read\\n')
+        sys.stderr.write('fatal error: %s\\n')
         sys.exit(1)
-        ''') % sys.executable)
+        ''') % (sys.executable, message))
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     out = tmp_path / 'run'
     assert main(['run', '--pack', DEMO, '--engine', 'zeek', '--zeek-bin',
