@@ -42,6 +42,9 @@ TIMELINE_MIN = 45
 #  what it shows). The benign backdrop runs the whole timeline.
 BACKDROP = ('Friday-02-03-2018', 'pcap/capEC2AMAZ-O4EL3NG-172.31.69.13',
             '2018-03-02T13:30:00')
+# The XSS slice starts five minutes before the attack's onset (17:50 UTC)
+# and holds no attacker packets; packs/cicids2018-demo leaves it unlabelled.
+# Moving it to 17:55 needs the dataset to rebuild the demo capture.
 SLICES = [
     ('Thursday-22-02-2018', 'pcap/UCAP172.31.69.28',
      '2018-02-22T17:45:00', 300, 2, 'XSS against DVWA'),

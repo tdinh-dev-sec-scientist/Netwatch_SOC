@@ -13,5 +13,9 @@ gunicorn>=22.0,<24.0
 # time; the `pool` extra provides the reader connection pool.
 psycopg[binary,pool]>=3.1,<4.0
 
+# NetWatch Bench reads scenario packs written in YAML, and the Suricata
+# adapter rewrites suricata.yaml. Nothing in the capture path needs it.
+PyYAML>=6.0,<7.0
+
 # Development / testing
 pytest>=8.0

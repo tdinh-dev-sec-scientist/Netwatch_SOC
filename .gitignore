@@ -17,3 +17,6 @@ results.json
 # Downloaded captures for eval/ (multi-GB; fetch.py re-creates them)
 data/
 *.pcap
+
+# netwatch-bench output directories
+runs/

@@ -29,6 +29,23 @@ top talkers, decoded packets, the 18 detectors and the pipeline.
 
 ---
 
+## New: NetWatch Bench — unit tests for network detections
+
+The harness that produced the results below is now a tool of its own. It
+scores **any** IDS (NetWatch, Suricata, or alerts exported from anything
+else) against labelled traffic, with confidence intervals, exact
+significance tests and a provenance manifest:
+
+```bash
+python -m netwatch_bench run --pack packs/cicids2018-demo --engine netwatch
+```
+
+Its first finding was about this project: 6/6 against Suricata's 3/6 is
+**not** statistically significant on its own (p ≈ 0.18); the 26× gap in
+false alerts is. **[NetWatch Bench →](netwatch_bench/README.md)**
+
+---
+
 ## Results on real traffic
 
 Scored against the dataset's ground truth. *Held-out* traffic was only
@@ -78,7 +95,7 @@ Full write-up, every false positive traced to a cause:
 | REST endpoints | Flask, parameterised queries, read-only demo mode | **25** |
 | Throughput | parse + detect + batched PostgreSQL writes, one thread | **5,873** packets/s |
 | Query latency | p95 across the 22 queries behind the API | **11.9** ms |
-| Tests | PostgreSQL and SQLite in CI, plus a Docker smoke test | **392** |
+| Tests | PostgreSQL and SQLite in CI, plus a Docker smoke test | **481** |
 
 ## How it works
 
@@ -175,7 +192,9 @@ DB_Manager.py         all SQL; migrations/ holds the schema
 App.py                Flask API and dashboard
 replay.py             pcap/pcapng replay through the real pipeline
 eval/cicids2018/      dataset fetch, ground truth, scoring, Suricata runner
-tests/                392 tests, run against real PostgreSQL
+netwatch_bench/       engine-agnostic detection scoring (NetWatch Bench)
+packs/                labelled traffic packs for NetWatch Bench
+tests/                481 tests, run against real PostgreSQL
 ```
 
 ## What I learned
@@ -204,6 +223,7 @@ The full list is in [docs/limitations.md](docs/limitations.md).
 | | |
 |---|---|
 | [Real-traffic validation](docs/real-traffic-validation.md) | Method, every round, every false positive, the Suricata comparison |
+| [NetWatch Bench](netwatch_bench/README.md) | Scoring any IDS against labelled traffic: [metric contract](docs/bench/metric-contract.md), [pack format](docs/bench/pack-format.md) |
 | [Design](docs/design.md) | Pipeline, detectors, protocol decoders, ATT&CK mapping, dashboard |
 | [Database](docs/database.md) | Schema, type choices, indexes, migrations |
 | [REST API](docs/api.md) | All 25 endpoints |

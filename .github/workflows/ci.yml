@@ -104,6 +104,73 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  bench:
+    name: NetWatch Bench (NetWatch and Suricata on the demo pack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate every pack
+        run: for pack in packs/*/; do python -m netwatch_bench validate "$pack"; done
+
+      - name: Score NetWatch on the demo pack
+        run: >-
+          python -m netwatch_bench run --pack packs/cicids2018-demo
+          --engine netwatch --out runs/netwatch
+
+      # Suricata and ET Open come from the network (apt and the rules
+      # mirror), so a mirror outage must not block the deployment gate.
+      - name: Score Suricata + ET Open on the same pack
+        id: suricata
+        continue-on-error: true
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q suricata suricata-update
+          sudo suricata-update --no-test -q
+          sudo chmod -R a+rX /var/lib/suricata /etc/suricata
+          python -m netwatch_bench run --pack packs/cicids2018-demo \
+            --engine suricata --suricata-bin suricata \
+            --rules /var/lib/suricata/rules/suricata.rules \
+            --suricata-config /etc/suricata/suricata.yaml --out runs/suricata
+          python -m netwatch_bench score --pack packs/cicids2018-demo \
+            --from runs/suricata --exclude-name-prefix "SURICATA " \
+            --out runs/suricata-et-rules
+          python -m netwatch_bench compare runs/netwatch runs/suricata \
+            --out runs/compare.md
+
+      - name: Publish the scorecards
+        if: always()
+        run: |
+          for f in runs/netwatch/report.md runs/suricata/report.md \
+                   runs/suricata-et-rules/report.md runs/compare.md; do
+            [ -f "$f" ] && { cat "$f"; echo; } >> "$GITHUB_STEP_SUMMARY"
+          done
+          for f in runs/*/report.md runs/compare.md; do
+            [ -f "$f" ] && { echo "=== $f"; cat "$f"; }
+          done
+          true
+
+      - name: Upload the runs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: netwatch-bench-demo
+          path: runs/
+          if-no-files-found: ignore
+          retention-days: 30
+
   container:
     name: Image and deployment smoke tests
     runs-on: ubuntu-latest
