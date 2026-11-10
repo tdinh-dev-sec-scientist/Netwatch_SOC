@@ -12,6 +12,7 @@ from PacketSimulator import TrafficGenerator
 from ThreatDetector import ThreatDetector
 
 from conftest import BASE_TS, SEED, run_scenario
+from detectors.base import Finding
 
 ALL_SCENARIOS = sorted(TrafficGenerator.SCENARIOS)
 
@@ -62,8 +63,36 @@ def test_findings_are_well_formed(engine, analyzer, gen, scenario):
         assert finding.detector and finding.threat_type
         assert finding.ts >= BASE_TS
         assert finding.evidence, 'no supporting evidence recorded'
+        assert finding.evidence_level in {
+            'OBSERVED_SIGNAL', 'SUSPECTED_ACTIVITY', 'CONFIRMED_TECHNIQUE'}
         for tid in finding.techniques:
             assert mitre.get(tid) is not None
+
+
+def test_finding_defaults_to_observed_signal():
+    finding = Finding('sample', 'LOW', 0.5, 'sample signal', ('T1046',))
+    assert finding.evidence_level == 'OBSERVED_SIGNAL'
+
+
+def test_brute_force_failure_burst_is_suspected_t1110(engine, analyzer, gen):
+    findings = [f for f in run_scenario(engine, analyzer, gen, 'brute_force')
+                if f.threat_type == 'brute_force']
+    assert findings
+    assert all(f.techniques == ('T1110',) for f in findings)
+    assert all(f.evidence_level == 'SUSPECTED_ACTIVITY' for f in findings)
+    assert all(f.evidence['evidence_level'] == f.evidence_level
+               for f in findings)
+
+
+def test_credential_spraying_is_suspected_t1110_not_t1078(
+        engine, analyzer, gen):
+    findings = [f for f in run_scenario(
+        engine, analyzer, gen, 'credential_stuffing')
+        if f.threat_type == 'credential_attack']
+    assert findings
+    assert all('T1110' in f.techniques for f in findings)
+    assert all('T1078' not in f.techniques for f in findings)
+    assert all(f.evidence_level == 'SUSPECTED_ACTIVITY' for f in findings)
 
 
 def test_findings_carry_the_incident_key_the_detector_dedups_on(
@@ -151,6 +180,10 @@ def test_brute_force_success_escalates_to_critical(analyzer, cfg):
     criticals = [f for f in findings if f.severity == 'CRITICAL']
     assert criticals
     assert any('T1078' in f.techniques for f in criticals)
+    assert all(f.techniques == ('T1110', 'T1078') for f in criticals)
+    assert all(f.evidence_level == 'CONFIRMED_TECHNIQUE' for f in criticals)
+    assert all('T1078' not in f.techniques for f in findings
+               if f.evidence.get('outcome') != 'success')
 
 
 def test_beacon_requires_low_jitter(analyzer, cfg):
@@ -211,6 +244,17 @@ def test_syn_flood_ignores_completed_handshakes(engine, analyzer, cfg):
     assert not fired
 
 
+def test_data_exfil_is_an_observed_signal_candidate_t1048_003(
+        engine, analyzer, gen):
+    findings = [f for f in run_scenario(engine, analyzer, gen, 'data_exfil')
+                if f.threat_type == 'data_exfil']
+    assert findings
+    assert all(f.techniques == ('T1048.003',) for f in findings)
+    assert all(f.evidence_level == 'OBSERVED_SIGNAL' for f in findings)
+    assert all(f.evidence['evidence_level'] == f.evidence_level
+               for f in findings)
+
+
 def test_data_exfil_ignores_inbound_downloads(engine, analyzer):
     """Same byte volume, but external -> internal is a download."""
     ts = BASE_TS
@@ -238,6 +282,55 @@ def test_lateral_movement_ignores_single_file_server(engine, analyzer):
     assert not fired
 
 
+@pytest.mark.parametrize('protocol,dport', [
+    ('SMB', 445), ('RDP', 3389), ('DCE/RPC', 135),
+])
+@pytest.mark.parametrize('flags', ['PSH|ACK', 'SYN|ACK'])
+def test_lateral_movement_ignores_non_initiating_admin_traffic(
+        engine, cfg, protocol, dport, flags):
+    detector = engine.get('lateral_movement')
+    src = '10.0.1.15'
+    findings = []
+    for index in range(cfg['lateral_movement']['distinct_hosts'] + 2):
+        packet = {
+            'ts': BASE_TS + index,
+            'src_ip': src,
+            'dst_ip': '10.0.2.%d' % (50 + index),
+            'src_port': 40000 + index,
+            'dst_port': dport,
+            'protocol': protocol,
+            'flags': flags,
+        }
+        findings.extend(detector.inspect(packet))
+    assert not findings
+    assert detector.packets_seen == 0
+    assert detector._targets.size(src, BASE_TS + 10) == 0
+
+
+@pytest.mark.parametrize('protocol,dport', [
+    ('SMB', 445), ('RDP', 3389), ('DCE/RPC', 135),
+])
+def test_lateral_movement_detects_syn_fanout_for_l7_protocols(
+        engine, cfg, protocol, dport):
+    detector = engine.get('lateral_movement')
+    src = '10.0.1.15'
+    findings = []
+    for index in range(cfg['lateral_movement']['distinct_hosts']):
+        packet = {
+            'ts': BASE_TS + index,
+            'src_ip': src,
+            'dst_ip': '10.0.2.%d' % (50 + index),
+            'src_port': 40000 + index,
+            'dst_port': dport,
+            'protocol': protocol,
+            'flags': 'SYN|ECE|CWR',
+        }
+        findings.extend(detector.inspect(packet))
+    assert len(findings) == 1
+    assert findings[0].techniques == ('T1021',)
+    assert findings[0].evidence_level == 'SUSPECTED_ACTIVITY'
+
+
 def test_arp_spoof_detects_binding_conflict(engine, analyzer, gen):
     findings = [f for f in run_scenario(engine, analyzer, gen, 'arp_spoof')
                 if f.threat_type == 'arp_spoof']
@@ -253,6 +346,11 @@ def test_http_anomaly_classifies_attack_categories(engine, analyzer, gen):
     for finding in findings:
         categories.update(finding.evidence.get('categories', []))
     assert {'SQLi', 'Traversal'} <= categories
+    injected = [f for f in findings if f.evidence.get('activity') ==
+                'attempted_exploitation']
+    assert injected
+    assert all(f.techniques == ('T1190',) for f in injected)
+    assert all(f.evidence_level == 'SUSPECTED_ACTIVITY' for f in injected)
 
 
 def test_http_anomaly_survives_url_encoding(engine, analyzer):
@@ -286,6 +384,8 @@ def test_cleartext_credentials_never_logged(engine, analyzer):
                  if f.evidence.get('pattern') == 'cleartext_credentials']
     assert cleartext
     finding = cleartext[0]
+    assert finding.techniques == ('T1040',)
+    assert finding.evidence_level == 'OBSERVED_SIGNAL'
     # The username is operationally useful; the password must never appear.
     assert finding.evidence['username'] == 'alice'
     assert finding.evidence['password_length'] == len('hunter2')

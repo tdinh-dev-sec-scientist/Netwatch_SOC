@@ -3,7 +3,7 @@
 [![CI](https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC/actions/workflows/ci.yml/badge.svg)](https://github.com/tdinh-dev-sec-scientist/Netwatch_SOC/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![MITRE ATT&CK](https://img.shields.io/badge/MITRE%20ATT%26CK-16%20techniques-C8102E)
+![MITRE ATT&CK](https://img.shields.io/badge/MITRE%20ATT%26CK-17%20techniques-C8102E)
 
 A student project in detection engineering. NetWatch reads raw network
 packets, decodes them with deep packet inspection over 21 protocols, runs 18
@@ -72,7 +72,7 @@ Full write-up, every false positive traced to a cause:
 |---|---|---|
 | Protocols inspected | L2-L7, identified by byte signature rather than port | **21** |
 | Threat types | one detector each, all proven by a synthetic attack scenario | **18** |
-| ATT&CK techniques | across 9 tactics, each with a written rationale | **16** |
+| ATT&CK techniques | across 9 tactics, each with a written rationale | **17** |
 | Tables | PostgreSQL, all written by the pipeline | **8** |
 | Indexes | usage checked with `EXPLAIN` in the test suite | **25** |
 | REST endpoints | Flask, parameterised queries, read-only demo mode | **25** |
@@ -110,16 +110,17 @@ flowchart LR
 | Detector | Signal | ATT&CK |
 |---|---|---|
 | `port_scan`, `network_recon` | Many ports on one host; many hosts in one /24; ICMP sweeps | T1046, T1595 |
-| `brute_force`, `credential_attack` | Login failures (FTP, SMTP, POP3, IMAP, HTTP 401); SSH and login-form bursts; many usernames from one source | T1110, T1078 |
+| `brute_force` | Authentication failures and login-form/session bursts; T1078 is reserved for an observed successful login after a failure burst | T1110; T1078 only on success |
+| `credential_attack` | Credential stuffing/spraying patterns; cleartext credential exposure | T1110; T1040 for observed cleartext exposure |
 | `c2_beacon` | Metronomic callbacks (low timing jitter); an internal host polling one external URL | T1071.001 |
 | `dns_tunnel`, `suspicious_dns` | Oversized high-entropy DNS labels; NXDOMAIN storms; DGA-like names | T1071.004, T1048 |
 | `icmp_tunnel`, `protocol_tunnel` | Data hidden in ping payloads; a protocol on the wrong port | T1572, T1048 |
 | `tls_anomaly` | Obsolete TLS, missing SNI, tiny cipher lists from internal clients | T1573 |
-| `data_exfil` | Large outbound volume to one external host | T1041 |
+| `data_exfil` | Large outbound volume to one external host (observed candidate egress; exfiltration is not confirmed) | T1048.003 candidate |
 | `lateral_movement` | One internal host fanning out over SMB, RDP or WinRM | T1021 |
 | `syn_flood`, `udp_flood`, `amplification` | Half-open SYNs; UDP packet rate; reflected response ratios | T1498, T1498.002 |
 | `http_flood` | HTTP request floods; Slowloris-style unfinished requests | T1499.002 |
-| `http_anomaly` | SQL injection, XSS, path traversal, Log4Shell, scanner user agents | T1190 |
+| `http_anomaly` | SQLi/XSS/traversal/command/JNDI signatures are attempted exploitation under T1190; a match does not prove success | T1190 |
 | `arp_spoof` | IP-to-MAC binding conflicts; gratuitous ARP floods | T1557.002 |
 
 Every threshold lives in `config.py` and can be overridden with a JSON file —

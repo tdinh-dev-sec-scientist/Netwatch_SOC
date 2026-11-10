@@ -1,6 +1,7 @@
 """Lateral movement detector."""
 
-from .base import Detector, TimedSet, is_internal, is_syn
+from .base import (SUSPECTED_ACTIVITY, Detector, TimedSet, is_internal,
+                   is_syn)
 
 SERVICE_NAMES = {
     445: 'SMB', 139: 'NetBIOS', 135: 'MS-RPC', 3389: 'RDP',
@@ -34,10 +35,11 @@ class LateralMovementDetector(Detector):
         src, dst = pkt.get('src_ip'), pkt.get('dst_ip')
         if not is_internal(src) or not is_internal(dst):
             return []
-        # Count session initiations, not every packet in an established session.
-        if pkt.get('protocol') == 'TCP' and not is_syn(pkt.get('flags', '')):
-            if pkt.get('protocol') not in ('SMB', 'RDP'):
-                return []
+        # The parser may label a TCP packet by its decoded L7 protocol. Count
+        # only connection-opening SYNs for every such label, never established
+        # SMB/RDP/DCE-RPC data packets or SYN-ACK responses.
+        if not is_syn(pkt.get('flags', '')):
+            return []
         self.packets_seen += 1
         ts = pkt['ts']
 
@@ -59,6 +61,7 @@ class LateralMovementDetector(Detector):
             'internal hosts in %ds via %s'
             % (src, hosts, self.cfg['window_s'], names),
             ('T1021',),
+            evidence_level=SUSPECTED_ACTIVITY,
             distinct_targets=hosts,
             targets=self._targets.members(src)[:16],
             services=services, service_names=names,

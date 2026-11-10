@@ -1,6 +1,6 @@
 """Data exfiltration detector."""
 
-from .base import Detector, TimedSum, is_internal
+from .base import OBSERVED_SIGNAL, Detector, TimedSum, is_internal
 
 
 class DataExfiltrationDetector(Detector):
@@ -8,14 +8,16 @@ class DataExfiltrationDetector(Detector):
 
     Direction matters: a large inbound download is a user fetching data, while
     a large *upload* from an internal host to a single external destination is
-    the exfiltration shape. Only bytes leaving the perimeter are counted.
+    an egress signal. Volume alone does not establish data theft, a non-C2
+    protocol, or successful exfiltration.
     """
 
     name = 'data_exfil'
     threat_type = 'data_exfil'
-    description = ('Outbound bytes from an internal source to a single '
-                   'external destination exceeding a threshold in a window')
-    techniques = ('T1041',)
+    description = ('Observed outbound bytes from an internal source to a '
+                   'single external destination exceeding a window threshold; '
+                   'candidate egress, not confirmed exfiltration')
+    techniques = ('T1048.003',)
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -51,11 +53,14 @@ class DataExfiltrationDetector(Detector):
             else 'HIGH'
         return [self._finding(
             pkt, severity, min(0.95, 0.65 + mb / 100.0),
-            'Outbound transfer of %.1f MB from internal host %s to external '
-            '%s over %d packets in %ds via %s'
+            'Observed outbound egress of %.1f MB from internal host %s to '
+            'external %s over %d packets in %ds via %s; this volume alone '
+            'does not confirm exfiltration'
             % (mb, src, dst, packets, self.cfg['window_s'],
                pkt.get('protocol')),
-            ('T1041',),
+            ('T1048.003',),
+            evidence_level=OBSERVED_SIGNAL,
+            activity='candidate_egress',
             bytes_out=total, megabytes=round(mb, 2), packet_count=packets,
             destination=dst, window_s=self.cfg['window_s'],
             transport=pkt.get('protocol'),
