@@ -29,13 +29,16 @@ TECHNIQUES = {
     ),
     'T1110': Technique(
         'T1110', 'Brute Force', 'Credential Access', _B + 'T1110/',
-        'Repeated authentication failures observed in-protocol (SSH, FTP 530, '
-        'SMTP 535, POP3/IMAP -ERR/NO, HTTP 401) against one service.',
+        'Repeated authentication failures or credential-spraying attempts '
+        'against a service are consistent with brute-force activity. A failed '
+        'attempt does not establish that valid credentials were used.',
     ),
     'T1078': Technique(
         'T1078', 'Valid Accounts', 'Defense Evasion', _B + 'T1078/',
-        'Many distinct usernames tried from one source, or a success following '
-        'a failure burst, indicates credential stuffing with valid accounts.',
+        'Only a protocol-level successful login observed after a failure burst '
+        'is mapped to Valid Accounts here. Failed attempts, username breadth, '
+        'and cleartext credential exposure alone do not establish successful '
+        'use of a valid account.',
     ),
     'T1071.004': Technique(
         'T1071.004', 'Application Layer Protocol: DNS', 'Command and Control',
@@ -67,16 +70,25 @@ TECHNIQUES = {
         'Obsolete TLS versions, absent SNI or self-signed certificates hide '
         'channel content from inspection.',
     ),
-    'T1041': Technique(
-        'T1041', 'Exfiltration Over C2 Channel', 'Exfiltration', _B + 'T1041/',
-        'Sustained high-volume outbound transfer from an internal host to a '
-        'single external destination on its established channel.',
+    'T1040': Technique(
+        'T1040', 'Network Sniffing', 'Credential Access', _B + 'T1040/',
+        'A cleartext authentication secret visible in captured traffic is an '
+        'observed exposure that a network sniffer could collect; this signal '
+        'does not prove an adversary performed sniffing.',
     ),
     'T1048': Technique(
         'T1048', 'Exfiltration Over Alternative Protocol', 'Exfiltration',
         _B + 'T1048/',
         'Data leaving over a protocol not used for normal C2 — DNS label '
         'encoding or ICMP payload padding.',
+    ),
+    'T1048.003': Technique(
+        'T1048.003', 'Exfiltration Over Unencrypted Non-C2 Protocol',
+        'Exfiltration', _B + 'T1048/003/',
+        'High outbound volume is emitted only as an observed egress signal and '
+        'is a candidate for this technique when separate evidence shows '
+        'unencrypted non-C2 transfer and stolen data; volume alone does not '
+        'prove exfiltration or this technique.',
     ),
     'T1021': Technique(
         'T1021', 'Remote Services', 'Lateral Movement', _B + 'T1021/',
@@ -103,8 +115,10 @@ TECHNIQUES = {
     'T1190': Technique(
         'T1190', 'Exploit Public-Facing Application', 'Initial Access',
         _B + 'T1190/',
-        'SQL injection, traversal or command-injection patterns in HTTP '
-        'request lines and headers targeting an exposed service.',
+        'SQL injection, traversal, XSS, command-injection or JNDI signatures '
+        'in HTTP requests represent attempted exploitation. A matching '
+        'request does not show that the application was vulnerable or that '
+        'the exploit succeeded.',
     ),
 }
 

@@ -74,22 +74,37 @@ techniques it can emit, and is tuned by one section of `config.py`.
 |---|---|---|
 | `port_scan` | Distinct destination ports on one host in a window | T1046 |
 | `network_recon` | Many hosts within one /24 on a narrow port set; ICMP sweep | T1595 |
-| `brute_force` | In-protocol auth failures (FTP 530, SMTP 535, POP3 `-ERR`, IMAP `NO`, HTTP 401); SSH session bursts; login-form POST bursts | T1110, T1078 |
-| `credential_attack` | Many usernames from one source; one username across many hosts; cleartext credentials | T1110, T1078 |
+| `brute_force` | In-protocol auth failures (FTP 530, SMTP 535, POP3 `-ERR`, IMAP `NO`, HTTP 401); SSH session bursts; login-form POST bursts. T1078 is emitted only after an observed successful login following a failure burst. | T1110; conditional T1078 |
+| `credential_attack` | Many usernames from one source; one username across many hosts; cleartext credentials | T1110; T1040 for observed cleartext exposure |
 | `c2_beacon` | Coefficient of variation of inter-arrival times on one channel; high-rate polling of one external URL path | T1071.001 |
 | `dns_tunnel` | Oversized label **and** high entropy / TXT-NULL-ANY / volume | T1071.004, T1048 |
 | `suspicious_dns` | NXDOMAIN ratio; repeated high-entropy SLD lookups | T1071.004 |
 | `icmp_tunnel` | Oversized, high-entropy echo payloads, repeated | T1572, T1048 |
 | `protocol_tunnel` | L7 identified by signature on a mismatched port | T1572 |
 | `tls_anomaly` | Obsolete version, absent SNI, tiny cipher list (scored together) | T1573 |
-| `data_exfil` | Outbound internal→external byte volume in a window | T1041 |
+| `data_exfil` | Observed outbound internal→external byte volume in a window; this is candidate egress, not confirmed data theft | T1048.003 candidate |
 | `lateral_movement` | Internal→internal admin-service fan-out | T1021 |
 | `syn_flood` | SYN rate **and** SYN:completed-handshake ratio | T1498 |
 | `udp_flood` | UDP packet rate to one destination | T1498 |
 | `amplification` | Response:request byte ratio on NTP/DNS/SNMP | T1498.002 |
 | `http_flood` | HTTP request rate to one service; mass of unfinished request heads (Slowloris) | T1499.002 |
-| `http_anomaly` | SQLi / traversal / XSS / command injection / JNDI / scanner UA | T1190 |
+| `http_anomaly` | SQLi / traversal / XSS / command injection / JNDI request signatures are attempted exploitation; a match does not prove success. Scanner UA and size anomalies are separate signals. | T1190 |
 | `arp_spoof` | IP↔MAC binding conflict; gratuitous ARP flood | T1557.002 |
+
+### Evidence levels
+
+Each `Finding` exposes an `evidence_level`; the same value is included in its
+evidence JSON so persisted alerts retain the tier without a database schema
+change:
+
+- `OBSERVED_SIGNAL` — a packet, protocol, or volume anomaly was directly seen.
+- `SUSPECTED_ACTIVITY` — the observed behavior is consistent with an attack
+  technique, but successful realization is not established.
+- `CONFIRMED_TECHNIQUE` — corroborating protocol evidence shows successful
+  realization. In this detector set, that requires a successful login observed
+  after a failure burst; only that path emits T1078.
+
+These tiers describe evidence strength, not detector severity or confidence.
 
 ### What the detectors deliberately do *not* alert on
 
@@ -168,7 +183,7 @@ too short or malformed to yield a usable L3 record, `safe_parse()` returns
 the packet keeps what was decoded and gains a `truncated` flag.
 
 
-## MITRE ATT&CK — 16 techniques
+## MITRE ATT&CK — 17 techniques
 
 `mitre.py` is the single source of truth and is loaded into the
 `mitre_techniques` table at startup. Every technique carries a written
@@ -186,9 +201,10 @@ Two invariants are enforced by tests:
 | ID | Name | Tactic | Raised by |
 |---|---|---|---|
 | T1595 | Active Scanning | Reconnaissance | `network_recon` |
-| T1190 | Exploit Public-Facing Application | Initial Access | `http_anomaly` |
-| T1078 | Valid Accounts | Defense Evasion | `brute_force`, `credential_attack` |
+| T1190 | Exploit Public-Facing Application | Initial Access | `http_anomaly` attempted-exploitation signatures |
+| T1078 | Valid Accounts | Defense Evasion | `brute_force` successful login after a failure burst |
 | T1110 | Brute Force | Credential Access | `brute_force`, `credential_attack` |
+| T1040 | Network Sniffing | Credential Access | `credential_attack` cleartext exposure signal |
 | T1557.002 | ARP Cache Poisoning | Credential Access | `arp_spoof` |
 | T1046 | Network Service Discovery | Discovery | `port_scan` |
 | T1021 | Remote Services | Lateral Movement | `lateral_movement` |
@@ -196,8 +212,8 @@ Two invariants are enforced by tests:
 | T1071.004 | Application Layer Protocol: DNS | Command and Control | `dns_tunnel`, `suspicious_dns` |
 | T1572 | Protocol Tunneling | Command and Control | `icmp_tunnel`, `protocol_tunnel` |
 | T1573 | Encrypted Channel | Command and Control | `tls_anomaly` |
-| T1041 | Exfiltration Over C2 Channel | Exfiltration | `data_exfil` |
 | T1048 | Exfiltration Over Alternative Protocol | Exfiltration | `dns_tunnel`, `icmp_tunnel` |
+| T1048.003 | Exfiltration Over Unencrypted Non-C2 Protocol | Exfiltration | `data_exfil` candidate egress signal |
 | T1498 | Network Denial of Service | Impact | `syn_flood`, `udp_flood` |
 | T1498.002 | Reflection Amplification | Impact | `amplification` |
 | T1499.002 | Service Exhaustion Flood | Impact | `http_flood` |

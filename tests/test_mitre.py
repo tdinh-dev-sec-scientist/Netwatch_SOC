@@ -85,7 +85,7 @@ def test_expected_pairings_are_correct(engine):
         'brute_force': 'T1110',
         'dns_tunnel': 'T1071.004',
         'c2_beacon': 'T1071.001',
-        'data_exfil': 'T1041',
+        'data_exfil': 'T1048.003',
         'lateral_movement': 'T1021',
         'arp_spoof': 'T1557.002',
         'icmp_tunnel': 'T1572',
@@ -101,6 +101,15 @@ def test_expected_pairings_are_correct(engine):
         assert technique_id in det.techniques, \
             '%s should map to %s, maps to %s' % (detector_name, technique_id,
                                                  det.techniques)
+
+
+def test_sensitive_mappings_have_narrow_rationales():
+    assert mitre.get('T1041') is None
+    assert mitre.get('T1048.003') is not None
+    assert 'successful' in mitre.get('T1078').rationale.lower()
+    assert 'only' in mitre.get('T1078').rationale.lower()
+    assert 'attempted exploitation' in mitre.get('T1190').rationale.lower()
+    assert 'does not prove' in mitre.get('T1048.003').rationale.lower()
 
 
 def test_catalog_persists_into_the_database(db):

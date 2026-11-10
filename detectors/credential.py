@@ -4,7 +4,8 @@ import base64
 import binascii
 import re
 
-from .base import Detector, TimedCounter, TimedSet
+from .base import (CONFIRMED_TECHNIQUE, OBSERVED_SIGNAL, SUSPECTED_ACTIVITY,
+                   Detector, TimedCounter, TimedSet)
 
 # Protocols whose authentication outcome is visible on the wire.
 _FAILURE = 'failure'
@@ -142,6 +143,8 @@ class BruteForceDetector(Detector):
     description = ('In-protocol authentication failures (FTP 530, SMTP 535, '
                    'POP3 -ERR, IMAP NO, HTTP 401), or bursts of SSH sessions '
                    'or web login-form submissions, within a window')
+    # T1078 is emitted only for a protocol-level successful login following
+    # the failure burst. Failure bursts alone map to T1110.
     techniques = ('T1110', 'T1078')
 
     def __init__(self, cfg):
@@ -176,6 +179,7 @@ class BruteForceDetector(Detector):
                     % (service, client, server, failures,
                        self.cfg['window_s']),
                     ('T1110', 'T1078'), src_ip=client, dst_ip=server,
+                    evidence_level=CONFIRMED_TECHNIQUE,
                     service=service, preceding_failures=failures,
                     outcome='success', window_s=self.cfg['window_s'],
                 )]
@@ -207,6 +211,7 @@ class BruteForceDetector(Detector):
             '%d %s %s from %s to %s in %ds'
             % (count, service, label, client, server, self.cfg['window_s']),
             ('T1110',), src_ip=client, dst_ip=server,
+            evidence_level=SUSPECTED_ACTIVITY,
             service=service, failure_count=count, evidence_type=label,
             window_s=self.cfg['window_s'], threshold=threshold,
         )]
@@ -229,7 +234,7 @@ class CredentialAttackDetector(Detector):
     description = ('Many distinct usernames from one source (stuffing), one '
                    'username across many hosts (spraying), or reusable '
                    'credentials sent in cleartext')
-    techniques = ('T1110', 'T1078')
+    techniques = ('T1110', 'T1040')
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -271,7 +276,8 @@ class CredentialAttackDetector(Detector):
                 'stuffing): %s' % (
                     src, n_users, self.cfg['window_s'],
                     ', '.join(sorted(self._users_by_src.members(src))[:6])),
-                ('T1110', 'T1078'),
+                ('T1110',),
+                evidence_level=SUSPECTED_ACTIVITY,
                 pattern='credential_stuffing', distinct_users=n_users,
                 sample_users=sorted(self._users_by_src.members(src))[:12],
                 window_s=self.cfg['window_s'],
@@ -284,7 +290,8 @@ class CredentialAttackDetector(Detector):
                 "Username '%s' tried against %d distinct hosts in %ds "
                 '(password spraying)'
                 % (username, n_hosts, self.cfg['window_s']),
-                ('T1110', 'T1078'),
+                ('T1110',),
+                evidence_level=SUSPECTED_ACTIVITY,
                 pattern='password_spraying', username=username,
                 distinct_hosts=n_hosts, window_s=self.cfg['window_s'],
             ))
@@ -301,7 +308,8 @@ class CredentialAttackDetector(Detector):
             "Cleartext %s credentials for '%s' observed from %s to %s — "
             'directly reusable by anyone on the path'
             % (proto, username, pkt['src_ip'], pkt['dst_ip']),
-            ('T1078',),
+            ('T1040',),
+            evidence_level=OBSERVED_SIGNAL,
             pattern='cleartext_credentials', username=username,
             protocol_exposed=proto, password_length=len(password),
         )]

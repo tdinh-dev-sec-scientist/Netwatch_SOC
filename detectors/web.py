@@ -3,7 +3,7 @@
 import re
 from urllib.parse import unquote_plus
 
-from .base import Detector
+from .base import OBSERVED_SIGNAL, SUSPECTED_ACTIVITY, Detector
 
 # Patterns are matched against the URL-decoded request line and headers.
 # Each carries its own weight so a single weak hit cannot alert on its own.
@@ -37,6 +37,10 @@ SCANNER_UA = re.compile(
     r"(?i)\b(sqlmap|nikto|nmap|masscan|acunetix|nessus|dirbuster|gobuster|"
     r"wpscan|havij|zgrab|metasploit|burpsuite)\b")
 
+_EXPLOIT_CATEGORIES = frozenset((
+    'SQLi', 'Traversal', 'XSS', 'CmdInjection', 'JNDI',
+))
+
 
 class HTTPAnomalyDetector(Detector):
     """Injection, traversal and scanner signatures in HTTP requests."""
@@ -44,8 +48,9 @@ class HTTPAnomalyDetector(Detector):
     name = 'http_anomaly'
     threat_type = 'http_anomaly'
     description = ('SQL injection, path traversal, XSS, command injection and '
-                   'JNDI patterns in the request line/headers, plus offensive '
-                   'security tool user agents and oversized requests')
+                   'JNDI request patterns are scoped as attempted exploitation '
+                   'under T1190, not proof of success; scanner user agents and '
+                   'oversized requests are separate HTTP anomaly signals')
     techniques = ('T1190',)
 
     def inspect(self, pkt):
@@ -90,18 +95,26 @@ class HTTPAnomalyDetector(Detector):
 
         if not hits or score < 0.5:
             return []
+        attempted_exploitation = bool(categories & _EXPLOIT_CATEGORIES)
         key = (pkt['src_ip'], pkt['dst_ip'], tuple(sorted(categories)))
         if not self._cooled_down(key, ts):
             return []
 
         severity = 'CRITICAL' if score >= 0.9 else (
             'HIGH' if score >= 0.7 else 'MEDIUM')
+        activity = ('attempted_exploitation' if attempted_exploitation else
+                    'http_request_anomaly')
         return [self._finding(
             pkt, severity, min(0.97, score),
-            '%s from %s to %s %s %s — %s' % (
+            '%s: %s from %s to %s %s %s — %s' % (
+                'Attempted exploitation under T1190'
+                if attempted_exploitation else 'HTTP request anomaly',
                 '/'.join(sorted(categories)), pkt['src_ip'], pkt['dst_ip'],
                 pkt.get('http_method', ''), uri[:120], '; '.join(hits[:5])),
             ('T1190',),
+            evidence_level=(SUSPECTED_ACTIVITY if attempted_exploitation
+                            else OBSERVED_SIGNAL),
+            activity=activity,
             categories=sorted(categories), signatures=hits[:10],
             method=pkt.get('http_method'), uri=uri[:512],
             host=pkt.get('http_host'), user_agent=ua[:200],

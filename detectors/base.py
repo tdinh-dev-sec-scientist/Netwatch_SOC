@@ -11,6 +11,14 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
 SEVERITY_ORDER = {'INFO': 0, 'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4}
+OBSERVED_SIGNAL = 'OBSERVED_SIGNAL'
+SUSPECTED_ACTIVITY = 'SUSPECTED_ACTIVITY'
+CONFIRMED_TECHNIQUE = 'CONFIRMED_TECHNIQUE'
+EVIDENCE_LEVELS = frozenset((
+    OBSERVED_SIGNAL,
+    SUSPECTED_ACTIVITY,
+    CONFIRMED_TECHNIQUE,
+))
 
 
 @dataclass
@@ -34,6 +42,8 @@ class Finding:
     # flood that is the victim, not the (often spoofed) source in `src_ip`.
     # Stamped automatically by Detector._finding; see _cooled_down.
     incident_key: tuple = None
+    # How strongly packet evidence supports the activity/technique label.
+    evidence_level: str = OBSERVED_SIGNAL
 
     def __post_init__(self):
         if self.severity not in SEVERITY_ORDER:
@@ -42,6 +52,8 @@ class Finding:
             raise ValueError('confidence must be in [0,1]')
         if not self.techniques:
             raise ValueError('every finding must map to >=1 ATT&CK technique')
+        if self.evidence_level not in EVIDENCE_LEVELS:
+            raise ValueError('invalid evidence level %r' % self.evidence_level)
 
 
 def is_syn(flags):
@@ -239,21 +251,30 @@ class Detector:
         return True
 
     def _finding(self, pkt, severity, confidence, reason, techniques,
-                 src_ip=None, dst_ip=None, **evidence):
+                 src_ip=None, dst_ip=None, evidence_level=OBSERVED_SIGNAL,
+                 **evidence):
         """Build a Finding from a packet.
 
         `src_ip`/`dst_ip` override the packet's own addresses for detectors
         that attribute an alert to a party other than the packet's sender —
         e.g. a server's "530 Login incorrect" is evidence against the client
         it was sent to.
+
+        Evidence level describes how strongly the observed packet data
+        supports the activity label; it is copied into the evidence payload
+        so the existing JSON persistence path retains it without a schema
+        change.
         """
         self.findings_emitted += 1
+        evidence = dict(evidence)
+        evidence['evidence_level'] = evidence_level
         return Finding(
             threat_type=self.threat_type,
             severity=severity,
             confidence=round(confidence, 3),
             reason=reason,
             techniques=tuple(techniques),
+            evidence_level=evidence_level,
             src_ip=src_ip or pkt.get('src_ip'),
             dst_ip=dst_ip or pkt.get('dst_ip'),
             src_port=pkt.get('src_port'),
