@@ -11,13 +11,15 @@ behavioural detectors mapped to MITRE ATT&CK, correlates the alerts into
 incidents, and serves them to an analyst dashboard — all in Python, on
 PostgreSQL.
 
-What makes it more than a lab exercise: I tested it on **31 million packets of
-real, labelled attack traffic** ([CSE-CIC-IDS2018](https://www.unb.ca/cic/datasets/ids-2018.html)),
-found out it was badly wrong, fixed it, and measured it again on traffic it had
-never seen — next to Suricata, an industry-standard IDS, on the same packets.
+What makes it more than a lab exercise: I evaluated it on **31,323,505
+CSE-CIC-IDS2018 packets** ([dataset](https://www.unb.ca/cic/datasets/ids-2018.html)):
+10,022,252 development packets, 1,763,242 Holdout-1 packets, and 19,538,011
+Holdout-2 packets. Holdout-1 informed round-two heuristic tuning; Holdout-2
+remained untouched until after the round-two code was frozen.
 
 **[Live demo →](https://netwatch-soc-demo.onrender.com)** read-only, replaying
-45 minutes of real attack traffic in a loop.
+the curated 45-minute CSE-CIC-IDS2018 capture in a loop; it does not use the
+internal synthetic traffic generator.
 
 **Demo video (2 min):** a walkthrough of the dashboard on the replayed traffic —
 posture, the alert queue, a SQL injection alert with the request that fired it,
@@ -31,21 +33,39 @@ top talkers, decoded packets, the 18 detectors and the pipeline.
 
 ## Results on real traffic
 
-Scored against the dataset's ground truth. *Held-out* traffic was only
-replayed after the code was frozen, so these are not numbers I tuned toward.
+Scored against the dataset's ground truth. Holdout-1 was first evaluated after
+Round 1; its missed web-login brute-force attack and benign traffic informed
+Round-2 detector and threshold tuning. Holdout-2 was held back until after the
+Round-2 code freeze and is the only clean, untouched post-freeze evaluation set.
 
-| On held-out real traffic (6 attacks, 82 host-hours) | NetWatch | Suricata + ET Open rules |
+| Set | Packets | Evaluation status | Round-two result |
+|---|---:|---|---|
+| Development | 10,022,252 | Development and tuning set | 18 / 18 attacks; 1.1 false alerts per host-hour |
+| Holdout-1 | 1,763,242 | Informed round-two heuristic tuning | 4 / 4 attacks; 1.3 false alerts per host-hour |
+| Holdout-2 | 19,538,011 | Clean, untouched after round-two freeze | 2 / 2 attacks; 0.4 false alerts per host-hour |
+
+The combined Holdout-1 + Holdout-2 result is 6 / 6 attacks and 1.0 false
+alerts per host-hour over 81.6 host-hours (rounded to 82). This is a combined
+validation result, not a clean 6 / 6 blind holdout score: Holdout-1 informed
+Round-2 tuning. Only Holdout-2 is clean post-freeze: 2 / 2 attacks detected
+and 0.4 false alerts per host-hour.
+
+| Combined Holdout-1 + Holdout-2 (H1 informed tuning; 6 attacks, 82 host-hours) | NetWatch | Offline Suricata + ET Open reference |
 |---|---|---|
 | Attacks detected | **6 / 6** | 3 / 6 |
-| False alerts per host per hour | **1.0** | 26.7 (severity 1-2) · 3,296 (all rules) |
+| False alerts per host per hour | **1.0** | 26.7 (severity 1–2 filter) · 3,296 (all alerts) |
 | False incidents per host per day | **10** | 372 (severity 1-2) |
+
+The Suricata figures come from an **offline PCAP benchmark** using `-k none`;
+the severity 1–2 row is a post-run filter and is included as a baseline
+reference, not as a claim of production superiority.
 
 How it got there, in three rounds:
 
 | | First version | Round 1: five bugs fixed | Round 2: four blind spots closed |
 |---|---|---|---|
 | Attacks detected (development set) | 16 / 18 | 11 / 18 | **18 / 18** |
-| False alerts per host per hour | 375 | 1.1 | **1.1** |
+| False alerts per host per hour | 374.6 | 1.1 | **1.1** |
 
 - **The first version was unusable on real traffic** — one false alert every
   ten seconds per host — even though it scored zero false positives on my
@@ -76,9 +96,9 @@ Full write-up, every false positive traced to a cause:
 | Tables | PostgreSQL, all written by the pipeline | **8** |
 | Indexes | usage checked with `EXPLAIN` in the test suite | **25** |
 | REST endpoints | Flask, parameterised queries, read-only demo mode | **25** |
-| Throughput | parse + detect + batched PostgreSQL writes, one thread | **5,873** packets/s |
-| Query latency | p95 across the 22 queries behind the API | **11.9** ms |
-| Tests | PostgreSQL and SQLite in CI, plus a Docker smoke test | **392** |
+| Throughput | Synthetic pipeline stress benchmark: parse + detect + batched PostgreSQL writes, one thread | **5,873** packets/s |
+| Backing Database Query Latency (p95 = 11.85 ms across 22 query types) | Direct `DatabaseManager` calls; excludes Flask/HTTP/network time | **11.85** ms |
+| Tests | Collected project tests; PostgreSQL and SQLite in CI, plus Docker smoke tests | **416** |
 
 ## How it works
 
@@ -176,7 +196,7 @@ DB_Manager.py         all SQL; migrations/ holds the schema
 App.py                Flask API and dashboard
 replay.py             pcap/pcapng replay through the real pipeline
 eval/cicids2018/      dataset fetch, ground truth, scoring, Suricata runner
-tests/                392 tests, run against real PostgreSQL
+tests/                416 collected tests, run against PostgreSQL and SQLite
 ```
 
 ## What I learned
@@ -187,17 +207,18 @@ tests/                392 tests, run against real PostgreSQL
   internet scanners I had never thought about.
 - **A false positive is a bug report.** Tracing each one to its cause found
   real logic errors. Raising thresholds would have hidden them.
-- **Measure on data you have not looked at.** The held-out sets are what make
-  the final numbers believable — including to me.
+- **Keep one set untouched through the final freeze.** Holdout-1 informed
+  round-two tuning; the clean post-freeze Holdout-2 result was 2 / 2 attacks.
 - **Signature and behaviour detection need each other.** Suricata caught what
   NetWatch could not, and the reverse.
 
 ## Limitations
 
 It is a learning project, and its numbers come with fine print: one 2018 lab
-network, six held-out attacks, a single-threaded Python engine, no
-authentication outside the read-only demo, and two dataset attacks aimed at a
-closed port that NetWatch reports as SYN floods (which is what the wire shows).
+network, six attacks across two holdout sets (Holdout-1 informed round-two
+tuning; Holdout-2 alone is untouched post-freeze), a single-threaded Python
+engine, and two dataset attacks aimed at a closed port that NetWatch reports
+as SYN floods (which is what the wire shows).
 The full list is in [docs/limitations.md](docs/limitations.md).
 
 ## Documentation
