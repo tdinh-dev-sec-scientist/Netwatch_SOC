@@ -1,28 +1,36 @@
 # NetWatch on real traffic: CSE-CIC-IDS2018
 
-Every other number in this project comes from synthetic traffic. This is the
-answer to "and on real traffic?": 31 million packets from a labelled public
-dataset, replayed through the unmodified pipeline, scored against the
-dataset's ground truth, with every false positive traced to a cause and the
-same captures run through Suricata with the ET Open ruleset for reference.
+The throughput and alert-volume benchmarks use synthetic test traffic. This
+separate evaluation replays **31,323,505 packets** from labelled
+CSE-CIC-IDS2018 captures through the detection pipeline and scores alerts
+against dataset ground truth. The exact packet totals are **10,022,252 for
+Development**, **1,763,242 for Holdout-1**, and **19,538,011 for Holdout-2**.
+
+The sets have different evaluation status. Holdout-1 was not used to design
+round-one fixes, but its results informed round-two heuristic tuning. It is
+therefore not an untouched final holdout. Holdout-2 was fetched only after the
+round-two code was frozen and is the clean, untouched post-freeze evaluation
+set. It contains two labelled attacks, both detected (2/2).
 
 ## Results
 
-Three rounds, each measured on a development set and then on held-out
-captures that were not replayed until that round's code was frozen.
+The table reports each set separately across the development run and two
+rounds of changes. Development is the tuning set. Holdout-1 was first scored
+after round-one fixes and then used to guide round-two heuristics. Holdout-2
+remained unseen until round-two code was frozen.
 
 | | As shipped | Round 1: bugs fixed | Round 2: misses closed |
 |---|---|---|---|
-| **Development** — 18 host captures, 10.0 M packets, 157 host-hours | | | |
+| **Development** — 18 host captures, 10,022,252 packets, 157.4 host-hours | | | |
 | Labelled attacks detected (right type) | 16 / 18 (9) | 11 / 18 (9) | **18 / 18 (17)** |
 | False-positive alerts per host-hour | 374.6 | 1.1 | **1.1** |
 | False-positive incidents per host-day | 292.1 | 9.9 | **9.9** |
 | Alert precision | 3.0% | 65.0% | 73.0% |
-| **Held-out 1** — 7 captures, 1.8 M packets, 53 host-hours | | | |
+| **Holdout-1** — 7 captures, 1,763,242 packets, 52.9 host-hours; informed round-two tuning | | | |
 | Labelled attacks detected (right type) | 3 / 4 (3) | 3 / 4 (3) | **4 / 4 (4)** |
 | False-positive alerts per host-hour | 506.7 | 1.3 | **1.3** |
 | False-positive incidents per host-day | 545.3 | 12.7 | **12.7** |
-| **Held-out 2** — 5 captures, 19.5 M packets, 29 host-hours, a host population used nowhere else | | | |
+| **Holdout-2** — 5 captures, 19,538,011 packets, 28.7 host-hours; untouched until after round-two freeze | | | |
 | Labelled attacks detected (right type) | — | — | **2 / 2 (1)** |
 | False-positive alerts per host-hour | — | — | **0.4** |
 | False-positive incidents per host-day | — | — | **5.8** |
@@ -32,48 +40,64 @@ every ten seconds per host. The synthetic suite's "0 false positives across
 240,000 benign packets" said nothing about this, because the synthetic
 generator never produced the traffic that caused them.
 
-**Round 1 — five logic bugs, not thresholds, caused 99.7% of them.** No
-detection threshold was changed. On the held-out days false positives fell by
-the same factor (300-400×) and detection was unchanged, so the fixes
-generalise rather than fit the data they came from. Detection on the
-development set *fell*, from 16 to 11 of 18, and that was the honest number:
-all ten botnet hosts had been "detected" by the port-scan detector misreading
-the C2 server's replies as a scan — one of the five bugs.
+**Round 1 — five logic bugs, not thresholds, caused 99.7% of the development
+false positives.** No detection threshold was changed. On Holdout-1 false
+positives fell by the same factor (about 400×) and detection was unchanged.
+Development detection *fell*, from 16 to 11 of 18, and that was the honest
+number: all ten botnet hosts had been "detected" by the port-scan detector
+misreading the C2 server's replies as a scan — one of the five bugs.
 
 **Round 2 — closing what was still missed.** Three new signals for the four
 attacks NetWatch could not see (application-layer DoS, Slowloris, login-form
 brute force, a botnet polling faster than any beacon interval), each with a
 threshold set between the busiest benign behaviour and the attack, with a
-4-6× margin on both sides. Development detection went to 18 of 18 and the
-first held-out set to 4 of 4, with **no new false positives on either**. A
-second held-out set, fetched only after the round-2 code was frozen, caught
-the HULK flood within 28 seconds as `http_flood` and raised 11 false alerts
-in 29 host-hours.
+4-6× margin on both sides. Development detection went to 18 of 18 and
+Holdout-1 to 4 of 4, with no increase in false positives on either.
+Holdout-1's misses and traffic characteristics then informed these
+heuristics, so its round-two result is validation after tuning, not a blind
+final score. Holdout-2, fetched only after the round-two code was frozen,
+caught both attacks (2/2), including the HULK flood within 28 seconds as
+`http_flood`, and raised 11 false alerts in 28.7 host-hours.
 
 **Incidents are what an analyst works.** `incidents.py` groups alerts on the
 same host pair within 30 minutes; on the development set 662 alerts become 167
 incidents, and the false ones come to about one per host every two and a half
 hours.
 
-Full per-attack tables: [`eval/cicids2018/results/`](../eval/cicids2018/results/).
+Per-attack reports: [Development](../eval/cicids2018/results/dev_round2/report.md),
+[Holdout-1](../eval/cicids2018/results/holdout_round2/report.md), and
+[Holdout-2](../eval/cicids2018/results/holdout2_round2/report.md).
 
 ## Against Suricata
 
-The same captures, ground truth, scoring and incident correlation, applied to
-Suricata 7.0.3 with ET Open (54,399 rules, 2024-12-11). Three configurations,
-from untouched to the usual first tuning steps (`eval/cicids2018/suricata.py`).
-Scoring is in Suricata's favour: its alerts are credited for any attack they
-touch, since its signature names do not map onto threat types.
+This is an **offline PCAP benchmark reference**, not a production deployment
+comparison. The same captures, ground truth, scoring and incident
+correlation were applied to Suricata 7.0.3 with ET Open (54,399 rules,
+2024-12-11) by `eval/cicids2018/suricata.py`. The runner uses Suricata's
+offline `-r <pcap>` mode with `-k none` because the captures contain checksum
+offload artefacts. Three post-run result variants are reported: all alerts,
+without Suricata engine anomaly events, and severity 1–2 only. Scoring is in
+Suricata's favour: its alerts are credited for any attack they touch, since
+its signature names do not map onto threat types. These results are a baseline
+reference for these captures, not a claim of production superiority.
 
-| | Dev: detected | Dev: false alerts / host-hour | Held-out 1+2: detected | Held-out: false alerts / host-hour | Held-out: false incidents / host-day |
+| | Dev: detected | Dev: false alerts / host-hour | Combined H1 + H2: detected | Combined H1 + H2: false alerts / host-hour | Combined H1 + H2: false incidents / host-day |
 |---|---|---|---|---|---|
 | **NetWatch (round 2)** | **18 / 18** | **1.1** | **6 / 6** | **1.0** | **10.3** |
-| Suricata + ET Open, as distributed | 14 / 18 | 2,777 | 3 / 6 | 3,296 | 1,393 |
-| … without engine anomaly events | 4 / 18 | 619 | 3 / 6 | 590 | 1,304 |
-| … severity 1-2 only | 4 / 18 | 7.2 | 3 / 6 | 26.7 | 372 |
+| Offline Suricata + ET Open, all alerts | 14 / 18 | 2,777 | 3 / 6 | 3,296 | 1,393 |
+| Offline Suricata, without engine anomaly events | 4 / 18 | 619 | 3 / 6 | 590 | 1,304 |
+| Offline Suricata, severity 1–2 filter | 4 / 18 | 7.2 | 3 / 6 | 26.7 | 372 |
 
-Held-out = 6 attacks over 82 host-hours (held-out 1 and 2 combined). Per-set
-reports: `eval/cicids2018/results/suricata_*`.
+The combined Holdout-1 + Holdout-2 columns cover 6 attacks over 81.6 host-hours
+(rounded to 82). Holdout-1 informed round-two tuning, so these are combined
+post-tuning validation results, not a blind or fully untouched comparison.
+Holdout-2 alone is the clean post-freeze result: 2/2 detected and 0.4 false
+alerts per host-hour. The severity 1–2 Suricata result (26.7 false alerts per
+host-hour across the combined holdouts) is a filtered baseline reference.
+Per-set reports are in
+Reports: [Development](../eval/cicids2018/results/suricata_dev/all/report.md),
+[Holdout-1](../eval/cicids2018/results/suricata_holdout/all/report.md), and
+[Holdout-2](../eval/cicids2018/results/suricata_holdout2/all/report.md).
 
 What the comparison shows, and does not:
 
@@ -91,11 +115,12 @@ What the comparison shows, and does not:
 - **Untuned, the noise is the story**: 437,155 false alerts on the development
   set, 72% of them invalid-checksum events (the captures were taken with
   checksum offload) and 19% "RDP response to external host" policy alerts.
-- **This is not a verdict on Suricata.** ET Open is a general ruleset, not
-  tuned for this lab; NetWatch's round-2 thresholds were chosen on the
-  development set, which is why the held-out columns are the fair comparison.
-  The two are complementary: signatures for known exploits, behaviour for
-  floods, brute force and C2 timing.
+- **This is not a verdict on production Suricata.** ET Open is a general
+  ruleset, not tuned for this lab; the comparison is an offline PCAP benchmark
+  with `-k none`, and severity 1–2 is a filtered reference. NetWatch's
+  round-two heuristics used Development and Holdout-1, so Holdout-2 is the clean
+  post-freeze evaluation. The two approaches are complementary: signatures for
+  known exploits, behaviour for floods, brute force and C2 timing.
 
 ## Dataset
 
@@ -119,11 +144,11 @@ both formats.
 | dev | Thu 22 Feb | DVWA server `.69.28` | Web brute force, XSS, SQL injection |
 | dev | Wed 28 Feb | workstation `.69.24` | Infiltration (dropper, then internal nmap) |
 | dev | Fri 2 Mar | 14 workstations | Ares botnet on 10 of them; 4 clean controls |
-| held-out 1 | Fri 23 Feb | DVWA server + 1 workstation | Web brute force, XSS, SQL injection |
-| held-out 1 | Thu 1 Mar | workstation `.69.13` | Infiltration |
-| held-out 1 | Wed 21 Feb | 4 workstations | none (benign) |
-| held-out 2 | Fri 16 Feb | web/FTP server `.69.25` (pcapng, 19 M packets) | DoS-Hulk, DoS-SlowHTTPTest |
-| held-out 2 | Wed 14 Feb | 4 workstations on the 172.31.64-67 department subnets | none (benign) |
+| Holdout-1 | Fri 23 Feb | DVWA server + 1 workstation | Web brute force, XSS, SQL injection |
+| Holdout-1 | Thu 1 Mar | workstation `.69.13` | Infiltration |
+| Holdout-1 | Wed 21 Feb | 4 workstations | none (benign) |
+| Holdout-2 | Fri 16 Feb | web/FTP server `.69.25` (pcapng attack capture) | DoS-Hulk, DoS-SlowHTTPTest |
+| Holdout-2 | Wed 14 Feb | 4 workstations on the 172.31.64-67 department subnets | none (benign) |
 
 ## Method
 
@@ -232,7 +257,7 @@ that fails on the shipped code and passes on the fixed code.
 
 After round 1, four attacks were still invisible. Each had a clear signal on
 the wire once measured, and a wide gap to the busiest benign behaviour seen
-across all 25 development and held-out-1 captures:
+across all 25 Development and Holdout-1 captures:
 
 | Attack | Signal | Attack rate | Benign peak | Threshold |
 |---|---|---|---|---|
@@ -252,9 +277,10 @@ across all 25 development and held-out-1 captures:
   times in ten minutes. Internal destinations are excluded: that is
   monitoring, not C2.
 
-Thresholds were chosen on data that included the development set, so the
-development numbers flatter them. Held-out 2 was fetched afterwards — a new
-DoS tool and a new host population — to measure them honestly.
+Thresholds were chosen on Development and refined using Holdout-1, so those
+round-two results are not blind. Holdout-2 was fetched only after the final
+round-two freeze — a new DoS tool and a new host population — to provide the
+untouched post-freeze measurement.
 
 ## What is left
 
@@ -262,12 +288,12 @@ DoS tool and a new host population — to measure them honestly.
 
 Round 2 added none. What remains, by cause:
 
-| Cause | Dev | Held-out 1 | Held-out 2 | Verdict |
+| Cause | Dev | Holdout-1 | Holdout-2 | Verdict |
 |---|---|---|---|---|
 | Internet RDP credential stuffing / SSH brute force on exposed hosts | 68 | 5 | 0 | **Real attacks the dataset labels benign.** 59 usernames in 5 minutes from one source is not a false positive in any SOC |
 | RDP-over-UDP sessions at 40-55 pkt/s, flagged as `udp_flood` / `data_exfil` | 55 | 25 | 0 | Real false positive. 40 pkt/s is the `udp_flood` threshold, too low for interactive traffic. **Deliberately not re-tuned**: it would be tuning to the test set |
 | Nmap service probes from the infiltrated host, raised as `credential_attack` (username `nmap`), `tls_anomaly` (SSLv3), `protocol_tunnel` | 25 | 21 | 0 | Caused by the attack, but typed wrong; counted as false positives anyway |
-| Long random-looking AWS/CDN hostnames (`rackcdn.com`, 53-char label) | 18 | 13 | 11 | Real false positive, and the only one that reached held-out 2. Needs a resolver allowlist or per-zone baselining, not a looser global threshold |
+| Long random-looking AWS/CDN hostnames (`rackcdn.com`, 53-char label) | 18 | 13 | 11 | Real false positive, and the only one that reached Holdout-2. Needs a resolver allowlist or per-zone baselining, not a looser global threshold |
 | Large uploads (S3, admin sessions) | 9 | 2 | 0 | Real false positive; volume alone is a weak exfiltration signal |
 | Other: scanner user-agents, a TLS anomaly, periodic TLS sessions | 4 | 4 | 0 | Mixed; the scanners are real |
 
@@ -282,11 +308,11 @@ development rate is about 0.7.
 | XSS, SQL injection | `http_anomaly`, both days | Signatures |
 | Web brute force (DVWA login) | `brute_force` in under 2 min, both days | New in round 2 |
 | DoS-GoldenEye, DoS-Slowloris | `http_flood` in 115 s and 78 s | New in round 2 |
-| DoS-Hulk (held-out 2) | `http_flood` in 28 s | First time this tool was seen |
+| DoS-Hulk (Holdout-2) | `http_flood` in 28 s | First time this tool was seen |
 | Infiltration | `port_scan`, `lateral_movement`, both days | From the compromised host's internal nmap |
 | Ares botnet | `c2_beacon` on 10 of 10 hosts, ~34 min after the window opens | New in round 2; the bot's polling ramps up slowly |
 | FTP-BruteForce | **`syn_flood`**, in 92 s | Not a NetWatch error: the dataset's FTP service was not running. All 19,700 SYNs in a sample 10 minutes got RST/ACK; there was never a 530 to count. NetWatch described the wire correctly |
-| DoS-SlowHTTPTest (held-out 2) | **`syn_flood`**, in 20 s | The same dataset flaw: it was aimed at port 21, which was closed, so no HTTP was ever exchanged |
+| DoS-SlowHTTPTest (Holdout-2) | **`syn_flood`**, in 20 s | The same dataset flaw: it was aimed at port 21, which was closed, so no HTTP was ever exchanged |
 
 ## Caveats
 
@@ -294,11 +320,11 @@ development rate is about 0.7.
   attacks against the exposed hosts. Counting alerts on them as false
   positives understates precision; it is done anyway so the numbers are not
   adjusted by hand.
-- **The fixes came from the development set.** That is what the held-out
-  sets are for, and they are smaller: 6 attacks and 82 host-hours between
-  them. There is no held-out botnet, SSH or FTP brute-force day, because the
-  dataset has only one of each. Held-out 1 served round 1 only cleanly: its
-  web brute-force miss was known when round 2 was designed.
+- **Holdout-1 informed the second tuning round.** It contains 4 attacks over
+  52.9 host-hours; its web brute-force miss was known when round 2 was
+  designed. Holdout-2 is the only untouched final set: 2 attacks over 28.7
+  host-hours. There is no untouched botnet, SSH or FTP brute-force day because
+  the dataset has only one of each.
 - **One lab, one year.** 2018 Windows and Ubuntu hosts in AWS. A corporate
   LAN, a home network or a 2026 browser mix would surface different problems.
 - **Per-host sensors.** Each host capture is replayed on its own detector, as
