@@ -53,8 +53,8 @@ let isDemo = false;
 let engineState = 'live';
 let booted = false;
 let shellOnce = null;
-const REFRESH_MS = 10000;
-const SHELL_REFRESH_MS = 15000;
+const REFRESH_MS = 30000;
+const SHELL_REFRESH_MS = 60000;
 let alertFilters = { severity: '', src_ip: '', threat_type: '', acknowledged: '' };
 let pktFilters = { protocol: '', src_ip: '', malicious_only: false };
 
@@ -2487,11 +2487,19 @@ function markRefreshed(ok) {
 }
 
 // Refresh whichever module is on screen; the others reload on navigation.
-setInterval(() => {
+function refreshView() {
   if (currentView === 'alerts') queue.merge = true;
   runLoader(currentView);
+}
+setInterval(() => {
+  if (document.visibilityState === 'visible') refreshView();
 }, REFRESH_MS);
-setInterval(() => { loadShell(); }, SHELL_REFRESH_MS);
+setInterval(() => {
+  if (document.visibilityState === 'visible') loadShell();
+}, SHELL_REFRESH_MS);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { refreshView(); loadShell(); }
+});
 
 applyTheme(readPref('netwatch.theme', 'system'));
 applyDensity(readPref('netwatch.density', 'comfortable'));

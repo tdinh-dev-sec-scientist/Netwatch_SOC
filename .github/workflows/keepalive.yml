@@ -24,13 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Request the dashboard
+      - name: Request the health endpoint
         env:
           DEMO_URL: ${{ vars.DEMO_URL || 'https://netwatch-soc-demo.onrender.com' }}
         run: |
           # A cold start can take a minute; allow for it, and retry once.
           for attempt in 1 2; do
-            if curl -fsS -o /dev/null --max-time 150 -w '%{http_code} in %{time_total}s\n' "$DEMO_URL/"; then
+            if curl -fsS -o /dev/null --max-time 150 -w '%{http_code} in %{time_total}s\n' "$DEMO_URL/api/health"; then
               exit 0
             fi
             sleep 20
