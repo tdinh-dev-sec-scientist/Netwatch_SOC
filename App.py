@@ -18,6 +18,7 @@ import os
 import threading
 
 from flask import Flask, jsonify, render_template, request
+from flask_compress import Compress
 
 import config as config_module
 import db_backends
@@ -115,6 +116,12 @@ def create_app(db=None, engine=None, simulator=None, start_simulation=None,
     environment (NETWATCH_DEMO, NETWATCH_RATE_LIMIT, ...).
     """
     app = Flask(__name__)
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 3600
+    app.config['COMPRESS_MIMETYPES'] = [
+        'text/html', 'text/css', 'text/javascript',
+        'application/javascript', 'application/json']
+    app.config['COMPRESS_MIN_SIZE'] = 500
+    Compress(app)
     cfg = config_module.load()
     hardening.install(app, security or hardening.Settings.from_env())
 
@@ -152,6 +159,11 @@ def _register(app):
         return jsonify({'error': 'internal server error', 'status': 500}), 500
 
     # ── dashboard ────────────────────────────────────────────────────────────
+
+    @app.route('/robots.txt')
+    def robots():
+        body = 'User-agent: *\nDisallow: /api/\nDisallow: /static/\n'
+        return app.response_class(body, mimetype='text/plain')
 
     @app.route('/')
     def index():
